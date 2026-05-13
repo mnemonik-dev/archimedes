@@ -31,6 +31,15 @@ services:
       timeout: 5s
       retries: 5
 
+  # ---------- Frontend (static mockups) ----------
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./ui-mockups:/usr/share/nginx/html:ro
+
   # ---------- Backend API ----------
   backend:
     build:
