@@ -6,6 +6,7 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/Pausable.sol";
 
 import "./interfaces/IVault.sol";
 import "./interfaces/IAMMRouter.sol";
@@ -14,7 +15,7 @@ import "./interfaces/IAMMRouter.sol";
 /// @notice ERC-4626 tokenized vault that holds synthetic/bridged assets.
 ///         Users deposit USDC, receive vault shares. Manager rebalances via AMM.
 ///         Non-custodial: agent has rebalance authority, NOT withdraw-to-platform authority.
-contract Vault is IVault, ERC20, Ownable, ReentrancyGuard {
+contract Vault is IVault, ERC20, Ownable, ReentrancyGuard, Pausable {
     using SafeERC20 for IERC20;
 
     // ─── Constants ───────────────────────────────────────────────────
@@ -104,6 +105,7 @@ contract Vault is IVault, ERC20, Ownable, ReentrancyGuard {
         external
         override
         nonReentrant
+        whenNotPaused
         returns (uint256 shares)
     {
         if (assets == 0) revert ZeroAmount();
@@ -131,6 +133,7 @@ contract Vault is IVault, ERC20, Ownable, ReentrancyGuard {
         external
         override
         nonReentrant
+        whenNotPaused
         returns (uint256 shares)
     {
         if (assets == 0) revert ZeroAmount();
@@ -154,6 +157,7 @@ contract Vault is IVault, ERC20, Ownable, ReentrancyGuard {
         external
         override
         nonReentrant
+        whenNotPaused
         returns (uint256 assets)
     {
         if (shares == 0) revert ZeroShares();
@@ -202,7 +206,7 @@ contract Vault is IVault, ERC20, Ownable, ReentrancyGuard {
         uint256[] calldata amountsIn,
         address[] calldata tokensOut,
         uint256[] calldata amountsOut
-    ) external override onlyManager nonReentrant {
+    ) external override onlyManager nonReentrant whenNotPaused {
         _accrueFees();
 
         // Sell tokens (swap tokenOut -> USDC via AMM)
@@ -309,6 +313,14 @@ contract Vault is IVault, ERC20, Ownable, ReentrancyGuard {
 
     function setPlatformFeeRecipient(address _recipient) external onlyOwner {
         platformFeeRecipient = _recipient;
+    }
+
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    function unpause() external onlyOwner {
+        _unpause();
     }
 
     // ─── Internal ────────────────────────────────────────────────────
