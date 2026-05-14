@@ -1,3 +1,9 @@
 [submodule "context-arc"]
-	path = context-arc
+	path = submodules/context-arc
 	url = https://github.com/the-canteen-dev/context-arc.git
+[submodule "submodules/KnowledgeBase"]
+	path = submodules/KnowledgeBase
+	url = https://github.com/dbrowneup/KnowledgeBase.git
+[submodule "submodules/Linus"]
+	path = submodules/Linus
+	url = https://github.com/dbrowneup/Linus.git
