@@ -1,0 +1,26 @@
+[project]
+name = "archimedes-analytics-engine"
+version = "0.1.0"
+description = "Archimedes analytics engine (backtesting + strategy passport metrics) using backtrader"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "backtrader>=1.9.78.123",
+  "pandas>=2.2.0",
+  "yfinance>=0.2.54",
+]
+
+[project.scripts]
+archimedes-analytics-engine = "archimedes_analytics_engine.cli:main"
+
+[dependency-groups]
+dev = [
+  "pytest>=8.2.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
