@@ -1,7 +1,7 @@
 FROM node:22-alpine AS ui-build
 WORKDIR /app
 COPY ui/package.json ui/package-lock.json ./
-RUN npm ci
+RUN npm install --prefer-offline
 COPY ui/ .
 RUN npm run build
 
