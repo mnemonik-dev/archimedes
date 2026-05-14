@@ -4,7 +4,11 @@
 > **Purpose:** Concrete prompts to paste into Claude Design for slides, UI prototypes,
 > and logo variants. Each prompt is self-contained so the design session has the context
 > it needs without you re-explaining the project.
-> **Status:** v1 prompts. Iterate based on what Claude Design produces.
+> **Status:** Day-4 revision (2026-05-14). Prompts updated to match what the team has
+> actually shipped — a live React/Vite UI at [`http://18.171.230.205/`](http://18.171.230.205/),
+> 10 contracts deployed on Arc testnet, and the
+> [`architecture-diagram.html`](architecture-diagram.html) reference. The UI prompts now
+> work as **refinement** prompts against the live UI rather than greenfield design.
 
 ## Quick notes on using Claude Design
 
@@ -139,17 +143,25 @@ Empty fourth column with a "?" — implying Archimedes goes here.
 
 SLIDE 3 — What we built
 Title: Archimedes — Peer-reviewed AI portfolios on Arc
-Four bullets with icons:
-- Strategies from peer-reviewed quant papers (with paper-claim binding).
-- Risk profiles: Conservative / Moderate / Aggressive / Hyper-Risky.
-- Autonomous: regime detection, rebalancing, strategy rotation.
-- Every decision hashed on Arc — verifiable reasoning trace.
-Background: stylized version of the system architecture diagram (strategy engine
-→ backtesting → portfolio agent → on-chain).
+Five bullets with icons:
+- Paper-grounded strategy passport — paper citation + methodology hash + paper-claim
+  delta surfaced honestly (3 strategies seeded: Faber 2007, Moreira-Muir 2017,
+  Moskowitz-Ooi-Pedersen 2012 + buy-and-hold baseline).
+- Selection-bias gate (DSR + PBO + walk-forward OOS + look-ahead audit) at admission.
+- Autonomous agent: regime detection → strategy rotation → rebalancing, with every
+  decision producing a reasoning trace.
+- 10 contracts on Arc testnet today — Vault, AMM, Synthetic Factory, Reasoning Trace
+  Registry — with multi-wallet UX (MetaMask / Coinbase / generic).
+- Commit-reveal trace anchoring: "trace existed *before* the trade," verifiable
+  on-chain.
+Background: stylized version of the architecture diagram from
+docs/architecture-diagram.html (Strategy Engine + Passport → Selection-Bias Gate →
+Autonomous Portfolio Agent → ReasoningTraceRegistry on Arc).
 
 SLIDE 4 — DEMO
-Full-bleed slide: just the word "DEMO" in large type, with a small "archimedes.
-hackagora.com" URL underneath. This slide gets minimum 90 seconds of live demo time.
+Full-bleed slide: just the word "DEMO" in large type, with a small URL underneath —
+either archimedes.hackagora.com (if locked) or 18.171.230.205 (the EC2 IP fallback,
+which works today). This slide gets minimum 90 seconds of live demo time.
 
 SLIDE 5 — Competitive landscape
 Title: We fill the gap.
@@ -218,16 +230,26 @@ same typography, same density of information.
 
 ---
 
-## Prompt 3 — High-fidelity UI prototype (onboarding + dashboard)
+## Prompt 3 — High-fidelity UI refinement (onboarding + dashboard)
 
 **Setup notes:** Use Claude Design's **Prototype** mode with **High fidelity** selected.
-This is what Daniel uses as a visual reference before writing the React code.
+**Updated framing (Day 4):** the team has shipped a live React/Vite UI at
+[`http://18.171.230.205/`](http://18.171.230.205/) with `Layout`, `WalletConnect`, and
+`Trade` components. This prompt now serves as **visual refinement** — give Claude Design
+the live URL as a starting reference and ask it to propose evolutions, rather than
+generating from scratch.
 
 ```
-Project: Archimedes — frontend prototype.
+Project: Archimedes — frontend visual refinement.
 
-Tech stack target: Next.js + TailwindCSS. The prototype should be implementable in
-that stack — don't generate UI that requires custom canvas/WebGL or anything exotic.
+Live reference URL (please fetch + study before generating): http://18.171.230.205/
+This is our current shipped UI — React 19 + Vite 8 + viem 2.48. The wallet-connect
+modal is already wired (MetaMask / Coinbase / generic browser wallet) and the Trade
+tab is live against deployed AMM contracts on Arc testnet (chain ID 5042002).
+
+Tech stack target: React 19 + Vite 8 + plain CSS (we are not using a CSS framework;
+no Tailwind, no Next.js). The refined screens should be implementable in that stack —
+don't generate UI that requires custom canvas/WebGL or anything exotic.
 
 I need three connected screens that walk a user through the core flow:
 
@@ -288,11 +310,11 @@ the navigation working. Don't worry about real data; placeholder values are fine
 
 **What to do with the output:**
 
-- Share with Daniel (frontend owner). He builds the actual React/Next.js implementation
-  using this as a visual reference.
+- Share with Marten + Daniel R. (current UI contributors). They evolve the live React
+  components using the refined visuals as a reference.
 - Iterate on any screens that don't match the intended feel.
 - Export key screens for the pitch deck (Slide 3 can use Screen 2; Slide 4's demo will
-  use the real implementation).
+  use the real implementation at `18.171.230.205`).
 
 ---
 
@@ -418,10 +440,13 @@ density.
 ## Workflow recap
 
 1. **Set up a design system** in Claude Design with the palette/typography above.
-2. **Run Prompt 1** (logo) first — pick a logo, lock it before doing slides/UI.
-3. **Run Prompt 2** (slide deck) — generate, iterate, export.
-4. **Run Prompt 3, 4, 5** (UI screens) — Daniel uses these as reference for the
-   actual frontend build.
+2. **Run Prompt 1** (logo) first — pick a logo, lock it before doing slides/UI. (Status
+   as of Day 4: not yet started. Smallest-scope test of Claude Design for the team.)
+3. **Run Prompt 2** (slide deck) — generate, iterate, export. Make sure the bullets
+   match what the team has actually shipped per the Day-4 revision above.
+4. **Run Prompt 3, 4, 5** (UI screens) — give Claude Design the live URL
+   (`http://18.171.230.205/`) as starting reference. These prompts are now **refinement**
+   prompts against the shipped React UI, not greenfield.
 5. **Iterate** — Claude Design is conversational; refine outputs based on your eye.
 
 If you take screenshots of references along the way, drop them in the conversation —
