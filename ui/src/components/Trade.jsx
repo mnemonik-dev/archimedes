@@ -7,7 +7,7 @@ import {
 
 const PRICE_DECIMALS = 6
 const TOKEN_DECIMALS = 18
-const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://127.0.0.1:8000'
+const API_BASE = import.meta.env.VITE_API_BASE ?? ''
 
 async function apiGet(path) {
   const res = await fetch(`${API_BASE}${path}`)
