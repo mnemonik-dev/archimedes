@@ -61,19 +61,32 @@ Non-Normality. *Journal of Portfolio Management* 40(5), 94–107.
 
 ### Formula
 
-Given Sharpe ratio `SR_hat` estimated from `T` daily returns with skewness
-`gamma_3` and excess kurtosis `gamma_4`, and `N` independent trials in the
-selection set, the DSR is the probability that the true Sharpe exceeds zero:
+Convention: `SR_hat` is the **per-bar** Sharpe ratio (un-annualized). If the
+caller carries an annualized Sharpe, divide by `sqrt(annualization_factor)`
+before computing DSR (annualization is purely a display transform). Skewness
+`gamma_3` and excess kurtosis `gamma_4` are likewise computed on the per-bar
+return series.
+
+Given `T` per-bar returns, the per-bar Sharpe `SR_hat`, and `N` independent
+trials in the selection set, the DSR is the probability that the true Sharpe
+exceeds zero:
 
 ```
-SR_zero = sqrt( (1 - gamma_E) + gamma_E^2 ) * (1 / sqrt(N))
-       where gamma_E ≈ 0.5772 (Euler-Mascheroni)
-       (the Bailey-López de Prado approximation for the expected max of
-        N iid normal Sharpe estimates)
+gamma_E = 0.5772156649        # Euler-Mascheroni
+Phi_inv = standard normal inverse CDF (scipy.stats.norm.ppf)
 
-DSR = Z * ( (SR_hat - SR_zero) * sqrt(T - 1) /
-            sqrt( 1 - gamma_3 * SR_hat + ((gamma_4 - 1) / 4) * SR_hat^2 ) )
-       where Z is the standard normal CDF
+# Bailey-López de Prado (2014) approximation for E[max_N] across N iid
+# normal Sharpe estimates with unit variance:
+E_max_N = (1 - gamma_E) * Phi_inv(1 - 1/N)
+        + gamma_E       * Phi_inv(1 - 1/(N * e))
+
+# Per-bar SR_hat has variance 1/(T - 1) under the iid normal null, so the
+# expected best-of-N under the null is scaled by sqrt(1/(T - 1)):
+SR_zero = sqrt(1 / (T - 1)) * E_max_N
+
+# Standard normal CDF of the variance-corrected z statistic:
+DSR = Phi( (SR_hat - SR_zero) * sqrt(T - 1)
+         / sqrt(1 - gamma_3 * SR_hat + ((gamma_4 - 1) / 4) * SR_hat^2) )
 ```
 
 `dsr_p_value` is the resulting probability (0 to 1). Higher = more confident
@@ -114,7 +127,7 @@ This will be wired in T5 (post-hackathon if not reached).
 
 | Field | Source | Notes |
 |---|---|---|
-| `returns_matrix: np.ndarray (T, N)` | orchestrator | Daily returns for all N candidate strategies aligned on the same T dates |
+| `returns_matrix: dict[str, list[float]]` | orchestrator | Map of `strategy_id → daily returns` for all N candidate strategies aligned on the same T dates. The evaluator converts this to an internal `np.ndarray` of shape `(T, N)` (column order pinned by sorted `strategy_id`) before running CSCV — the dict-keyed input is what the orchestrator naturally carries and preserves the strategy-id mapping needed for the `dict[str, float]` return value. |
 | `S: int` | constant `16` | Number of CSCV partitions; 16 is the paper's recommended default |
 | `selection_metric: callable` | default `sharpe_ratio` | The function used to pick the "best" strategy |
 
@@ -218,23 +231,24 @@ def compute_pbo(
 - [ ] Unit tests: a hand-constructed return series with known properties
       reproduces a DSR and PBO matching reference values (within tolerance).
 
-## Numerical sanity-check example (for unit test seed)
+## Numerical sanity-check examples (for unit test seed)
 
-A strategy with:
-- `sharpe_ratio = 1.8` over `T = 2520` days (10 years)
-- `skewness = -0.4`, `excess_kurtosis = 3.2`
-- `num_trials = 10` (a library of 10 strategies)
+All three cases use the per-bar convention: `SR_per_bar = SR_annualized /
+sqrt(252)` for daily bars, and skew/excess-kurtosis computed on the per-bar
+series. Reference values below were computed against `scipy.stats.norm.ppf`
+and `norm.cdf`; pin the unit tests to these to catch implementation drift.
 
-Expected (approximate):
-- `SR_zero ≈ sqrt(1.557) * 1/sqrt(10) ≈ 0.394`
-- `DSR statistic ≈ (1.8 - 0.394) * sqrt(2519) / sqrt(1 - (-0.4)(1.8) + (2.2/4)(3.24))`
-  `≈ 1.406 * 50.19 / sqrt(1 + 0.72 + 1.782) ≈ 70.57 / 1.873 ≈ 37.7`
-- `dsr_p_value ≈ Z(37.7) ≈ ~1.0` (very high confidence Sharpe > 0)
+| Case | `SR_ann` | `T` | `skew` | `ex_kurt` | `N` | `SR_zero` (per-bar) | `z` | `dsr_p_value` |
+|---|---|---|---|---|---|---|---|---|
+| A — strong | 1.8 | 2520 | −0.4 | 3.2  | 10   | 0.0314 |  4.013 | ~1.0000 |
+| B — borderline | 0.9 | 1260 | −0.2 | 2.0  | 20   | 0.0536 |  0.110 | ~0.5439 |
+| C — failure | 0.3 | 504  |  0.0 | 0.0  | 1000 | 0.1451 | −2.831 | ~0.0023 |
 
-A weaker strategy with `sharpe_ratio = 0.9`, same N=10, T=2520, same higher
-moments produces `dsr_p_value ≈ 0.99x` — still likely positive but with
-visibly lower confidence. Use a `sharpe_ratio = 0.3, N=1000` case to
-produce a `dsr_p_value < 0.5` for the failure-case unit test.
+Case A is the slam-dunk: a long, smooth backtest with a small library.
+Case B is the "credibly positive but not at the 95% bar" boundary used to
+exercise the gate threshold. Case C is the multiple-testing failure mode —
+a weak Sharpe pulled out of a thousand-trial selection should *not* clear
+the gate, even with arbitrarily clean residuals.
 
 ## What this spec deliberately does not specify
 

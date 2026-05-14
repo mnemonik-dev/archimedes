@@ -45,14 +45,22 @@ T-2:  ReasoningTraceRegistry.commit(trace_hash, trade_intent_summary)
         - Emits TraceCommitted(traceId, hash, msg.sender, block.number)
         - Stores commitment in a pending-traces table
 T-3:  Vault.rebalance(trades)  [trade executes on Arc]
-T-4:  ReasoningTraceRegistry.reveal(traceId, trace_content_pointer, content_hash)
-        - Verifies keccak256(content_pointer_contents) == committed hash
-        - Emits TraceRevealed(traceId, pointer, block.number)
+T-4:  Upload canonical_trace_json to off-chain storage; obtain storagePointer.
+T-5:  ReasoningTraceRegistry.reveal(traceId, storagePointer, fullTraceContent)
+        - On-chain: verifies keccak256(fullTraceContent) == committed contentHash
+        - Records storagePointer alongside the commitment
+        - Emits TraceRevealed(traceId, storagePointer, block.number)
         - Promotes commitment from pending to revealed
 ```
 
+Note that the reveal call carries both the off-chain `storagePointer` (URL/IPFS/Arweave —
+the canonical place to fetch the content from) and the `fullTraceContent` bytes (so the
+contract itself can recompute the hash and verify the binding without trusting any
+off-chain fetch). The storage pointer is recorded for convenience; the hash verification
+is what enforces the commit.
+
 Between T-2 and T-3, the trace hash is on-chain and **immutable**. The agent cannot
-alter the content without breaking the verification at T-4. The reveal at T-4 publishes
+alter the content without breaking the verification at T-5. The reveal at T-5 publishes
 the content. Anyone can verify post-hoc that the hash committed before the trade matches
 the content revealed after.
 
