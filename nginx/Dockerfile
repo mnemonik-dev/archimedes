@@ -1,7 +1,7 @@
 FROM node:22 AS ui-build
 WORKDIR /app
-COPY ui/package.json ui/package-lock.json ./
-RUN npm install --prefer-offline
+COPY ui/package.json ./
+RUN npm install
 COPY ui/ .
 RUN npm run build
 
