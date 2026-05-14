@@ -25,6 +25,9 @@ test:
 deploy:
 	cd wallet-setup && node --env-file=../.env deploy.mjs
 
+deploy-new:
+	cd wallet-setup && node --env-file=../.env deploy-new.mjs
+
 # ─── Oracle ──────────────────────────────────────────
 
 feed:
