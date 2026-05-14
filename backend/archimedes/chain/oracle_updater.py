@@ -134,7 +134,7 @@ class OracleUpdater:
                         "contractAddress": oracle_addr,
                         "abiFunctionSignature": "setPrice(uint256)",
                         "abiParameters": [str(price_int)],
-                        "fee": {"type": "level", "config": {"feeLevel": "MEDIUM"}},
+                        "feeLevel": "MEDIUM",
                         "blockchain": CIRCLE_BLOCKCHAIN,
                         "entitySecretCiphertext": ciphertext,
                     }
