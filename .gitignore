@@ -51,3 +51,13 @@ infra/*.pem
 .pytest_cache/
 .coverage
 htmlcov/
+
+#
+#create_wallet.js
+#generateEntitySecret.js
+#registerEntitySecret.js
+**/**/recovery/
+forge-std
+openzeppelin-contracts
+foundry.lock
+contracts/lib/openzeppelin-contracts
