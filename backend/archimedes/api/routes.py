@@ -159,6 +159,66 @@ async def list_strategies(
     )
 
 
+@strategies_router.get("/signals", response_model=StrategySignalsResponse)
+async def get_strategy_signals():
+    """Evaluate all strategies against live market data and return signals.
+
+    This is the intelligence layer surfaced as an API — the same evaluation
+    the agent runner performs each tick, but on-demand for the frontend.
+    """
+    from datetime import datetime, timezone
+
+    from archimedes.services.strategy_signal_evaluator import strategy_evaluator
+    from archimedes.services.redis_state import AgentStateStore
+
+    strategies = _strategy_provider.list_strategies()
+    from archimedes.chain.client import chain_client
+    synth_assets = [sym for sym, addr in chain_client.settings.synth_addresses.items() if addr]
+
+    all_signals = await asyncio.to_thread(
+        strategy_evaluator.evaluate_strategies, strategies, synth_assets,
+    )
+
+    target_weights = strategy_evaluator.aggregate_signals(all_signals, usdc_floor=0.20)
+
+    flat_count = sum(1 for ss in all_signals for s in ss.signals if s.signal.value == "flat")
+    total_count = sum(len(ss.signals) for ss in all_signals)
+    flat_pct = flat_count / total_count if total_count > 0 else 0
+
+    if flat_pct > 0.6:
+        regime = "risk_off"
+    elif flat_pct > 0.3:
+        regime = "transition"
+    else:
+        regime = "risk_on"
+
+    strat_responses = []
+    for ss in all_signals:
+        strat_responses.append(StrategySignalResponse(
+            strategy_id=ss.strategy_id,
+            paper_title=ss.paper_title,
+            signals=[
+                SignalResponse(
+                    asset=s.asset,
+                    signal=s.signal.value,
+                    weight=s.weight,
+                    reason=s.reason,
+                    strategy_name=s.strategy_name,
+                )
+                for s in ss.signals
+            ],
+        ))
+
+    return StrategySignalsResponse(
+        strategy_count=len(all_signals),
+        regime=regime,
+        confidence=round(1.0 - flat_pct, 2),
+        target_weights=target_weights,
+        strategies=strat_responses,
+        timestamp=datetime.now(timezone.utc).isoformat(),
+    )
+
+
 @strategies_router.get("/{strategy_id}", response_model=StrategyResponse)
 async def get_strategy(strategy_id: str):
     """Get a single strategy by ID. Backed by LocalStrategyProvider."""
@@ -501,70 +561,6 @@ async def list_swap_pools():
 async def get_contract_addresses():
     """Get all deployed contract addresses."""
     return await _config_svc.get_contract_addresses()
-
-
-# ── Strategy Signals (live evaluation) ───────────────────────
-
-
-@strategies_router.get("/signals", response_model=StrategySignalsResponse)
-async def get_strategy_signals():
-    """Evaluate all strategies against live market data and return signals.
-
-    This is the intelligence layer surfaced as an API — the same evaluation
-    the agent runner performs each tick, but on-demand for the frontend.
-    """
-    from datetime import datetime, timezone
-
-    from archimedes.services.strategy_signal_evaluator import strategy_evaluator
-    from archimedes.services.redis_state import AgentStateStore
-
-    strategies = _strategy_provider.list_strategies()
-    from archimedes.chain.client import chain_client
-    synth_assets = [sym for sym, addr in chain_client.settings.synth_addresses.items() if addr]
-
-    all_signals = await asyncio.to_thread(
-        strategy_evaluator.evaluate_strategies, strategies, synth_assets,
-    )
-
-    target_weights = strategy_evaluator.aggregate_signals(all_signals, usdc_floor=0.20)
-
-    # Derive regime from signal consensus
-    flat_count = sum(1 for ss in all_signals for s in ss.signals if s.signal.value == "flat")
-    total_count = sum(len(ss.signals) for ss in all_signals)
-    flat_pct = flat_count / total_count if total_count > 0 else 0
-
-    if flat_pct > 0.6:
-        regime = "risk_off"
-    elif flat_pct > 0.3:
-        regime = "transition"
-    else:
-        regime = "risk_on"
-
-    strat_responses = []
-    for ss in all_signals:
-        strat_responses.append(StrategySignalResponse(
-            strategy_id=ss.strategy_id,
-            paper_title=ss.paper_title,
-            signals=[
-                SignalResponse(
-                    asset=s.asset,
-                    signal=s.signal.value,
-                    weight=s.weight,
-                    reason=s.reason,
-                    strategy_name=s.strategy_name,
-                )
-                for s in ss.signals
-            ],
-        ))
-
-    return StrategySignalsResponse(
-        strategy_count=len(all_signals),
-        regime=regime,
-        confidence=round(1.0 - flat_pct, 2),
-        target_weights=target_weights,
-        strategies=strat_responses,
-        timestamp=datetime.now(timezone.utc).isoformat(),
-    )
 
 
 # ── Agent Status ─────────────────────────────────────────────
