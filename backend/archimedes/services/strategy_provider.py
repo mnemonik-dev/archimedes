@@ -21,6 +21,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import logging
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -301,11 +302,37 @@ class LocalStrategyProvider:
 
 
 def default_provider(repo_root: Path | None = None) -> LocalStrategyProvider:
-    """Construct a provider pointing at `analytics-engine/strategies/`.
+    """Resolve the strategies directory robustly across host and container.
 
-    `repo_root` defaults to four levels up from this file (the archimedes
-    repo root). Override for tests.
+    Priority:
+      1. explicit ``repo_root`` arg (tests)
+      2. ``ARCHIMEDES_STRATEGIES_DIR`` env var — the deployment override;
+         set it (or bind-mount to it) in docker-compose / EC2 so the
+         backend image does not have to vendor the strategy corpus
+      3. first existing candidate among the known host repo layout and
+         container-plausible mount points
+
+    The original ``parents[3]`` math only holds for the host checkout
+    layout — in the backend image ``__file__`` is ``/app/...`` so it
+    resolved to a nonexistent ``/analytics-engine/strategies``. This keeps
+    host dev identical while making the deployed path configurable.
     """
-    if repo_root is None:
-        repo_root = Path(__file__).resolve().parents[3]
-    return LocalStrategyProvider(repo_root / "analytics-engine" / "strategies")
+    if repo_root is not None:
+        return LocalStrategyProvider(repo_root / "analytics-engine" / "strategies")
+
+    env_dir = os.getenv("ARCHIMEDES_STRATEGIES_DIR")
+    if env_dir:
+        return LocalStrategyProvider(Path(env_dir))
+
+    here = Path(__file__).resolve()
+    candidates = [
+        here.parents[3] / "analytics-engine" / "strategies",  # host repo layout
+        Path("/app/analytics-engine/strategies"),  # repo-root build context
+        Path("/analytics-engine/strategies"),  # bind-mount at root
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return LocalStrategyProvider(candidate)
+    # None found: fall back to the host-layout path so the warning log
+    # names a sensible location rather than an arbitrary container root.
+    return LocalStrategyProvider(candidates[0])
