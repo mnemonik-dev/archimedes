@@ -77,6 +77,8 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
     env_file:
       - .env
+    volumes:
+      - ./analytics-engine/strategies:/app/analytics-engine/strategies:ro
     depends_on:
       postgres:
         condition: service_healthy

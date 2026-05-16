@@ -175,13 +175,17 @@ async def construct_strategy(req: StrategyConstructionRequest):
     IAgentOrchestrator; they share the provider + guardrail.
     """
     # propose() may issue a blocking Claude call — keep the event loop free.
-    proposal = await asyncio.to_thread(
-        _architect.propose,
-        req.intent,
-        req.risk_profile,
-        req.capital_usdc,
-        req.regime,
-    )
+    try:
+        proposal = await asyncio.to_thread(
+            _architect.propose,
+            req.intent,
+            req.risk_profile,
+            req.capital_usdc,
+            req.regime,
+        )
+    except Exception as exc:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=503, detail=f"LLM backend unavailable: {exc}") from exc
     guardrail = apply_guardrail(proposal)
     trace = build_construction_trace(proposal, guardrail)
 

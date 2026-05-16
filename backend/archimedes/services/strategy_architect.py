@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 # Claude version to reason about. Override per-call via the backend constructor;
 # Opus (`claude-opus-4-7`) is the upgrade lever for the flagship reasoning moment.
 DEFAULT_MODEL = "claude-sonnet-4-20250514"
-MAX_TOKENS = 1500
+MAX_TOKENS = 4096
 
 
 # ── LLM backend seam ────────────────────────────────────────────
@@ -73,8 +73,11 @@ class ClaudeBackend:
     """
 
     def __init__(self, model: str = DEFAULT_MODEL, api_key: str | None = None) -> None:
+        import anthropic
+
         self._model = model
         self._api_key = api_key or os.getenv("ANTHROPIC_API_KEY", "")
+        self._client = anthropic.Anthropic(api_key=self._api_key) if self._api_key else None
 
     @property
     def model_id(self) -> str:
@@ -87,7 +90,7 @@ class ClaudeBackend:
     def complete(self, system: str, user: str) -> str:
         import anthropic
 
-        client = anthropic.Anthropic(api_key=self._api_key)
+        client = self._client or anthropic.Anthropic(api_key=self._api_key)
         response = client.messages.create(
             model=self._model,
             max_tokens=MAX_TOKENS,
@@ -255,7 +258,7 @@ def _build_user_prompt(
 # ── Robust JSON extraction ──────────────────────────────────────
 
 
-def _extract_json(text: str) -> dict:
+def extract_json(text: str) -> dict:
     """Pull the first balanced JSON object out of an LLM response.
 
     Tolerates ```json fences and surrounding prose. Raises ValueError if no
@@ -307,7 +310,7 @@ class StrategyArchitect:
         backend: LLMBackend | None = None,
     ) -> None:
         self._provider = provider or default_provider()
-        self._backend = backend or _default_backend()
+        self._backend = backend or default_backend()
 
     def _candidates(self, risk_profile: RiskProfile) -> list[Strategy]:
         scoped = self._provider.get_strategies_for_risk_profile(risk_profile.value)
@@ -341,7 +344,7 @@ class StrategyArchitect:
 
         raw = self._backend.complete(system, user)
         try:
-            parsed = _extract_json(raw)
+            parsed = extract_json(raw)
         except ValueError:
             logger.warning("architect: unparseable LLM output; empty proposal")
             return ArchitectProposal(
@@ -391,7 +394,7 @@ class StrategyArchitect:
         )
 
 
-def _default_backend() -> LLMBackend:
+def default_backend() -> LLMBackend:
     """Hosted Claude when a key is present; canned fallback otherwise."""
     claude = ClaudeBackend()
     if claude.available:

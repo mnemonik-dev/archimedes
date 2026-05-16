@@ -39,8 +39,8 @@ from typing import Callable
 
 from archimedes.services.strategy_architect import (
     LLMBackend,
-    _default_backend,
-    _extract_json,
+    default_backend,
+    extract_json,
 )
 
 logger = logging.getLogger(__name__)
@@ -172,7 +172,7 @@ def synthesize_passport(
     )
     raw = backend.complete(_SYNTH_SYSTEM, user)
     try:
-        return _extract_json(raw)
+        return extract_json(raw)
     except ValueError:
         logger.warning("arxiv synth: unparseable model output for %s", meta.arxiv_id)
         return {}
@@ -290,7 +290,7 @@ def extract_strategy(
     `fetcher` / `pdf_downloader` are injectable so the deterministic path
     (synthesize → render → write) is testable with no network.
     """
-    backend = backend or _default_backend()
+    backend = backend or default_backend()
     fetcher = fetcher or fetch_paper
     pdf_downloader = pdf_downloader or _download_pdf
 
