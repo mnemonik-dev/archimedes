@@ -30,7 +30,7 @@ from archimedes.services.vault_service import VaultService
 from archimedes.services.config_service import ConfigService
 from archimedes.services.strategy_provider import default_provider
 from archimedes.services.strategy_architect import default_architect
-from archimedes.services.portfolio_guardrail import apply_guardrail
+from archimedes.services.strategy_guardrail import apply_guardrail
 from archimedes.services.construction_trace import build_construction_trace
 from archimedes.models.strategy import Strategy, StrategyStatus
 from archimedes.api.architect_schemas import (
@@ -210,7 +210,7 @@ async def construct_strategy(req: StrategyConstructionRequest):
         usyc_weight=guardrail.usyc_weight,
         overall_reasoning=proposal.overall_reasoning,
         risk_notes=proposal.risk_notes,
-        guardrail_notes=guardrail.notes,
+        guardrail_notes=guardrail.adjustments,
         trace=ConstructionTraceResponse(
             id=trace.id,
             decision_type=trace.decision_type.value,

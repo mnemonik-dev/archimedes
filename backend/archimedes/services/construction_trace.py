@@ -24,7 +24,7 @@ from __future__ import annotations
 import uuid
 
 from archimedes.models.trace import DecisionType, ReasoningTrace
-from archimedes.services.portfolio_guardrail import GuardrailedAllocation
+from archimedes.services.strategy_guardrail import GuardrailResult
 from archimedes.services.strategy_architect import ArchitectProposal
 
 # No vault exists yet when a user is *designing* a portfolio pre-deposit.
@@ -35,7 +35,7 @@ UNBOUND_VAULT = "0x0000000000000000000000000000000000000000"
 
 def build_construction_trace(
     proposal: ArchitectProposal,
-    guardrail: GuardrailedAllocation,
+    guardrail: GuardrailResult,
     *,
     vault_address: str = UNBOUND_VAULT,
 ) -> ReasoningTrace:
@@ -62,6 +62,7 @@ def build_construction_trace(
         "usyc_weight": round(guardrail.usyc_weight, 6),
         "rationales": rationales,
         "paper_citations": citations,
+        "dropped": sorted(guardrail.dropped),
     }
 
     market_context = {
@@ -73,9 +74,9 @@ def build_construction_trace(
     reasoning = proposal.overall_reasoning.strip()
     if proposal.risk_notes.strip():
         reasoning += f"\n\nRisk notes: {proposal.risk_notes.strip()}"
-    if guardrail.notes:
+    if guardrail.adjustments:
         reasoning += "\n\nGuardrail adjustments:\n" + "\n".join(
-            f"- {n}" for n in guardrail.notes
+            f"- {n}" for n in guardrail.adjustments
         )
 
     trace = ReasoningTrace(
