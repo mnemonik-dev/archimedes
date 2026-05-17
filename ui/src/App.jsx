@@ -22,6 +22,53 @@ import './App.css'
 const PRICE_DECIMALS = 6
 const TOKEN_DECIMALS = 18
 
+const PAGE_TO_PATH = {
+  explore: '/markets/explore',
+  strategies: '/markets/strategies',
+  trade: '/markets/trade',
+  dashboard: '/portfolio/dashboard',
+  mint: '/portfolio/mint-burn',
+  liquidity: '/portfolio/liquidity',
+  vaults: '/portfolio/vaults',
+  'create-vault': '/portfolio/create-vault',
+  financial: '/portfolio/financial',
+  reasoning: '/intelligence/reasoning',
+  risk: '/intelligence/risk',
+  about: '/about',
+  imprint: '/imprint',
+}
+
+const PATH_TO_PAGE = {
+  '/': 'explore',
+  ...Object.fromEntries(Object.entries(PAGE_TO_PATH).map(([page, path]) => [path, page])),
+}
+
+function resolveRoute(pathname = '/', search = '') {
+  if (PATH_TO_PAGE[pathname]) {
+    return { page: PATH_TO_PAGE[pathname], vaultAddress: null, matched: true }
+  }
+
+  if (pathname.startsWith('/portfolio/vaults/')) {
+    const rawAddress = pathname.replace('/portfolio/vaults/', '')
+    if (rawAddress) {
+      return { page: 'vault-detail', vaultAddress: rawAddress, matched: true }
+    }
+  }
+
+  const params = new URLSearchParams(search)
+  const vaultAddress = params.get('vault')
+  if (pathname === '/portfolio/vaults' && vaultAddress) {
+    return { page: 'vault-detail', vaultAddress, matched: true }
+  }
+
+  return { page: 'trade', vaultAddress: null, matched: false }
+}
+
+function pageToPath(page, selectedVault = null) {
+  if (page === 'vault-detail' && selectedVault) return `/portfolio/vaults/${selectedVault}`
+  return PAGE_TO_PATH[page] ?? '/markets/trade'
+}
+
 // ─── Shared helpers ──────────────────────────────────────────
 
 function timeAgo(ts) {
@@ -723,56 +770,18 @@ function ComingSoon({ title }) {
 
 // ─── Main App ────────────────────────────────────────────────
 
-// ─── Hash-based routing ────────────────────────────────────────
-// Maps URL hash paths to internal page IDs.
-// e.g. /#/markets/explore → 'explore'
-const ROUTE_MAP = {
-  '/':                      'explore',
-  '/home':                 'explore',
-  '/about':                'about',
-  '/markets/explore':       'explore',
-  '/markets/strategies':    'strategies',
-  '/markets/trade':         'trade',
-  '/portfolio/dashboard':   'dashboard',
-  '/portfolio/mint-burn':   'mint',
-  '/portfolio/liquidity':   'liquidity',
-  '/portfolio/vaults':      'vaults',
-  '/portfolio/create-vault':'create-vault',
-  '/portfolio/financial':   'financial',
-  '/intelligence/reasoning':'reasoning',
-  '/intelligence/risk':     'risk',
-  '/imprint':              'imprint',
-}
-
-function hashToPage() {
-  const hash = window.location.hash.replace(/^#/, '') || '/'
-  return ROUTE_MAP[hash] || 'explore'
-}
-
 export default function App() {
-  const [page, setPage] = useState(hashToPage)
+  const initialRoute = resolveRoute(window.location.pathname, window.location.search)
+
+  const [page, setPage] = useState(initialRoute.page)
   const [walletAddr, setWalletAddr] = useState(null)
-  const [selectedVault, setSelectedVault] = useState(null)
+  const [selectedVault, setSelectedVault] = useState(initialRoute.vaultAddress)
   const [data, setData] = useState({})
   const [prevData, setPrevData] = useState({})
   const [errors, setErrors] = useState({})
   const [loading, setLoading] = useState(true)
   const [lastFetch, setLastFetch] = useState(null)
   const [countdown, setCountdown] = useState(30)
-
-  // Sync hash → page on browser nav
-  useEffect(() => {
-    const onHash = () => setPage(hashToPage())
-    window.addEventListener('hashchange', onHash)
-    return () => window.removeEventListener('hashchange', onHash)
-  }, [])
-
-  // Wrapper for setPage that also updates the URL hash
-  const navigate = (pageId) => {
-    const route = Object.entries(ROUTE_MAP).find(([, id]) => id === pageId)
-    if (route) window.location.hash = route[0]
-    setPage(pageId)
-  }
 
   useEffect(() => {
     reconnectWallet().then(result => {
@@ -789,14 +798,29 @@ export default function App() {
   const handleConnect = (addr) => setWalletAddr(addr)
   const handleDisconnect = () => { disconnectWallet(); setWalletAddr(null) }
 
+  const navigateToPage = useCallback((nextPage, opts = {}) => {
+    const nextVault = opts.vaultAddress ?? selectedVault
+    const nextPath = pageToPath(nextPage, nextVault)
+    const method = opts.replace ? 'replaceState' : 'pushState'
+
+    if (window.location.pathname + window.location.search !== nextPath) {
+      window.history[method]({}, '', nextPath)
+    }
+
+    setPage(nextPage)
+    if (Object.prototype.hasOwnProperty.call(opts, 'vaultAddress')) {
+      setSelectedVault(opts.vaultAddress)
+    } else if (nextPage !== 'vault-detail') {
+      setSelectedVault(null)
+    }
+  }, [selectedVault])
+
   const selectVault = (addr) => {
-    setSelectedVault(addr)
-    setPage('vault-detail')
+    navigateToPage('vault-detail', { vaultAddress: addr })
   }
 
   const backToVaults = () => {
-    setSelectedVault(null)
-    navigate('vaults')
+    navigateToPage('vaults', { vaultAddress: null })
   }
 
   const fetchAll = useCallback(async () => {
@@ -821,6 +845,21 @@ export default function App() {
   }, [])
 
   useEffect(() => { fetchAll() }, [fetchAll])
+
+  useEffect(() => {
+    if (!initialRoute.matched) {
+      window.history.replaceState({}, '', '/markets/trade')
+    }
+
+    const onPopState = () => {
+      const route = resolveRoute(window.location.pathname, window.location.search)
+      setPage(route.page)
+      setSelectedVault(route.vaultAddress)
+    }
+
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
+  }, [initialRoute.matched])
   useEffect(() => {
     const interval = setInterval(() => {
       setCountdown(c => { if (c <= 1) { fetchAll(); return 30 } return c - 1 })
@@ -849,7 +888,7 @@ export default function App() {
   }
 
   return (
-    <Layout page={page} setPage={navigate} walletAddr={walletAddr} onConnect={handleConnect} onDisconnect={handleDisconnect}>
+    <Layout page={page} setPage={navigateToPage} walletAddr={walletAddr} onConnect={handleConnect} onDisconnect={handleDisconnect}>
       {renderPage()}
     </Layout>
   )
