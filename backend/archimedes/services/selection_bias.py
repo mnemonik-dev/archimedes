@@ -71,7 +71,7 @@ def compute_dsr(
     mean_r = float(np.mean(returns))
     std_r = float(np.std(returns, ddof=1))
 
-    if std_r == 0:
+    if std_r < 1e-15:
         return 0.0, 0.0
 
     SR_hat = mean_r / std_r  # per-bar Sharpe
