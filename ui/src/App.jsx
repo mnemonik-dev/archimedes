@@ -16,6 +16,7 @@ import VaultChat from './components/VaultChat'
 import Reasoning from './components/Reasoning'
 import RiskAnalysis from './components/RiskAnalysis'
 import FinancialAnalysis from './components/FinancialAnalysis'
+import Landing from './components/Landing'
 import Marketplace from './Marketplace'
 import './App.css'
 
@@ -36,10 +37,11 @@ const PAGE_TO_PATH = {
   risk: '/intelligence/risk',
   about: '/about',
   imprint: '/imprint',
+  landing: '/',
 }
 
 const PATH_TO_PAGE = {
-  '/': 'explore',
+  '/': 'landing',
   ...Object.fromEntries(Object.entries(PAGE_TO_PATH).map(([page, path]) => [path, page])),
 }
 
@@ -848,7 +850,7 @@ export default function App() {
 
   useEffect(() => {
     if (!initialRoute.matched) {
-      window.history.replaceState({}, '', '/markets/trade')
+      window.history.replaceState({}, '', '/')
     }
 
     const onPopState = () => {
@@ -869,7 +871,8 @@ export default function App() {
 
   const renderPage = () => {
     switch (page) {
-      case 'explore':       return <Marketplace />
+      case 'landing':       return <Landing onNavigate={navigateToPage} onConnect={handleConnect} walletAddr={walletAddr} />
+      case 'explore':        return <Marketplace />
       case 'strategies':    return <Strategies />
       case 'trade':         return <Trade />
       case 'dashboard':     return <Dashboard data={data} prevData={prevData} errors={errors} loading={loading} lastFetch={lastFetch} countdown={countdown} fetchAll={fetchAll} />

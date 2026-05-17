@@ -355,16 +355,51 @@ def vault_address():
 
 
 @pytest.fixture
-def client():
+def client(vault_address):
     """AsyncClient for testing FastAPI endpoints.
 
     TODO: Replace with real FastAPI TestClient once Chuan implements routes.
     """
     mock = AsyncMock()
 
-    # Default responses for each endpoint
-    mock.get.return_value = MagicMock(
-        status_code=200,
-        json=MagicMock(return_value={"vaults": [], "total": 0}),
-    )
+    async def _get(url, params=None):
+        """Return appropriate mock response based on URL."""
+        base = url.split("?")[0].rstrip("/")
+
+        if base.startswith("/api/traces"):
+            parts = base.split("/")
+            is_list = len(parts) == 3  # /api/traces
+            is_by_vault = (params or {}).get("vault_address")
+            trace_id = parts[3] if len(parts) >= 4 else None
+
+            sample_trace = {
+                "id": trace_id or "trace-001",
+                "vault_address": is_by_vault or vault_address,
+                "decision_type": "rebalance",
+                "trigger": "drift",
+                "timestamp": "2026-05-15T10:30:00",
+                "reasoning": "Test reasoning trace.",
+                "confidence": 0.85,
+                "trace_hash": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+                "arc_tx_hash": "0xtrace_tx_123",
+                "is_verified": True,
+            }
+
+            if is_list:
+                return MagicMock(
+                    status_code=200,
+                    json=MagicMock(return_value={"traces": [sample_trace], "total": 1}),
+                )
+            else:
+                return MagicMock(
+                    status_code=200,
+                    json=MagicMock(return_value=sample_trace),
+                )
+
+        return MagicMock(
+            status_code=200,
+            json=MagicMock(return_value={"vaults": [], "total": 0}),
+        )
+
+    mock.get.side_effect = _get
     return mock

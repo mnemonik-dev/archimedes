@@ -130,7 +130,14 @@ class ClaudeBackend:
         self._model = model
         self._served = model  # configured until a real response overrides it
         self._api_key = api_key or os.getenv("ANTHROPIC_API_KEY", "")
-        self._client = anthropic.Anthropic(api_key=self._api_key) if self._api_key else None
+        self._auth_token = os.getenv("ANTHROPIC_AUTH_TOKEN", "")
+        self._base_url = os.getenv("ANTHROPIC_BASE_URL", "")
+        if self._api_key:
+            self._client: anthropic.Anthropic | None = anthropic.Anthropic(api_key=self._api_key)
+        elif self._auth_token and self._base_url:
+            self._client = anthropic.Anthropic(auth_token=self._auth_token, base_url=self._base_url)
+        else:
+            self._client = None
 
     @property
     def model_id(self) -> str:
@@ -142,13 +149,12 @@ class ClaudeBackend:
 
     @property
     def available(self) -> bool:
-        return bool(self._api_key)
+        return self._client is not None
 
     def complete(self, system: str, user: str) -> str:
-        import anthropic
-
-        client = self._client or anthropic.Anthropic(api_key=self._api_key)
-        response = client.messages.create(
+        if self._client is None:
+            raise RuntimeError("no LLM client configured")
+        response = self._client.messages.create(
             model=self._model,
             max_tokens=MAX_TOKENS,
             system=system,
@@ -182,8 +188,8 @@ class CannedBackend:
                 "strategy_name": "Offline fusion placeholder",
                 "thesis": (
                     "Offline fallback: no LLM backend available, so no genuine "
-                    "cross-paper synthesis was performed. Connect "
-                    "ANTHROPIC_API_KEY for a real, novelty-seeking fusion."
+                    "cross-paper synthesis was performed. Set ANTHROPIC_API_KEY "
+                    "or ANTHROPIC_AUTH_TOKEN+ANTHROPIC_BASE_URL for a real, novelty-seeking fusion."
                 ),
                 "source_arxiv_ids": ids,
                 "fusion_reasoning": (
@@ -612,7 +618,7 @@ class StrategyFusion:
 
 
 def default_backend() -> LLMBackend:
-    """Hosted Claude when a key is present; canned fallback otherwise.
+    """Claude or GLM when credentials are present; canned fallback otherwise.
 
     Mirrors `strategy_architect.default_backend()`.
     """
@@ -620,7 +626,8 @@ def default_backend() -> LLMBackend:
     if claude.available:
         return claude
     logger.warning(
-        "ANTHROPIC_API_KEY not set — strategy fusion using canned fallback"
+        "No LLM credentials (ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN+ANTHROPIC_BASE_URL) "
+        "— strategy fusion using canned fallback"
     )
     return CannedBackend()
 
