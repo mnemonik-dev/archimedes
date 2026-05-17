@@ -441,20 +441,19 @@ function StrategyArchitect({ strategies }) {
             </div>
           )}
           {result.trace && (
-            <div className="trace-card" style={{ marginTop: 18 }}>
-              <div className="trace-id">
-                {result.trace.decision_type} · {result.trace.trigger}
-                <span
-                  className={`badge ${result.trace.is_anchored ? 'tier-1' : ''}`}
-                  style={{ marginLeft: 8 }}
-                >
+            <div className="trace-card" style={{ marginTop: 18, flexDirection: 'column', gap: 6 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                <span className="trace-id" style={{ fontSize: '0.85rem' }}>
+                  {result.trace.decision_type} · {result.trace.trigger}
+                </span>
+                <span className={`badge ${result.trace.is_anchored ? 'tier-1' : ''}`} style={{ marginLeft: 0, flexShrink: 0 }}>
                   {result.trace.is_anchored ? 'anchored on-chain' : 'pending anchor'}
                 </span>
               </div>
-              <div className="mono" style={{ marginTop: 6, wordBreak: 'break-all', fontSize: 12 }}>
+              <code className="mono" style={{ wordBreak: 'break-all', fontSize: '0.72rem', color: 'var(--text-3)', display: 'block' }}>
                 {result.trace.trace_hash}
-              </div>
-              <p className="caption" style={{ marginTop: 6 }}>
+              </code>
+              <p className="caption" style={{ margin: 0 }}>
                 SHA-256 of the decision — recompute it from this response to verify.
                 Anchored on Arc via ReasoningTraceRegistry.
               </p>
