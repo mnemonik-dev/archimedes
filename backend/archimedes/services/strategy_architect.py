@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 # Match the model string already used by chat_service.py so the team has one
 # Claude version to reason about. Override per-call via the backend constructor;
 # Opus (`claude-opus-4-7`) is the upgrade lever for the flagship reasoning moment.
-DEFAULT_MODEL = "claude-sonnet-4-20250514"
+DEFAULT_MODEL = os.getenv("ANTHROPIC_DEFAULT_MODEL", "claude-sonnet-4-20250514")
 MAX_TOKENS = 4096
 
 
@@ -65,7 +65,8 @@ class LLMBackend(Protocol):
 
 
 class ClaudeBackend:
-    """Hosted Claude via the Anthropic SDK (already a project dependency).
+    """Anthropic-SDK backend. Supports direct Claude (ANTHROPIC_API_KEY) or a
+    GLM-compatible endpoint (ANTHROPIC_AUTH_TOKEN + ANTHROPIC_BASE_URL).
 
     `anthropic` is imported lazily inside `complete` so this module stays
     importable in dependency-light environments (tests, AST tooling) — the
@@ -77,7 +78,14 @@ class ClaudeBackend:
 
         self._model = model
         self._api_key = api_key or os.getenv("ANTHROPIC_API_KEY", "")
-        self._client = anthropic.Anthropic(api_key=self._api_key) if self._api_key else None
+        self._auth_token = os.getenv("ANTHROPIC_AUTH_TOKEN", "")
+        self._base_url = os.getenv("ANTHROPIC_BASE_URL", "")
+        if self._api_key:
+            self._client: anthropic.Anthropic | None = anthropic.Anthropic(api_key=self._api_key)
+        elif self._auth_token and self._base_url:
+            self._client = anthropic.Anthropic(auth_token=self._auth_token, base_url=self._base_url)
+        else:
+            self._client = None
 
     @property
     def model_id(self) -> str:
@@ -85,13 +93,12 @@ class ClaudeBackend:
 
     @property
     def available(self) -> bool:
-        return bool(self._api_key)
+        return self._client is not None
 
     def complete(self, system: str, user: str) -> str:
-        import anthropic
-
-        client = self._client or anthropic.Anthropic(api_key=self._api_key)
-        response = client.messages.create(
+        if self._client is None:
+            raise RuntimeError("no LLM client configured")
+        response = self._client.messages.create(
             model=self._model,
             max_tokens=MAX_TOKENS,
             system=system,
@@ -131,8 +138,8 @@ class CannedBackend:
                 "selected": selected,
                 "overall_reasoning": (
                     "Offline fallback: equal-weighted the risk-profile-eligible "
-                    "library. Not model reasoning — connect ANTHROPIC_API_KEY for "
-                    "a real paper-grounded construction."
+                    "library. Not model reasoning — set ANTHROPIC_API_KEY or "
+                    "ANTHROPIC_AUTH_TOKEN+ANTHROPIC_BASE_URL for a real paper-grounded construction."
                 ),
                 "risk_notes": "Fallback allocation; downstream guardrail still applies.",
             }
@@ -395,12 +402,13 @@ class StrategyArchitect:
 
 
 def default_backend() -> LLMBackend:
-    """Hosted Claude when a key is present; canned fallback otherwise."""
+    """Claude or GLM when credentials are present; canned fallback otherwise."""
     claude = ClaudeBackend()
     if claude.available:
         return claude
     logger.warning(
-        "ANTHROPIC_API_KEY not set — strategy architect using canned fallback"
+        "No LLM credentials (ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN+ANTHROPIC_BASE_URL) "
+        "— strategy architect using canned fallback"
     )
     return CannedBackend()
 

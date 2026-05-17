@@ -3,6 +3,9 @@ import Breadcrumbs from './Breadcrumbs'
 import { NEW_CONTRACTS } from '../config'
 
 const NAV = [
+  { group: 'Home', items: [
+    { id: 'landing', label: 'Home' },
+  ]},
   { group: 'Markets', items: [
     { id: 'explore',    label: 'Explore' },
     { id: 'strategies', label: 'Strategies' },
@@ -23,6 +26,7 @@ const NAV = [
 ]
 
 export const PAGE_LABELS = {
+  landing: 'Home',
   explore: 'Explore',
   strategies: 'Strategies',
   trade: 'Trade',

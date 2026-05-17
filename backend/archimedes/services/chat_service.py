@@ -177,17 +177,23 @@ class ChatService:
         user_message: str,
         wallet_address: str,
     ) -> dict | None:
-        """Generate an AI response using Claude API."""
+        """Generate an AI response using Claude or GLM API."""
+        import anthropic
+
         api_key = os.getenv("ANTHROPIC_API_KEY", "")
-        if not api_key:
-            logger.warning("ANTHROPIC_API_KEY not set — returning canned AI response")
+        auth_token = os.getenv("ANTHROPIC_AUTH_TOKEN", "")
+        base_url = os.getenv("ANTHROPIC_BASE_URL", "")
+        if api_key:
+            client: anthropic.Anthropic | None = anthropic.Anthropic(api_key=api_key)
+        elif auth_token and base_url:
+            client = anthropic.Anthropic(auth_token=auth_token, base_url=base_url)
+        else:
+            client = None
+        if client is None:
+            logger.warning("No LLM credentials set — returning canned AI response")
             return self._canned_response(vault_address, user_message)
 
         try:
-            import anthropic
-
-            client = anthropic.Anthropic(api_key=api_key)
-
             # Get recent chat context (last 10 messages)
             recent = self.get_messages(vault_address, limit=10)
             lines = []
