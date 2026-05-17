@@ -57,7 +57,7 @@ EXPLICIT_VAULTS = os.getenv("AGENT_VAULT_ADDRESSES", "")
 USDC_FLOOR = float(os.getenv("AGENT_USDC_FLOOR", "0.20"))
 
 # Drift threshold for rebalance trigger
-_DRIFT_THRESHOLD = 0.05
+_DRIFT_THRESHOLD = 0.15
 
 
 class StrategyRunner:

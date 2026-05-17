@@ -1163,7 +1163,16 @@ async def bootstrap_amm_liquidity():
     """Add AMM pool liquidity so vault rebalances can execute.
 
     Adds USDC + synth token pairs to all AMM pools using the Circle wallet.
-    Trigger this once after deployment to enable swaps.
+    Runs in the background to avoid 504 timeout.
     """
+    import asyncio
     from archimedes.services.amm_bootstrap import bootstrap_amm_liquidity as _bootstrap
-    return await _bootstrap()
+
+    async def _run():
+        try:
+            await _bootstrap()
+        except Exception:
+            pass
+
+    asyncio.create_task(_run())
+    return {"status": "started", "message": "Liquidity bootstrap running in background. Check /api/swap/pools in 2-3 minutes."}
