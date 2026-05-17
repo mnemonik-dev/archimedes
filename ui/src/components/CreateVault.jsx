@@ -1,4 +1,9 @@
 import { useState, useEffect, useCallback } from 'react'
+import {
+  publicClient, getWalletClient, getAddress,
+  VAULT_FACTORY_ABI, VAULT_ABI,
+  NEW_CONTRACTS,
+} from '../config'
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? ''
 
@@ -32,7 +37,11 @@ export default function CreateVault({ onVaultCreated }) {
 
   const [deploying, setDeploying] = useState(false)
   const [deployError, setDeployError] = useState('')
+  const [deployStep, setDeployStep] = useState('')
   const [vaultAddress, setVaultAddress] = useState(null)
+  const [txHash, setTxHash] = useState(null)
+
+  const wallet = getAddress()
 
   const loadStrategies = useCallback(async () => {
     setLoading(true)
@@ -56,28 +65,111 @@ export default function CreateVault({ onVaultCreated }) {
   }
 
   const deploy = async () => {
+    if (!wallet) {
+      setDeployError('Connect your wallet first.')
+      return
+    }
+
+    // Validate
+    if (!name.trim()) { setDeployError('Vault name is required.'); return }
+    if (!symbol.trim()) { setDeployError('Symbol is required.'); return }
+    const mgmt = Number(mgmtFeeBps)
+    const perf = Number(perfFeeBps)
+    if (mgmt < 0 || mgmt > 1000) { setDeployError('Management fee must be 0–1000 BPS.'); return }
+    if (perf < 0 || perf > 3000) { setDeployError('Performance fee must be 0–3000 BPS.'); return }
+
     setDeploying(true)
     setDeployError('')
     setVaultAddress(null)
+    setTxHash(null)
+
+    const factoryAddress = NEW_CONTRACTS.vaultFactory
+    if (!factoryAddress) {
+      setDeployError('VaultFactory address not configured. Check config.js NEW_CONTRACTS.')
+      setDeploying(false)
+      return
+    }
+
     try {
-      const data = await apiPost('/api/vaults/create', {
-        name,
-        symbol,
-        management_fee_bps: Number(mgmtFeeBps),
-        performance_fee_bps: Number(perfFeeBps),
-        agent_assisted: agentAssisted,
-        strategy_ids: selectedIds,
+      const w = await getWalletClient()
+
+      setDeployStep('Sending transaction…')
+
+      // Call VaultFactory.createVault(name, symbol, managementFeeBps, performanceFeeBps, agentAssisted)
+      const hash = await w.writeContract({
+        address: factoryAddress,
+        abi: VAULT_FACTORY_ABI,
+        functionName: 'createVault',
+        args: [
+          name.trim(),
+          symbol.trim().toUpperCase(),
+          mgmt,
+          perf,
+          agentAssisted,
+        ],
       })
-      setVaultAddress(data.vault_address)
-      if (onVaultCreated) onVaultCreated(data.vault_address)
-    } catch (e) {
-      setDeployError(e.message || 'Deployment failed')
+
+      setTxHash(hash)
+      setDeployStep('Waiting for confirmation…')
+
+      // Wait for receipt to parse VaultCreated event
+      const receipt = await publicClient.waitForTransactionReceipt({ hash })
+
+      // Decode VaultCreated event from logs
+      let newVaultAddress = null
+      for (const log of receipt.logs) {
+        try {
+          const decoded = publicClient.decodeEventLog({
+            abi: VAULT_FACTORY_ABI,
+            data: log.data,
+            topics: log.topics,
+          })
+          if (decoded.eventName === 'VaultCreated' && decoded.args?.vault) {
+            newVaultAddress = decoded.args.vault
+            break
+          }
+        } catch {
+          // skip undecodable logs (other contract events)
+        }
+      }
+
+      // Fallback: get last vault from factory list
+      if (!newVaultAddress) {
+        const allVaults = await publicClient.readContract({
+          address: factoryAddress,
+          abi: VAULT_FACTORY_ABI,
+          functionName: 'getVaults',
+        })
+        newVaultAddress = allVaults[allVaults.length - 1]
+      }
+
+      setVaultAddress(newVaultAddress)
+      setDeployStep('')
+
+      // Store strategy association off-chain
+      if (newVaultAddress && selectedIds.length > 0) {
+        try {
+          await apiPost('/api/vaults/metadata', {
+            vault_address: newVaultAddress,
+            strategy_ids: selectedIds,
+            name: name.trim(),
+            symbol: symbol.trim().toUpperCase(),
+          })
+        } catch {
+          // Non-fatal — vault is deployed on-chain, metadata is best-effort
+        }
+      }
+
+      if (onVaultCreated) onVaultCreated(newVaultAddress)
+    } catch (err) {
+      setDeployError(err.shortMessage || err.message || 'Deployment failed')
+      setDeployStep('')
     } finally {
       setDeploying(false)
     }
   }
 
-  const canDeploy = name.trim() && symbol.trim() && !deploying
+  const canDeploy = name.trim() && symbol.trim() && !deploying && wallet
 
   return (
     <div className="panel">
@@ -86,6 +178,12 @@ export default function CreateVault({ onVaultCreated }) {
         Deploy a new managed vault on Arc. Select strategies to associate, set fee
         parameters, and optionally enable agent-assisted rebalancing.
       </p>
+
+      {!wallet && (
+        <div className="info-box warning" style={{ marginTop: 16 }}>
+          Connect your wallet to deploy a vault. Your wallet will sign the on-chain transaction.
+        </div>
+      )}
 
       <div className="card" style={{ marginTop: 20 }}>
         <h3>Vault details</h3>
@@ -193,7 +291,7 @@ export default function CreateVault({ onVaultCreated }) {
               <div
                 key={s.id}
                 className="vault-card vault-card-clickable"
-                style={selected ? { border: '1px solid var(--accent, #6366F1)', background: 'rgba(99,102,241,0.08)' } : {}}
+                style={selected ? { border: '1px solid var(--accent, #D4A853)', background: 'rgba(212,168,83,0.08)' } : {}}
                 onClick={() => toggleStrategy(s.id)}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -221,9 +319,27 @@ export default function CreateVault({ onVaultCreated }) {
         </div>
       )}
 
+      {deployStep && (
+        <div className="info-box" style={{ marginTop: 16 }}>
+          {deployStep}
+        </div>
+      )}
+
+      {txHash && !vaultAddress && (
+        <div className="info-box" style={{ marginTop: 16 }}>
+          TX submitted: <code>{txHash}</code>. Waiting for confirmation…
+        </div>
+      )}
+
       {vaultAddress && (
         <div className="info-box" style={{ marginTop: 16 }}>
-          Vault deployed at <code>{vaultAddress}</code>. Navigating to vault…
+          ✅ Vault deployed at <code>{vaultAddress}</code>
+          {txHash && <><br/>TX: <code>{txHash}</code></>}
+          <div className="caption" style={{ marginTop: 4 }}>
+            {wallet?.toLowerCase() === '0x...agent'.toLowerCase()
+              ? '🏆 Tier 1 — Verified (agent-deployed)'
+              : '👥 Tier 2 — Community (user-deployed)'}
+          </div>
         </div>
       )}
 
@@ -233,7 +349,7 @@ export default function CreateVault({ onVaultCreated }) {
         onClick={deploy}
         disabled={!canDeploy}
       >
-        {deploying ? 'Deploying vault…' : 'Deploy vault on Arc'}
+        {deploying ? deployStep || 'Deploying vault…' : wallet ? 'Deploy vault on Arc' : 'Connect wallet to deploy'}
       </button>
     </div>
   )

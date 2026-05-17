@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { ASSETS } from './config'
+import { publicClient, ASSETS, ORACLE_ABI, VAULT_FACTORY_ABI, VAULT_ABI, NEW_CONTRACTS } from './config'
 
 // Use relative /api paths — Vite proxy handles dev, nginx handles prod
 const API = '/api'
@@ -134,15 +134,15 @@ const MOCK_ACTIVITY = [
   },
 ]
 
-// Static price data for synthetic assets (oracle values are on-chain)
-const ASSET_PRICES = {
-  TSLA:   { price: '287.42',   change: +1.23 },
-  NVDA:   { price: '875.31',   change: +2.45 },
-  SPY:    { price: '532.18',   change: +0.41 },
-  BTC:    { price: '67,842',   change: -0.87 },
-  GOLD:   { price: '2,341',    change: +0.62 },
-  OIL:    { price: '78.45',    change: -1.34 },
-  NIKKEI: { price: '38,241',   change: +0.28 },
+// Asset prices — populated from on-chain oracles on mount
+const ASSET_PRICES_INIT = {
+  TSLA:   { price: '—', change: 0 },
+  NVDA:   { price: '—', change: 0 },
+  SPY:    { price: '—', change: 0 },
+  BTC:    { price: '—', change: 0 },
+  GOLD:   { price: '—', change: 0 },
+  OIL:    { price: '—', change: 0 },
+  NIKKEI: { price: '—', change: 0 },
 }
 
 // ─── Adapter: backend StrategyCard → UI card shape ──────────
@@ -427,6 +427,13 @@ export default function Marketplace() {
   const [showSection, setShowSection] = useState('all')
   const [categoryFilter, setCategoryFilter] = useState('all')
 
+  // Live oracle prices
+  const [assetPrices, setAssetPrices] = useState(ASSET_PRICES_INIT)
+
+  // On-chain vaults
+  const [onChainVaults, setOnChainVaults] = useState([])
+  const [vaultLoading, setVaultLoading] = useState(true)
+
   // API state
   const [allStrategies, setAllStrategies] = useState([])
   const [featuredStrategies, setFeaturedStrategies] = useState([])
@@ -439,6 +446,83 @@ export default function Marketplace() {
   const [selectedStrategy, setSelectedStrategy] = useState(null)
   const [selectedDetail, setSelectedDetail] = useState(null)
   const [loadingDetail, setLoadingDetail] = useState(false)
+
+  // Fetch live oracle prices
+  useEffect(() => {
+    const loadPrices = async () => {
+      const prices = { ...ASSET_PRICES_INIT }
+      await Promise.all(ASSETS.map(async (asset) => {
+        try {
+          const rawPrice = await publicClient.readContract({
+            address: asset.oracle,
+            abi: ORACLE_ABI,
+            functionName: 'price',
+          })
+          // Oracle prices are in 6 decimals (USDC-precision)
+          const priceNum = Number(rawPrice) / 1e6
+          let formatted
+          if (priceNum >= 10000) formatted = priceNum.toLocaleString('en-US', { maximumFractionDigits: 0 })
+          else if (priceNum >= 100) formatted = priceNum.toFixed(2)
+          else formatted = priceNum.toFixed(4)
+          prices[asset.id] = { price: formatted, change: 0 }
+        } catch {
+          // keep placeholder
+        }
+      }))
+      setAssetPrices(prices)
+    }
+    loadPrices()
+    const interval = setInterval(loadPrices, 30000)
+    return () => clearInterval(interval)
+  }, [])
+
+  // Fetch on-chain vaults from VaultFactory
+  useEffect(() => {
+    const loadVaults = async () => {
+      const factoryAddr = NEW_CONTRACTS.vaultFactory
+      if (!factoryAddr) { setVaultLoading(false); return }
+      try {
+        const addrs = await publicClient.readContract({
+          address: factoryAddr,
+          abi: VAULT_FACTORY_ABI,
+          functionName: 'getVaults',
+        })
+        // Read basic metrics for each vault
+        const vaultData = await Promise.all(addrs.map(async (addr) => {
+          try {
+            const [totalAssets, creator, tier, paused] = await Promise.all([
+              publicClient.readContract({ address: addr, abi: VAULT_ABI, functionName: 'totalAssets' }),
+              publicClient.readContract({ address: addr, abi: VAULT_ABI, functionName: 'creator' }),
+              publicClient.readContract({ address: addr, abi: VAULT_ABI, functionName: 'tier' }),
+              publicClient.readContract({ address: addr, abi: VAULT_ABI, functionName: 'paused' }),
+            ])
+            return {
+              id: addr,
+              name: `Vault ${addr.slice(0, 6)}...${addr.slice(-4)}`,
+              symbol: `v${addr.slice(2, 6).toUpperCase()}`,
+              tier: Number(tier),
+              aum: Number(totalAssets) / 1e6,
+              return30d: 0,
+              sharpe: 0,
+              maxDrawdown: 0,
+              allocations: [],
+              managementFee: 0,
+              performanceFee: 0,
+              creator,
+              paused,
+            }
+          } catch {
+            return null
+          }
+        }))
+        setOnChainVaults(vaultData.filter(Boolean))
+      } catch {
+        // factory not available — keep mock
+      }
+      setVaultLoading(false)
+    }
+    loadVaults()
+  }, [])
 
   // Fetch regime
   useEffect(() => {
@@ -520,7 +604,10 @@ export default function Marketplace() {
       })
   }, [allStrategies, showSection, categoryFilter, searchQuery, sortBy])
 
-  const filteredVaults = MOCK_VAULTS
+  // Use on-chain vaults if available, otherwise fall back to mock
+  const displayVaults = onChainVaults.length > 0 ? onChainVaults : MOCK_VAULTS
+
+  const filteredVaults = displayVaults
     .filter(v => {
       if (vaultFilter === 'verified')  return v.tier === 1
       if (vaultFilter === 'community') return v.tier === 2
@@ -554,8 +641,8 @@ export default function Marketplace() {
       {/* Ecosystem Stats */}
       <div className="grid g-4 mb-7" style={{ gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
         {[
-          { label: 'Ecosystem AUM',    value: ECOSYSTEM_STATS.totalAum,    sub: `${ECOSYSTEM_STATS.aumChange} this week`, cls: 'positive' },
-          { label: 'Active Vaults',    value: ECOSYSTEM_STATS.activeVaults, sub: `${ECOSYSTEM_STATS.verifiedVaults} verified · ${ECOSYSTEM_STATS.communityVaults} community`, cls: '' },
+          { label: 'Ecosystem AUM',    value: onChainVaults.length > 0 ? `$${formatNumber(onChainVaults.reduce((s, v) => s + v.aum, 0))}` : ECOSYSTEM_STATS.totalAum, sub: `${ECOSYSTEM_STATS.aumChange} this week`, cls: 'positive' },
+          { label: 'Active Vaults',    value: onChainVaults.length || ECOSYSTEM_STATS.activeVaults, sub: `${onChainVaults.filter(v => v.tier === 1).length || ECOSYSTEM_STATS.verifiedVaults} verified · ${onChainVaults.filter(v => v.tier === 2).length || ECOSYSTEM_STATS.communityVaults} community`, cls: '' },
           { label: 'On-Chain Traces',  value: ECOSYSTEM_STATS.totalTraces, sub: 'All verifiable', cls: 'accent' },
           { label: 'Avg Sharpe (T1)',  value: ECOSYSTEM_STATS.avgSharpe,   sub: `${ECOSYSTEM_STATS.sharpeDelta} vs benchmark`, cls: 'positive' },
         ].map(({ label, value, sub, cls }) => (
@@ -577,7 +664,7 @@ export default function Marketplace() {
         </div>
         <div className="grid g-5" style={{ gridTemplateColumns: 'repeat(5, 1fr)', gap: 12 }}>
           {ASSETS.slice(0, 5).map(asset => {
-            const info = ASSET_PRICES[asset.id] || { price: '—', change: 0 }
+            const info = assetPrices[asset.id] || { price: '—', change: 0 }
             const isPos = info.change >= 0
             return (
               <div key={asset.id} className="card-flat" style={{ padding: 16 }}>

@@ -75,10 +75,13 @@ class VaultService:
             trace_count = await trace_publisher.get_trace_count(address)
             recent_traces = await self._get_recent_traces(address, limit=5)
 
+            # Resolve name/symbol from off-chain metadata
+            name, symbol = await self._get_vault_names(address)
+
             return VaultDetailResponse(
                 address=address,
-                name=f"Vault {metrics['tier']}",
-                symbol=f"v{address[:6]}",
+                name=name or f"Vault {metrics['tier']}",
+                symbol=symbol or f"v{address[:6]}",
                 tier=metrics["tier"],
                 creator=metrics["creator"],
                 aum_usdc=metrics["total_aum_usdc"],
@@ -117,6 +120,27 @@ class VaultService:
             depositors=0,
             created_at=datetime.now(timezone.utc).isoformat(),
         )
+
+    async def _get_vault_names(self, address: str) -> tuple[str | None, str | None]:
+        """Resolve vault display name and symbol from off-chain metadata."""
+        try:
+            from archimedes.db import get_session
+            from archimedes.models.chat import VaultMetadata
+
+            session = get_session()
+            try:
+                meta = (
+                    session.query(VaultMetadata)
+                    .filter(VaultMetadata.vault_address == address)
+                    .first()
+                )
+                if meta:
+                    return meta.name, meta.symbol
+            finally:
+                session.close()
+        except Exception:
+            pass
+        return None, None
 
     async def _get_recent_traces(self, vault_address: str, limit: int = 5) -> list[TraceResponse]:
         """Get recent reasoning traces for a vault (from on-chain)."""

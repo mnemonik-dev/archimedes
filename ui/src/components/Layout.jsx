@@ -13,9 +13,11 @@ const NAV = [
     { id: 'liquidity',    label: 'Liquidity' },
     { id: 'vaults',       label: 'Vaults' },
     { id: 'create-vault', label: 'Create Vault' },
+    { id: 'financial',    label: 'Financial Analysis' },
   ]},
   { group: 'Intelligence', items: [
     { id: 'reasoning',  label: 'Reasoning' },
+    { id: 'risk',        label: 'Risk Analysis' },
   ]},
 ]
 
@@ -28,7 +30,24 @@ const PAGE_LABELS = {
   liquidity:  'Liquidity',
   vaults:        'Vaults',
   'create-vault': 'Create Vault',
+  'vault-detail': 'Vault Detail',
+  financial:     'Financial Analysis',
   reasoning:     'Reasoning',
+  risk:          'Risk Analysis',
+}
+
+const PAGE_ROUTES = {
+  explore:    '/markets/explore',
+  strategies: '/markets/strategies',
+  trade:      '/markets/trade',
+  dashboard:  '/portfolio/dashboard',
+  mint:       '/portfolio/mint-burn',
+  liquidity:  '/portfolio/liquidity',
+  vaults:     '/portfolio/vaults',
+  'create-vault': '/portfolio/create-vault',
+  financial:     '/portfolio/financial',
+  reasoning:  '/intelligence/reasoning',
+  risk:       '/intelligence/risk',
 }
 
 export default function Layout({ page, setPage, walletAddr, onConnect, onDisconnect, children }) {
@@ -76,7 +95,7 @@ export default function Layout({ page, setPage, walletAddr, onConnect, onDisconn
 
       <div className="main-area">
         <div className="topbar">
-          <span className="topbar-label">{PAGE_LABELS[page] ?? ''}</span>
+          <span className="topbar-label">{PAGE_LABELS[page] ?? ''} <span className="caption" style={{ marginLeft: 8, color: 'var(--text-4)' }}>{PAGE_ROUTES[page] || ''}</span></span>
           <WalletConnect address={walletAddr} onConnect={onConnect} onDisconnect={onDisconnect} />
         </div>
         <main className="page-content">{children}</main>

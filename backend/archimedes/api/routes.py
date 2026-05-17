@@ -43,7 +43,8 @@ from archimedes.api.architect_schemas import (
     StrategyConstructionRequest,
     StrategyConstructionResponse,
 )
-from archimedes.api.vault_schemas import VaultCreateRequest, VaultCreateResponse
+from archimedes.api.vault_schemas import VaultCreateRequest, VaultCreateResponse, VaultMetadataRequest, VaultMetadataResponse
+from archimedes.models.chat import VaultMetadata
 from archimedes.chain.oracle_updater import OracleUpdater
 from archimedes.chain.executor import chain_executor
 
@@ -186,6 +187,64 @@ async def get_vault_detail(address: str):
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Vault not found")
     return detail
+
+
+# ── Vault Metadata (off-chain) ───────────────────────────────
+
+
+@vaults_router.post("/metadata", response_model=VaultMetadataResponse)
+async def store_vault_metadata(req: VaultMetadataRequest):
+    """Store off-chain vault metadata (strategy associations, display name).
+
+    Called by the frontend after a successful on-chain vault deployment.
+    Idempotent — upserts on vault_address.
+    """
+    from archimedes.db import get_session
+
+    session = get_session()
+    try:
+        meta = (
+            session.query(VaultMetadata)
+            .filter(VaultMetadata.vault_address == req.vault_address)
+            .first()
+        )
+        if meta is None:
+            meta = VaultMetadata(vault_address=req.vault_address)
+            session.add(meta)
+
+        meta.name = req.name
+        meta.symbol = req.symbol
+        meta.creator_address = req.creator_address or ""
+        meta.set_strategy_ids(req.strategy_ids)
+        session.commit()
+        session.refresh(meta)
+        return VaultMetadataResponse(**meta.to_dict())
+    except Exception as exc:
+        session.rollback()
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    finally:
+        session.close()
+
+
+@vaults_router.get("/{address}/metadata", response_model=VaultMetadataResponse)
+async def get_vault_metadata(address: str):
+    """Get off-chain vault metadata (strategy associations, display name)."""
+    from fastapi import HTTPException
+    from archimedes.db import get_session
+
+    session = get_session()
+    try:
+        meta = (
+            session.query(VaultMetadata)
+            .filter(VaultMetadata.vault_address == address)
+            .first()
+        )
+        if meta is None:
+            raise HTTPException(status_code=404, detail="No metadata for this vault")
+        return VaultMetadataResponse(**meta.to_dict())
+    finally:
+        session.close()
 
 
 # ── Strategies ────────────────────────────────────────────────

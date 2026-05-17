@@ -1666,7 +1666,149 @@ button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
    RESPONSIVE
    ═══════════════════════════════════════════════════════════════ */
 
-@media (max-width: 768px) {
+/* Tablet: sidebar collapses */
+@media (max-width: 900px) {
+  .shell {
+    flex-direction: column;
+  }
+
+  .sidebar {
+    position: relative;
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid var(--glass-border);
+    overflow-x: auto;
+    overflow-y: hidden;
+    max-height: none;
+  }
+
+  .sidebar nav {
+    display: flex;
+    flex-direction: row;
+    gap: 0;
+    padding: 0 var(--space-4);
+    overflow-x: auto;
+  }
+
+  .nav-group {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 4px;
+    padding: 0;
+    border-bottom: none;
+  }
+
+  .nav-group-label {
+    display: none;
+  }
+
+  .nav-link {
+    padding: 10px 12px;
+    white-space: nowrap;
+    font-size: 0.8rem;
+  }
+
+  .sidebar-brand {
+    padding: var(--space-3) var(--space-4);
+    border-bottom: none;
+  }
+
+  .sidebar-footer {
+    display: none;
+  }
+
+  .main-area {
+    margin-left: 0;
+  }
+
+  .topbar {
+    display: none;
+  }
+
+  .page-content {
+    padding: var(--space-4);
+  }
+
+  /* Grids go single-column */
+  .grid,
+  .trade-grid,
+  .strat-grid-2,
+  .strat-grid-3 {
+    grid-template-columns: 1fr !important;
+  }
+
+  .trade-grid {
+    grid-template-columns: 1fr !important;
+    gap: 16px;
+  }
+}
+
+/* Phone: compact everything */
+@media (max-width: 600px) {
+  :root {
+    --sidebar-w: 100%;
+    --space-6: 20px;
+    --space-7: 32px;
+  }
+
+  html { font-size: 14px; }
+
+  .sidebar-brand {
+    padding: var(--space-2) var(--space-3);
+  }
+
+  .logo-sub { display: none; }
+
+  .nav-link {
+    padding: 8px 10px;
+    font-size: 0.75rem;
+  }
+
+  .page-content {
+    padding: var(--space-3);
+  }
+
+  /* Force single column on stat grids */
+  .grid.g-4,
+  [style*="gridTemplateColumns: repeat(4"] {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 10px !important;
+  }
+
+  [style*="gridTemplateColumns: repeat(5"] {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+
+  /* Stack forms */
+  .form-row {
+    flex-direction: column !important;
+    gap: 10px !important;
+  }
+
+  /* Table scroll */
+  .table-container {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  table {
+    font-size: 0.78rem;
+  }
+
+  /* Full-width buttons */
+  .btn-primary {
+    width: 100%;
+  }
+
+  .vault-stats-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+
+  .strategy-metrics-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
   .strategy-modal {
     width: 95%;
     max-height: 95vh;
@@ -1678,7 +1820,12 @@ button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
     padding: 16px;
   }
 
-  .strategy-metrics-grid {
-    grid-template-columns: repeat(2, 1fr);
+  /* Swap box */
+  .swap-box {
+    padding: 16px !important;
+  }
+
+  .swap-amount {
+    font-size: 1.2rem !important;
   }
 }

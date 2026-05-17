@@ -17,3 +17,20 @@ class VaultCreateRequest(BaseModel):
 class VaultCreateResponse(BaseModel):
     vault_address: str
     strategy_ids: list[str]
+
+
+class VaultMetadataRequest(BaseModel):
+    vault_address: str = Field(..., pattern=r'^0x[a-fA-F0-9]{40}$')
+    name: str = Field("", max_length=64)
+    symbol: str = Field("", max_length=16)
+    creator_address: str = Field("", pattern=r'^(0x[a-fA-F0-9]{40})?$')
+    strategy_ids: list[str] = Field(default_factory=list)
+
+
+class VaultMetadataResponse(BaseModel):
+    vault_address: str
+    name: str = ""
+    symbol: str = ""
+    creator_address: str = ""
+    strategy_ids: list[str] = []
+    created_at: str | None = None

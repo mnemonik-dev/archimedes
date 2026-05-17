@@ -55,3 +55,6 @@ data/corpus/text/
 .pytest_cache/
 .coverage
 htmlcov/
+
+.loom/
+!.loom/loom.config.json
