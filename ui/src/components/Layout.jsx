@@ -23,32 +23,20 @@ const NAV = [
 ]
 
 export const PAGE_LABELS = {
-  explore:    'Explore',
+  explore: 'Explore',
   strategies: 'Strategies',
-  trade:      'Trade',
-  dashboard:  'Dashboard',
-  mint:       'Mint / Burn',
-  liquidity:  'Liquidity',
-  vaults:        'Vaults',
+  trade: 'Trade',
+  dashboard: 'Dashboard',
+  mint: 'Mint / Burn',
+  liquidity: 'Liquidity',
+  vaults: 'Vaults',
   'create-vault': 'Create Vault',
-  'vault-detail': 'Vault Detail',
-  financial:     'Financial Analysis',
-  reasoning:     'Reasoning',
-  risk:          'Risk Analysis',
-}
-
-const PAGE_ROUTES = {
-  explore:    '/markets/explore',
-  strategies: '/markets/strategies',
-  trade:      '/markets/trade',
-  dashboard:  '/portfolio/dashboard',
-  mint:       '/portfolio/mint-burn',
-  liquidity:  '/portfolio/liquidity',
-  vaults:     '/portfolio/vaults',
-  'create-vault': '/portfolio/create-vault',
-  financial:     '/portfolio/financial',
-  reasoning:  '/intelligence/reasoning',
-  risk:       '/intelligence/risk',
+  financial: 'Financial Analysis',
+  'vault-detail': 'Vault Details',
+  reasoning: 'Reasoning',
+  risk: 'Risk Analysis',
+  about: 'About',
+  imprint: 'Imprint',
 }
 
 export default function Layout({ page, setPage, walletAddr, onConnect, onDisconnect, children }) {
@@ -78,7 +66,7 @@ export default function Layout({ page, setPage, walletAddr, onConnect, onDisconn
                 <button
                   key={item.id}
                   type="button"
-                  className={`nav-link${page === item.id ? ' active' : ''}`}
+                  className={`nav-link${page === item.id || (item.id === 'vaults' && page === 'vault-detail') ? ' active' : ''}`}
                   onClick={() => setPage(item.id)}
                 >
                   {item.label}
