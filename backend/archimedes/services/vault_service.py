@@ -27,7 +27,13 @@ class VaultService:
         offset: int = 0,
     ) -> VaultListResponse:
         """List all vaults with summary data."""
-        vault_addresses = await chain_executor.get_all_vaults()
+        try:
+            vault_addresses = await chain_executor.get_all_vaults()
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Failed to get vault addresses: {e}")
+            return VaultListResponse(vaults=[], total=0)
+
         summaries: list[VaultSummaryResponse] = []
 
         for addr in vault_addresses:
@@ -37,7 +43,9 @@ class VaultService:
                 if tier is not None and summary.tier != tier:
                     continue
                 summaries.append(summary)
-            except Exception:
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Skipping vault {addr}: {e}")
                 continue
 
         # Sort
