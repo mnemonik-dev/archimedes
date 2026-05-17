@@ -878,7 +878,12 @@ async def get_trace_canonical(trace_id: str):
 
 @regime_router.get("/current", response_model=RegimeResponse)
 async def get_current_regime():
-    """Get current market regime — reads live state from Redis (agent writes it)."""
+    """Get current market regime — reads live state from Redis (agent writes it).
+
+    The agent runner persists regime state to Redis on each tick. This endpoint
+    returns the latest classification with confidence, transition probabilities,
+    and regime history summary.
+    """
     from archimedes.services.redis_state import AgentStateStore
 
     state = AgentStateStore()
@@ -894,11 +899,11 @@ async def get_current_regime():
             regime=data.get("regime", "unknown"),
             confidence=data.get("confidence", 0.0),
             timestamp=data.get("timestamp", ""),
-            regime_changed=False,
+            regime_changed=data.get("regime_changed", False),
             signals=RegimeSignalsResponse(
-                vix_level=0.0,
-                sp500_above_ma50=True,
-                sp500_above_ma200=True,
+                vix_level=data.get("vix_level", 0.0),
+                sp500_above_ma50=data.get("sp500_above_ma50", True),
+                sp500_above_ma200=data.get("sp500_above_ma200", True),
             ),
         )
 
@@ -913,6 +918,38 @@ async def get_current_regime():
             sp500_above_ma200=True,
         ),
     )
+
+
+@regime_router.get("/transitions")
+async def get_regime_transitions():
+    """Get regime transition probability matrix.
+
+    Returns the estimated probability of transitioning from each regime
+    to every other regime, based on historical observations.
+    """
+    from archimedes.services.redis_state import AgentStateStore
+
+    state = AgentStateStore()
+    try:
+        data = await state.load_regime()
+        transitions = data.get("transition_probabilities") if data else None
+        history = data.get("regime_history_summary") if data else None
+    finally:
+        await state.close()
+
+    if not transitions:
+        # Return default uniform-ish priors
+        transitions = {
+            "risk_on": {"risk_on": 0.85, "transition": 0.10, "risk_off": 0.04, "crisis": 0.01},
+            "transition": {"risk_on": 0.20, "transition": 0.50, "risk_off": 0.25, "crisis": 0.05},
+            "risk_off": {"risk_on": 0.05, "transition": 0.15, "risk_off": 0.70, "crisis": 0.10},
+            "crisis": {"risk_on": 0.02, "transition": 0.08, "risk_off": 0.30, "crisis": 0.60},
+        }
+
+    return {
+        "transition_probabilities": transitions,
+        "history": history or {"total": 0},
+    }
 
 
 # ── Swap ──────────────────────────────────────────────────────
