@@ -43,6 +43,7 @@ jobs:
             git reset --hard origin/main
 
             # Rebuild and restart services (detached)
+            docker compose build --no-cache nginx
             docker compose up --build -d --remove-orphans
 
             # Prune old images to save disk

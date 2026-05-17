@@ -49,7 +49,7 @@ logger = logging.getLogger(__name__)
 
 # Mirror the architect's configured default; `response.model` is what is
 # actually recorded for provenance (see module docstring / spec).
-DEFAULT_MODEL = "claude-sonnet-4-20250514"
+DEFAULT_MODEL = os.getenv("ANTHROPIC_DEFAULT_MODEL", "claude-sonnet-4-20250514")
 MAX_TOKENS = 4096
 
 # Hard floor: a fusion of one paper is just extraction (the architect's job).

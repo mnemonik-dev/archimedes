@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 # Match the model string already used by chat_service.py so the team has one
 # Claude version to reason about. Override per-call via the backend constructor;
 # Opus (`claude-opus-4-7`) is the upgrade lever for the flagship reasoning moment.
-DEFAULT_MODEL = "claude-sonnet-4-20250514"
+DEFAULT_MODEL = os.getenv("ANTHROPIC_DEFAULT_MODEL", "claude-sonnet-4-20250514")
 MAX_TOKENS = 4096
 
 
