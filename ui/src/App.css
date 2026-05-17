@@ -223,6 +223,37 @@ h4, .h4 { font-family: var(--sans); font-size: 0.8rem; font-weight: 600; text-tr
   flex-shrink: 0;
 }
 
+/* --- Breadcrumbs --- */
+.breadcrumbs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 0.78rem;
+  color: var(--text-4);
+}
+.breadcrumb-sep {
+  margin: 0 6px;
+  color: var(--text-4);
+  user-select: none;
+}
+.breadcrumb-link {
+  background: none;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+  font-family: var(--sans);
+  font-size: 0.78rem;
+  padding: 0;
+  transition: color 0.15s;
+}
+.breadcrumb-link:hover {
+  color: var(--text-1);
+}
+.breadcrumb-current {
+  color: var(--text-1);
+  font-weight: 600;
+}
+
 /* --- Wallet Chip --- */
 .wallet-chip {
   display: flex;

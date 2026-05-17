@@ -1,4 +1,5 @@
 import WalletConnect from './WalletConnect'
+import Breadcrumbs from './Breadcrumbs'
 import { NEW_CONTRACTS } from '../config'
 
 const NAV = [
@@ -21,7 +22,7 @@ const NAV = [
   ]},
 ]
 
-const PAGE_LABELS = {
+export const PAGE_LABELS = {
   explore:    'Explore',
   strategies: 'Strategies',
   trade:      'Trade',
@@ -95,7 +96,7 @@ export default function Layout({ page, setPage, walletAddr, onConnect, onDisconn
 
       <div className="main-area">
         <div className="topbar">
-          <span className="topbar-label">{PAGE_LABELS[page] ?? ''} <span className="caption" style={{ marginLeft: 8, color: 'var(--text-4)' }}>{PAGE_ROUTES[page] || ''}</span></span>
+          <Breadcrumbs page={page} setPage={setPage} />
           <WalletConnect address={walletAddr} onConnect={onConnect} onDisconnect={onDisconnect} />
         </div>
         <main className="page-content">{children}</main>
