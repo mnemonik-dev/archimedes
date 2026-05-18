@@ -31,9 +31,11 @@ May 11–25, 2026.
 
 - Repository: [`github.com/hackagora/archimedes-arcadia`](https://github.com/hackagora/archimedes-arcadia)
 - Discord: **Archimedes Arcadia** server
-- Branch model: `develop` is the integration branch; `main` is protected and promoted-to
-  once stable. Per-owner staging branches (e.g. `dbrowneup/<name>`, `moonshot/<name>`,
-  `marten`) are personal scratch space before opening a PR
+- Branch model: **`main` is the single live branch — build-on-deploy.** Every merge to
+  `main` triggers a CI build + deploy to the live EC2 stack. No `develop`/integration
+  branch (retired 2026-05-18, unused). Short-lived per-owner branches
+  (`dbrowneup/<name>`, `marten`, …) → PR → merge to `main`; `main` moves continuously
+  (Chuan's agentic system lands + self-iterates on it), so rebase late and merge fast
 - Live testnet deploy: [`http://18.171.230.205/`](http://18.171.230.205/) (EC2,
   Chain ID `5042002` / `0x4cef52`, Arc testnet)
 - License: [Unlicense](https://unlicense.org) — full public-domain dedication
@@ -240,23 +242,24 @@ decisions (5 of them as of Day 3):
 
 ## Engineering conventions
 
-### Branch model (5-person hackathon team, async-first)
+### Branch model (build-on-deploy, main-only)
 
-- `main` is protected. Every change goes through a PR. (Day-4 reality: small infra fixes
-  have occasionally landed on `main` directly via merge from the contracts owner's branch
-  for hotfix expediency. Keep this rare — `develop` is the integration target.)
-- `develop` is the integration branch — merge feature branches here first; promote to
-  `main` once stable.
-- Feature branches: `feat/<short-name>`, e.g. `feat/strategy-passport`,
-  `feat/regime-detection`, `feat/ec2-infra-cicd`.
-- Per-owner branches: `<discord-handle>/<short-name>`, e.g. `moonshot/contracts-v0`,
-  `marten/arc-cli-spike`, `dbrowneup/strategy-foundation`,
-  `danielscoffee/backtest`. Personal staging.
-- Smart-contract branches: `smart-contracts` (the live branch Chuan uses) or
-  `contract/<short-name>` for spikes — these get **two reviews** (Chuan + one generalist)
-  before merge.
-- **No force-push to `main` or `develop`. Ever.** Force-push to your own branch before
-  opening a PR is fine.
+Codified 2026-05-18 to match how the team actually works (see
+"Working with AI agents on this repo" below):
+
+- **`main` is the only long-lived branch, and it is the deploy branch.** Every merge
+  to `main` triggers a CI build + deploy to the live EC2 stack. There is no
+  `develop`/integration branch — it drifted unused and was retired.
+- **`main` moves continuously.** Chuan's agentic system merges work and iterates on
+  its own CI failures directly on `main`. Treat `main` as fast-moving: branch from it
+  late, rebase onto it right before merging, and merge in a tight window before it
+  drifts again. Don't wait for it to "settle" — it won't.
+- Short-lived per-owner branches `<discord-handle>/<short-name>` → PR → merge to
+  `main`. Delete the branch after merge.
+- **The few hard rules — universal, and they do not impede speed:** never force-push
+  `main`; never commit secrets or `.env`; one logical change per PR. Force-pushing
+  your *own* unmerged feature branch is fine and expected (rebase-before-merge).
+- On-chain / smart-contract changes still warrant Chuan's eyes given live-funds risk.
 
 ### PR reviews
 
@@ -324,6 +327,64 @@ rules:
 - Adding docstrings, type hints, or formatting fixes
 - Updating `docs/` to keep specs in sync with shipped code
 - Running `pytest`, `ruff`, `prettier --write`, `docker compose up --build` locally
+
+## Working with AI agents on this repo
+
+Most of this team works through AI agents. Three practices keep that fast *and*
+safe. Read this section before dispatching agents or feeding work to the issue
+pipeline.
+
+### The agentic issue pipeline (highest-leverage workflow)
+
+An agentic coding system is wired to this GitHub repo: it reads issues and writes
+code against them. **A well-specified issue is executable work.** The
+highest-value thing a human + hosted Claude can produce is often a judge-grade
+issue spec, not hand-written code — the system ships faster than any of us alone.
+Don't hand-implement what a good spec can dispatch.
+
+A judge-grade issue carries: a one-paragraph problem statement; explicit
+acceptance criteria as checkboxes; the exact files/interfaces to touch; test
+expectations; out-of-scope notes; and an owner. Vague issues produce vague code —
+spec quality is the throughput lever. This is Maestro/Worker discipline at scale:
+humans + hosted Claude plan and spec; the agentic system executes; humans review
+the resulting PR.
+
+### Git safety — every contributor and their agents
+
+Non-negotiable, and load-bearing because the judges read this repo like operators:
+
+- **Never force-push `main`.** Ever. (Force-pushing your own unmerged feature
+  branch is fine.)
+- Humans: branch + PR → merge to `main`. One logical change per PR; atomic commits.
+  The agentic system integrates on `main` directly (build-on-deploy) — that's the
+  accepted reality, not a violation; the rule that matters is no force-push + no
+  secrets, not "never touch `main`."
+- `main` moves continuously — rebase onto it right before merge and merge fast.
+- **Never commit secrets or `.env`** — `.env` is gitignored; keep it that way; no
+  private keys in the tree.
+- If an AI agent is uncertain, it **stops and asks** — it does not invent APIs,
+  fabricate data, or silently work around a blocker.
+- New to the stack: pair on one full branch → push → PR cycle before running
+  agents unsupervised. No judgement — the cost of a tangled shared history is
+  high; the cost of one paired cycle is low.
+
+### Parallel agent fan-out discipline
+
+Hard-won (2026-05-16); ignore at your peril:
+
+- **Probe with ONE canary agent before any fan-out.** If the canary is blocked at
+  a step, the whole fan-out will be too — you pay the fan-out tax for zero
+  parallelism.
+- **The canary must match the fan-out's execution mode.** A foreground canary
+  does *not* validate a background fan-out — they run under different sandboxes.
+- **Background subagents are filesystem-sandboxed here** (no writes; cannot exec
+  interpreters outside the project dir). Use **foreground** agents for
+  implementation fan-out, or a scoped `permissions.allow` in
+  `.claude/settings.json`.
+- Parallel agents get **isolated git worktrees**, base-SHA-pinned to a recorded
+  commit; do not commit to the base branch between dispatches.
+- Dismantle worktrees at end of session; retain their branches until the PRs
+  merge.
 
 ## Architectural primitives we want to get right
 
