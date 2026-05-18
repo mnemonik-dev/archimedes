@@ -110,10 +110,12 @@ services:
       ARC_VAULT_FACTORY_ADDRESS: ${ARC_VAULT_FACTORY_ADDRESS:-0xca873414070844aeb98b0bf1051f81969c79cc32}
       ARC_REASONING_TRACE_REGISTRY_ADDRESS: ${ARC_REASONING_TRACE_REGISTRY_ADDRESS:-0x42d8a23edb897cbee203e9fa197eb05ab5106ca6}
       ARC_ASSET_REGISTRY_ADDRESS: ${ARC_ASSET_REGISTRY_ADDRESS:-0x2d44550711137916df6175587d17886281a0fbc7}
+      ARCHIMEDES_STRATEGIES_DIR: /app/analytics-engine/strategies
     env_file:
       - .env
     volumes:
       - ./analytics-engine/strategies:/app/analytics-engine/strategies:ro
+      - ./analytics-engine/artifacts:/app/analytics-engine/artifacts:ro
       - ./contracts/abis:/contracts/abis:ro
     depends_on:
       postgres:
