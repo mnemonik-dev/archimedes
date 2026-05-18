@@ -43,6 +43,10 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
 
+            # Fix permissions for analytics-engine artifacts (may be owned by docker)
+            mkdir -p analytics-engine/artifacts
+            sudo chown -R ubuntu:ubuntu analytics-engine/artifacts/ 2>/dev/null || true
+
             # Rebuild and restart services (detached)
             docker compose build --no-cache
             docker compose up -d --force-recreate --remove-orphans
