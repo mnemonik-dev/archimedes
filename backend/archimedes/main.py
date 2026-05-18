@@ -89,6 +89,9 @@ async def _startup_populate_rigor_gate():
             "startup: rigor gate computed — %d/%d passing",
             result.passing, result.total,
         )
+
+        # Refresh provider's backtest cache so /api/strategies serves the new DSR/PBO values
+        provider.refresh()
     except Exception as exc:
         _logger.warning("startup: rigor gate population failed (non-fatal): %s", exc)
 
