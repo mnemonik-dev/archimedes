@@ -8,6 +8,16 @@
 [![Hackathon: Agora](https://img.shields.io/badge/hackathon-Agora%20Agents-violet.svg)](https://luma.com/7i50p2r9)
 [![Settled on: Arc](https://img.shields.io/badge/settled%20on-Arc-2A4DD1.svg)](https://www.arc.network/)
 
+## Contents
+
+- [What is Archimedes?](#what-is-archimedes) · [Why Archimedes?](#why-archimedes)
+- **Get it running:** [Setup](#setup) → [Run Archimedes locally](#run-archimedes-locally) (the one-command path) → [Understanding the RPC URL](#understanding-the-rpc-url)
+- **Reference:** [Quick Links](#quick-links) (all design docs) · [Repository Structure](#repository-structure) · [Tech Stack](#tech-stack)
+- **Working here:** [Development workflow](#development-workflow) · [Reporting traction](#reporting-traction-the-30-rubric-weight) · [Security notes](#security-notes) · [Platform-specific notes](#platform-specific-notes)
+- [Using the context-arc submodule](#using-the-context-arc-submodule) · [Roadmap](#roadmap) · [Team](#team) · [Contributing](#contributing) · [License](#license)
+
+> **TL;DR to run it locally:** install Docker + conda, `cp .env.example .env`, `docker compose up -d --build`, open <http://localhost>. Full walkthrough in [Run Archimedes locally](#run-archimedes-locally).
+
 ## What is Archimedes?
 
 Archimedes is an autonomous portfolio agent that turns peer-reviewed quant finance research
@@ -19,15 +29,16 @@ reputation is **verifiable history, not predicted performance**.
 Built for the [**Agora Agents Hackathon**](https://luma.com/7i50p2r9) — Canteen × Circle ×
 Arc, May 11–25, 2026.
 
-**Status (Day 4, 2026-05-14):** live testnet deploy at
-[`http://18.171.230.205/`](http://18.171.230.205/). 10 Solidity contracts deployed on Arc
-testnet (chain ID `5042002`). React/Vite UI with multi-wallet connect (MetaMask /
-Coinbase / generic). 3 paper-grounded strategies + buy-and-hold baseline seeded in the
-analytics engine. Backend FastAPI app with strategy provider + chain integration layer
-running behind nginx in the EC2 docker-compose stack. The remaining critical-path work
-is the autonomous orchestrator loop and end-to-end reasoning-trace anchoring — see
-[`docs/judging-rubric-assessment.md`](docs/judging-rubric-assessment.md) for the running
-self-score. See [`docs/`](docs/) for design + planning artifacts.
+**Status (2026-05-18):** live testnet deploy + 10 Solidity contracts on Arc testnet
+(chain ID `5042002`). React/Vite UI with multi-wallet connect. The autonomous agent
+loop, statistical regime detector, Kelly/risk-parity portfolio constructor, and the
+four-control selection-bias gate (DSR / PBO / walk-forward OOS / look-ahead audit) are
+all implemented and run as services in the docker-compose stack. The
+analytics-engine → strategy-passport pipeline is now wired end-to-end: real persisted
+backtests feed the selection-bias gate and the passport surfaces real backtest-backed
+metrics rather than placeholders, with backtest seeding run by the deploy pipeline.
+See [`docs/judging-rubric-assessment.md`](docs/judging-rubric-assessment.md)
+for the running self-score and [`docs/`](docs/) for design + planning artifacts.
 
 ## Why Archimedes?
 
@@ -309,12 +320,13 @@ This is the everyone-on-the-team path for spinning up Archimedes on your laptop 
 
 ### What you get
 
-`docker compose up` brings up five services:
+`docker compose up` brings up **six** services:
 
 | Service     | Port | URL                              | What it is |
 | ----------- | ---- | -------------------------------- | ---------- |
 | `nginx`     | 80   | <http://localhost>               | React UI build (multi-stage Dockerfile in [`nginx/`](nginx/)) + reverse-proxy to backend |
 | `backend`   | 8000 | <http://localhost:8000/docs>     | FastAPI app (Swagger UI auto-generated from `backend/archimedes/api/routes.py`) |
+| `agent`     | —    | (no HTTP)                        | Autonomous orchestrator loop — evaluates strategy signals, derives regime, triggers vault rebalances, publishes reasoning-trace hashes on-chain |
 | `oracle`    | —    | (no HTTP)                        | Oracle price feeder — pushes prices via Circle Wallets API to `PriceOracle.sol` |
 | `postgres`  | 5432 | `postgres://archimedes@localhost:5432/archimedes` | DB for strategies, backtests, reasoning traces |
 | `redis`     | 6379 | `redis://localhost:6379/0`       | Live regime state cache; agent loop scratch |
@@ -353,7 +365,8 @@ Watch healthchecks succeed:
 
 ```bash
 docker compose ps
-# All four services should report "running" and "(healthy)"
+# postgres / redis / backend report "running" + "(healthy)" (they have healthchecks);
+# agent / oracle / nginx report "running" (no HTTP healthcheck — that's expected).
 ```
 
 ### Step 3 — Verify it works
@@ -362,14 +375,15 @@ docker compose ps
 | -------------------- | ------------- |
 | <http://localhost>           | The live React UI (built from [`ui/`](ui/) — Layout + WalletConnect + Trade components) |
 | <http://localhost:8000>      | `{"name":"Archimedes","tagline":"Peer-reviewed AI portfolios, settled on Arc.","docs":"/docs"}` |
-| <http://localhost:8000/health> | `{"status":"ok","service":"archimedes-backend"}` |
+| <http://localhost:8000/health> | `{"status":"ok","service":"archimedes-backend","chain_connected":true}` |
 | <http://localhost:8000/docs> | Swagger UI auto-rendered from the API contract |
 
-The Swagger UI shows the live routes. As of Day 4, the strategy provider, chain
-integration (read paths), and oracle runner are real implementations; the autonomous
-orchestrator loop, regime detector, portfolio constructor, and backtest evaluator are
-the remaining interface implementations from
-[`docs/specs/component-interfaces-spec.md`](docs/specs/component-interfaces-spec.md).
+The Swagger UI shows the live routes. The strategy provider, chain integration, oracle
+runner, autonomous agent loop, statistical regime detector, Kelly/risk-parity portfolio
+constructor, and the selection-bias gate are all implemented and wired end-to-end:
+the analytics-engine → passport bridge and the rigor gate run on real persisted
+backtests. See [`docs/judging-rubric-assessment.md`](docs/judging-rubric-assessment.md)
+for the running self-score.
 
 ### Step 4 — Drive the strategy library from the Python side
 
@@ -600,8 +614,9 @@ matches Dan + Daniel + Önder's Linux/macOS workflow exactly.
 
 See [`CLAUDE.md`](CLAUDE.md) for full conventions. Headline points:
 
-- **Branch model:** `feat/<name>` for features; `<discord-handle>/<name>` for personal
-  staging. PRs to `develop`; promote to `main` once stable.
+- **Branch model:** `main` is the single live branch — build-on-deploy (every merge
+  triggers a CI deploy). Short-lived `<discord-handle>/<name>` branches → PR → `main`;
+  rebase late and merge fast (`main` moves continuously). No `develop` branch.
 - **One approving review** for non-contract changes; two for contract changes.
 - **Commit style:** imperative mood with optional scope tags (`[strategy]`, `[backend]`,
   `[contracts]`, etc.).
