@@ -325,6 +325,61 @@ rules:
 - Updating `docs/` to keep specs in sync with shipped code
 - Running `pytest`, `ruff`, `prettier --write`, `docker compose up --build` locally
 
+## Working with AI agents on this repo
+
+Most of this team works through AI agents. Three practices keep that fast *and*
+safe. Read this section before dispatching agents or feeding work to the issue
+pipeline.
+
+### The agentic issue pipeline (highest-leverage workflow)
+
+An agentic coding system is wired to this GitHub repo: it reads issues and writes
+code against them. **A well-specified issue is executable work.** The
+highest-value thing a human + hosted Claude can produce is often a judge-grade
+issue spec, not hand-written code — the system ships faster than any of us alone.
+Don't hand-implement what a good spec can dispatch.
+
+A judge-grade issue carries: a one-paragraph problem statement; explicit
+acceptance criteria as checkboxes; the exact files/interfaces to touch; test
+expectations; out-of-scope notes; and an owner. Vague issues produce vague code —
+spec quality is the throughput lever. This is Maestro/Worker discipline at scale:
+humans + hosted Claude plan and spec; the agentic system executes; humans review
+the resulting PR.
+
+### Git safety — every contributor and their agents
+
+Non-negotiable, and load-bearing because the judges read this repo like operators:
+
+- `main` and `develop` are protected. **Never force-push them.** Ever.
+- Every change is a branch + PR. **Never commit directly to `main`.** One logical
+  change per PR; atomic commits.
+- Sync before you start: branch from current `main` (or rebase onto it).
+- **Never commit secrets or `.env`** — `.env` is gitignored; keep it that way; no
+  private keys in the tree.
+- If an AI agent is uncertain, it **stops and asks** — it does not invent APIs,
+  fabricate data, or silently work around a blocker.
+- New to the stack: pair on one full branch → push → PR cycle before running
+  agents unsupervised. No judgement — the cost of a tangled shared history is
+  high; the cost of one paired cycle is low.
+
+### Parallel agent fan-out discipline
+
+Hard-won (2026-05-16); ignore at your peril:
+
+- **Probe with ONE canary agent before any fan-out.** If the canary is blocked at
+  a step, the whole fan-out will be too — you pay the fan-out tax for zero
+  parallelism.
+- **The canary must match the fan-out's execution mode.** A foreground canary
+  does *not* validate a background fan-out — they run under different sandboxes.
+- **Background subagents are filesystem-sandboxed here** (no writes; cannot exec
+  interpreters outside the project dir). Use **foreground** agents for
+  implementation fan-out, or a scoped `permissions.allow` in
+  `.claude/settings.json`.
+- Parallel agents get **isolated git worktrees**, base-SHA-pinned to a recorded
+  commit; do not commit to the base branch between dispatches.
+- Dismantle worktrees at end of session; retain their branches until the PRs
+  merge.
+
 ## Architectural primitives we want to get right
 
 These four architectural commitments are load-bearing for the pitch's defensibility.
