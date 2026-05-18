@@ -50,8 +50,8 @@ jobs:
             # Prune old images to save disk
             docker image prune -f
 
-            # Seed backtest results into DB (idempotent — skips if already run)
-            docker compose exec -T backend python -m archimedes.scripts.run_backtests || echo "⚠️ Backtest seeding skipped (non-fatal)"
+            # Seed backtest results into DB from pre-computed artifacts (idempotent)
+            docker compose exec -T backend python -m archimedes.scripts.seed_backtests_from_artifacts || echo "⚠️ Backtest seeding skipped (non-fatal)"
 
             # Verify services are healthy
             sleep 10
