@@ -31,6 +31,49 @@ local-first execution; fine-tuning, LoRA/QLoRA, pmetal; offline data sovereignty
 (Kiwix/PMTiles); the electricity-budget framing. **Inference is the GLM API key**
 (z.ai Anthropic-compatible). Archimedes is a hosted, single-user web product.
 
+## Additional architectural primitives (beyond the memory pillar)
+
+Linus's orchestration layer (`src/linus/`, Phase 2a largely landed) carries
+primitives Archimedes should lift as **patterns** (not local-first machinery):
+
+| Linus primitive (status) | Archimedes port | Value |
+| --- | --- | --- |
+| **RAG gateway** — fuses SPECTER2 + TF-IDF + KG into one context object; cached, query-logged (Phase 2, thin adapter) | The research-grounding engine: hybrid retrieval over the q-fin corpus is what makes a strategy *grounded*, not merely prompted | ★ highest |
+| **Tool registry, MCP-shape** — `@tool` decorator, domain-grouped (`linus.tools`, landed) | `archimedes.research.* / strategy.* / rigor.* / vault.*` as inspectable MCP tools — composable and judge-legible | ★ high |
+| **Anthropic-compatible server** + tool-call routing + model-preference fallback (`linus.server`; `/v1/messages` = DEC-0056, outstanding N3) | Direct reference for Archimedes's GLM gateway (already Anthropic-compat); fallback = resilience if GLM drops | ★ high |
+| **Agent spawner** — N parallel Workers, scoped prompt + scoped tool allowlist + shared SQLite results, merged to parent (Phase 3, deferred) | **The strategy-fusion engine**: one Worker per paper/method → merge into a novel fused strategy. This *is* the novelty differentiator | ★ high |
+| **Sandbox** — allowlist/blocklist per tool call; confirmation-required ops returned for user approval; every call audited (landed) | Safe autonomous USDC moves; "confirm before rebalance" = the human-in-the-loop trust gate | ★ high |
+| **Audit log** — append-only JSONL of every model/tool/policy decision; basis for "autonomy graduation" (landed) | Off-chain provenance richer than trace hashes; *"the agent earns autonomy as its audited record grows"* = a strong pitch arc | ★ high |
+| **Maestro-side output synthesis** (DEC-0023) — Worker outputs → balanced bullets + prose with citation drill-down | How a generated strategy is presented: synthesized rationale that drills down to source papers = the passport | medium-high |
+| **Trust-tier tagging** on every context item | Each strategy input (peer-reviewed vs preprint vs scraped) tagged → feeds the rigor scorecard | medium-high |
+| Router metadata (`memory_mode`/`cot_budget`), Skills (`SKILL.md`) | Cost/quality discipline; templated strategy archetypes | defer |
+
+## Linus-MVP prioritization for Archimedes (reverse signal)
+
+Ranked by Archimedes value, to steer what the Linus MVP should include:
+
+- **Tier 1 — make these clean & copyable in the Linus MVP:**
+  1. **RAG gateway interface.** Thin in Linus, but the #1 Archimedes primitive —
+     the entire "research-grounded" claim rests on hybrid retrieval. A clean
+     gateway contract is the single highest-leverage thing to nail.
+  2. **Tool registry (MCP-shape).** Already landed (`linus.tools`); the
+     architectural backbone Archimedes copies wholesale.
+  3. **Anthropic `/v1/messages` + model fallback (N3, outstanding).**
+     De-risks Archimedes's GLM gateway directly — worth finishing in the MVP.
+- **Tier 2 — pull forward if the Archimedes pitch needs it:**
+  4. **Agent spawner.** Deferred to Phase 3 in Linus, but *Phase 1* for
+     Archimedes — it is the fusion/novelty engine.
+  5. **Sandbox + audit log.** Landed; lift directly for autonomous-USDC safety
+     and the provenance / "autonomy graduation" narrative.
+- **Tier 3 — defer for the hackathon:** Skills, router intelligence,
+  training/fine-tuning, data sovereignty.
+
+**The two divergences that matter for Linus-MVP scoping:** (1) the **RAG
+gateway** is "thin / Phase 2" in Linus but Tier-1 for Archimedes — make its
+interface a first-class, copyable contract; (2) the **agent spawner** is
+"Phase 3 / deferred" in Linus but the engine of Archimedes's novelty pitch — a
+minimal version in the MVP pays outsized Archimedes dividends.
+
 ## Personas
 
 - **Primary — the single user / allocator.** Has idle USDC, wants
