@@ -32,7 +32,8 @@ QFIN_CATEGORIES = [
 
 API_BASE = "https://export.arxiv.org/api/query"
 BATCH_SIZE = 200  # arXiv max per request
-POLITE_DELAY = 1  # seconds between requests (1s for bulk backfill)
+POLITE_DELAY = 3  # seconds between requests
+BACKOFF_BASE = 30  # seconds, doubled on each 429
 
 
 def load_existing_ids(path: Path) -> set[str]:
@@ -161,6 +162,7 @@ def main():
     start = 0
     total_fetched = 0
     new_count = 0
+    backoff = BACKOFF_BASE
 
     while True:
         remaining = args.max - len(all_papers)
@@ -173,10 +175,12 @@ def main():
 
         try:
             papers, total_available = fetch_batch(start, batch_size)
+            backoff = BACKOFF_BASE  # reset on success
         except Exception as exc:
             logger.error("arXiv API error: %s", exc)
-            logger.info("Waiting 30s before retry...")
-            time.sleep(30)
+            logger.info("Waiting %ds before retry...", backoff)
+            time.sleep(backoff)
+            backoff = min(backoff * 2, 300)  # cap at 5 min
             continue
 
         if not papers:

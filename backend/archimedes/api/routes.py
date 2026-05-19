@@ -7,6 +7,7 @@ Daniel codes the frontend fetch calls against these paths.
 from __future__ import annotations
 
 import asyncio
+import json
 
 from fastapi import APIRouter, Query
 
@@ -1409,43 +1410,103 @@ async def list_papers(
     category: str | None = None,
     search: str | None = None,
 ):
-    """Paginated corpus catalog from the mounted manifest. Metadata only — no PDFs."""
-    from archimedes.services.strategy_fusion import load_corpus
+    """Paginated corpus catalog. DB-backed with file fallback."""
+    from archimedes.models.corpus_store import PaperRecord
 
-    corpus = load_corpus()
-    papers = [
-        {
-            "arxiv_id": p.arxiv_id,
-            "title": p.title,
-            "primary_category": p.primary_category,
-            "categories": list(p.categories),
-            "published": p.published,
-            "abstract": p.abstract[:200] + "..." if len(p.abstract) > 200 else p.abstract,
-        }
-        for p in corpus
-    ]
-    if category:
-        category_lower = category.lower()
-        papers = [p for p in papers if category_lower in " ".join(p["categories"]).lower()]
-    if search:
-        search_lower = search.lower()
-        papers = [p for p in papers if search_lower in p["title"].lower() or search_lower in p["abstract"].lower()]
-    total = len(papers)
-    start = (page - 1) * page_size
-    page_papers = papers[start:start + page_size]
-    return {"total": total, "page": page, "page_size": page_size, "papers": page_papers}
+    with get_session() as session:
+        query = session.query(PaperRecord)
+
+        if category:
+            query = query.filter(PaperRecord.categories.contains(category))
+        if search:
+            pattern = f"%{search}%"
+            query = query.filter(
+                (PaperRecord.title.ilike(pattern)) | (PaperRecord.abstract.ilike(pattern))
+            )
+
+        total = query.count()
+        rows = (
+            query.order_by(PaperRecord.published.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+
+        papers = [
+            {
+                "arxiv_id": r.arxiv_id,
+                "title": r.title,
+                "primary_category": r.primary_category,
+                "categories": json.loads(r.categories) if r.categories else [],
+                "published": r.published,
+                "abstract": r.abstract[:200] + "..." if len(r.abstract) > 200 else r.abstract,
+            }
+            for r in rows
+        ]
+
+    # If DB is empty, fall back to file-based corpus
+    if total == 0 and not category and not search:
+        from archimedes.services.strategy_fusion import load_corpus
+        corpus = load_corpus()
+        all_papers = [
+            {
+                "arxiv_id": p.arxiv_id,
+                "title": p.title,
+                "primary_category": p.primary_category,
+                "categories": list(p.categories),
+                "published": p.published,
+                "abstract": p.abstract[:200] + "..." if len(p.abstract) > 200 else p.abstract,
+            }
+            for p in corpus
+        ]
+        total = len(all_papers)
+        start = (page - 1) * page_size
+        papers = all_papers[start:start + page_size]
+
+    return {"total": total, "page": page, "page_size": page_size, "papers": papers}
 
 
 @papers_router.get("/{arxiv_id}")
 async def get_paper(arxiv_id: str):
     """Single paper detail + citing strategies (bidirectional provenance)."""
-    from archimedes.services.strategy_fusion import load_corpus
+    from archimedes.models.corpus_store import PaperRecord
     from archimedes.models.strategy_store import strategies_by_paper
+    from fastapi import HTTPException
 
+    # Try DB first
+    with get_session() as session:
+        record = session.query(PaperRecord).filter(PaperRecord.arxiv_id == arxiv_id).first()
+
+    if record is not None:
+        citing_strategies = []
+        try:
+            with get_session() as session:
+                records = strategies_by_paper(session, arxiv_id)
+                citing_strategies = [
+                    {"id": r.id, "name": r.strategy_name, "status": r.status, "method": r.generation_method}
+                    for r in records
+                ]
+        except Exception:
+            pass
+
+        return {
+            "arxiv_id": record.arxiv_id,
+            "title": record.title,
+            "authors": json.loads(record.authors) if record.authors else [],
+            "primary_category": record.primary_category,
+            "categories": json.loads(record.categories) if record.categories else [],
+            "published": record.published,
+            "abstract": record.abstract,
+            "pdf_url": record.pdf_url,
+            "source": record.source,
+            "citing_strategies": citing_strategies,
+        }
+
+    # File fallback
+    from archimedes.services.strategy_fusion import load_corpus
     corpus = load_corpus()
     paper = next((p for p in corpus if p.arxiv_id == arxiv_id), None)
     if paper is None:
-        from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Paper not found")
 
     citing_strategies = []
@@ -1477,6 +1538,46 @@ async def get_paper(arxiv_id: str):
 async def get_corpus_overview():
     """High-level library breakdown: category mix, year distribution, totals."""
     from collections import Counter
+    from archimedes.models.corpus_store import PaperRecord
+    from sqlalchemy import func
+
+    # DB-backed overview
+    with get_session() as session:
+        total = session.query(func.count(PaperRecord.arxiv_id)).scalar() or 0
+
+        if total > 0:
+            # Category distribution via primary_category
+            cat_rows = (
+                session.query(PaperRecord.primary_category, func.count(PaperRecord.arxiv_id))
+                .group_by(PaperRecord.primary_category)
+                .order_by(func.count(PaperRecord.arxiv_id).desc())
+                .all()
+            )
+            category_counts = Counter()
+            for cat, cnt in cat_rows:
+                category_counts[cat] = cnt
+
+            # Year distribution
+            year_rows = (
+                session.query(
+                    func.substr(PaperRecord.published, 1, 4).label("year"),
+                    func.count(PaperRecord.arxiv_id),
+                )
+                .filter(PaperRecord.published != "")
+                .group_by("year")
+                .order_by("year")
+                .all()
+            )
+            year_dist = [(yr, cnt) for yr, cnt in year_rows if yr and yr.isdigit()]
+
+            return {
+                "total_papers": total,
+                "source": "database",
+                "categories": [{"name": cat, "count": cnt} for cat, cnt in category_counts.most_common(20)],
+                "year_distribution": [{"year": yr, "count": cnt} for yr, cnt in year_dist],
+            }
+
+    # File fallback if DB is empty
     from archimedes.services.strategy_fusion import load_corpus
 
     corpus = load_corpus()
@@ -1496,6 +1597,7 @@ async def get_corpus_overview():
 
     return {
         "total_papers": len(corpus),
+        "source": "file",
         "categories": [{"name": cat, "count": cnt} for cat, cnt in top_categories],
         "year_distribution": [{"year": yr, "count": cnt} for yr, cnt in year_dist],
     }
