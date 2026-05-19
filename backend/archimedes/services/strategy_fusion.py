@@ -201,12 +201,14 @@ class FusionBrief:
     does not hard-filter papers. `strategic_direction` biases ranking and is
     passed verbatim to the prompt. `max_papers` is clamped to
     [MIN_PAPERS, FUSION_MAX_PAPERS]; the >=2 floor is non-negotiable.
+    `market_context` carries live regime/market data (3rd input).
     """
 
     asset_classes: list[str] = field(default_factory=list)
     risk_appetite: RiskProfile | str = RiskProfile.MODERATE
     strategic_direction: str = ""
     max_papers: int = 4
+    market_context: dict[str, Any] = field(default_factory=dict)
 
     @property
     def risk_profile(self) -> RiskProfile:
@@ -438,7 +440,7 @@ literature>",
 
 def _build_user_prompt(brief: FusionBrief, candidates: list[CorpusPaper]) -> str:
     rp = brief.risk_profile
-    payload = {
+    payload: dict[str, Any] = {
         "user_steer": {
             "asset_classes": brief.asset_classes,
             "risk_appetite": rp.value,
@@ -460,6 +462,8 @@ def _build_user_prompt(brief: FusionBrief, candidates: list[CorpusPaper]) -> str
             for p in candidates
         ],
     }
+    if brief.market_context:
+        payload["market_context"] = brief.market_context
     return json.dumps(payload, indent=2)
 
 

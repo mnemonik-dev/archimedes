@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import (
+    Boolean,
     Column,
     String,
     Text,
@@ -50,6 +51,7 @@ class StrategyRecord(Base):
     # Status lifecycle
     status = Column(String(16), nullable=False, default="candidate")  # candidate|live|retired
     rigor_verdict = Column(Text, nullable=True)  # JSON: DSR/PBO/walk-forward results
+    is_example = Column(Boolean, nullable=False, default=False)  # hand-curated static strategies
 
     # Lineage
     parent_id = Column(String(64), nullable=True)
@@ -81,6 +83,7 @@ class StrategyRecord(Base):
             "risk_profile": self.risk_profile,
             "status": self.status,
             "rigor_verdict": json.loads(self.rigor_verdict) if self.rigor_verdict else None,
+            "is_example": self.is_example,
             "parent_id": self.parent_id,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
@@ -123,6 +126,7 @@ def upsert_strategy(
     rigor_verdict: dict | None = None,
     parent_id: str | None = None,
     provenance_hash: str | None = None,
+    is_example: bool = False,
 ) -> StrategyRecord:
     """Idempotent upsert: same content → same row, no duplicates."""
     content_hash = _compute_content_hash(
@@ -153,6 +157,7 @@ def upsert_strategy(
         rigor_verdict=json.dumps(rigor_verdict) if rigor_verdict else None,
         parent_id=parent_id,
         provenance_hash=provenance_hash,
+        is_example=is_example,
     )
     if rigor_verdict and rigor_verdict.get("passing"):
         record.status = "live"

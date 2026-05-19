@@ -446,7 +446,7 @@ async def get_strategy(strategy_id: str):
     return _to_strategy_response(strategy)
 
 
-@strategies_router.post("/generate")
+@strategies_router.post("/generate", status_code=202)
 async def generate_strategy(
     asset_classes: str = "",
     risk_appetite: str = "moderate",
@@ -454,16 +454,17 @@ async def generate_strategy(
     max_papers: int = 4,
     mode: str = "fusion",
 ):
-    """Generate a research-grounded strategy via fusion (primary) or architect (fast).
+    """Queue a strategy generation job. Returns 202 + job_id immediately.
 
     Fusion: multi-paper novelty-seeking synthesis (requires corpus + LLM backend).
     Architect: fast single-paper path (?mode=fast).
     """
     from fastapi import HTTPException
     from archimedes.models.portfolio import RiskProfile
+    from archimedes.services.job_queue import JobStore
 
     if mode == "fast":
-        # Architect single-paper sub-mode
+        # Architect single-paper sub-mode — still synchronous for fast path
         try:
             proposal = await asyncio.to_thread(
                 _architect.propose,
@@ -490,7 +491,7 @@ async def generate_strategy(
             },
         }
 
-    # Primary path: fusion
+    # Primary path: fusion — validate then enqueue
     if not fusion_enabled():
         raise HTTPException(
             status_code=503,
@@ -509,61 +510,144 @@ async def generate_strategy(
     except ValueError:
         rp = RiskProfile.MODERATE
 
-    brief = FusionBrief(
-        asset_classes=[a.strip() for a in asset_classes.split(",") if a.strip()],
-        risk_appetite=rp,
-        strategic_direction=strategic_direction,
-        max_papers=max_papers,
-    )
-
-    fusion = default_fusion()
+    # Read live regime data (3rd input)
+    market_context: dict = {}
     try:
-        result = await asyncio.to_thread(fusion.propose, brief)
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"LLM backend unavailable: {exc}") from exc
+        from archimedes.services.redis_state import AgentStateStore
+        state = AgentStateStore()
+        try:
+            regime_data = await state.load_regime()
+            if regime_data:
+                market_context = {
+                    "regime": regime_data.get("regime", "unknown"),
+                    "confidence": regime_data.get("confidence", 0.0),
+                    "source": regime_data.get("source", ""),
+                    "strategy_count": regime_data.get("strategy_count", 0),
+                    "signals": regime_data.get("signals", {}),
+                }
+        finally:
+            await state.close()
+    except Exception:
+        pass  # Non-blocking — degrade without fabricating
 
-    if not result.is_actionable:
-        return {
+    store = JobStore()
+    try:
+        job_id = await store.enqueue(
+            job_type="fusion",
+            payload={
+                "asset_classes": [a.strip() for a in asset_classes.split(",") if a.strip()],
+                "risk_appetite": rp.value,
+                "strategic_direction": strategic_direction,
+                "max_papers": max_papers,
+                "market_context": market_context,
+            },
+        )
+    finally:
+        await store.close()
+
+    # Spawn background worker
+    asyncio.create_task(_run_fusion_job(job_id))
+
+    return {"status": "queued", "job_id": job_id}
+
+
+@strategies_router.get("/generate/{job_id}")
+async def get_generation_job(job_id: str):
+    """Poll a strategy generation job. Returns status + result when done."""
+    from fastapi import HTTPException
+    from archimedes.services.job_queue import JobStore
+
+    store = JobStore()
+    try:
+        job = await store.get(job_id)
+    finally:
+        await store.close()
+
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
+
+
+async def _run_fusion_job(job_id: str) -> None:
+    """Background worker: runs fusion and updates job status."""
+    from archimedes.models.portfolio import RiskProfile
+    from archimedes.services.job_queue import JobStore
+
+    store = JobStore()
+    try:
+        await store.update_status(job_id, "running")
+
+        job = await store.get(job_id)
+        if not job or not job.get("payload"):
+            await store.update_status(job_id, "failed", error="Job payload missing")
+            return
+
+        payload = job["payload"]
+        rp = RiskProfile(payload.get("risk_appetite", "moderate"))
+
+        brief = FusionBrief(
+            asset_classes=payload.get("asset_classes", []),
+            risk_appetite=rp,
+            strategic_direction=payload.get("strategic_direction", ""),
+            max_papers=payload.get("max_papers", 4),
+            market_context=payload.get("market_context", {}),
+        )
+
+        fusion = default_fusion()
+        result = await asyncio.to_thread(fusion.propose, brief)
+
+        if not result.is_actionable:
+            await store.update_status(job_id, "done", result={
+                "mode": "fusion",
+                "status": result.status,
+                "message": result.thesis,
+            })
+            return
+
+        # Persist to StrategyStore
+        strategy_id = None
+        try:
+            with get_session() as session:
+                source_papers = [
+                    {"arxiv_id": aid, "sha256": ""}
+                    for aid in result.source_arxiv_ids
+                ]
+                record = upsert_strategy(
+                    session,
+                    generation_method="fusion",
+                    strategy_name=result.strategy_name,
+                    thesis=result.thesis,
+                    source_papers=source_papers,
+                    asset_universe=brief.asset_classes,
+                    risk_profile=rp.value,
+                    provenance_hash=result.model,
+                )
+                session.commit()
+                strategy_id = record.id
+        except Exception:
+            pass
+
+        await store.update_status(job_id, "done", result={
             "mode": "fusion",
             "status": result.status,
-            "message": result.thesis,
-        }
-
-    # Persist to StrategyStore
-    try:
-        with get_session() as session:
-            source_papers = [
-                {"arxiv_id": aid, "sha256": ""}
-                for aid in result.source_arxiv_ids
-            ]
-            record = upsert_strategy(
-                session,
-                generation_method="fusion",
-                strategy_name=result.strategy_name,
-                thesis=result.thesis,
-                source_papers=source_papers,
-                asset_universe=brief.asset_classes,
-                risk_profile=rp.value,
-                provenance_hash=result.model,
-            )
-            session.commit()
-            strategy_id = record.id
-    except Exception:
-        strategy_id = None
-
-    return {
-        "mode": "fusion",
-        "status": result.status,
-        "strategy_name": result.strategy_name,
-        "thesis": result.thesis,
-        "source_arxiv_ids": result.source_arxiv_ids,
-        "fusion_reasoning": result.fusion_reasoning,
-        "novelty_rationale": result.novelty_rationale,
-        "risk_notes": result.risk_notes,
-        "model": result.model,
-        "requested_model": result.requested_model,
-        "strategy_id": strategy_id,
-    }
+            "strategy_name": result.strategy_name,
+            "thesis": result.thesis,
+            "source_arxiv_ids": result.source_arxiv_ids,
+            "fusion_reasoning": result.fusion_reasoning,
+            "novelty_rationale": result.novelty_rationale,
+            "risk_notes": result.risk_notes,
+            "model": result.model,
+            "requested_model": result.requested_model,
+            "strategy_id": strategy_id,
+            "market_context_used": brief.market_context,
+        })
+    except Exception as exc:
+        try:
+            await store.update_status(job_id, "failed", error=str(exc))
+        except Exception:
+            pass
+    finally:
+        await store.close()
 
 
 @strategies_router.post("/construct", response_model=StrategyConstructionResponse)
