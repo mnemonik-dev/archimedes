@@ -1,8 +1,13 @@
 # Demo Script & Pitch Deck Outline
 
 > **Audience:** Archimedes hackathon team (deck owner + demo runner + Q&A primaries)
-> **Status:** Day-4 revision (2026-05-14) — tighten in Week 2 as the orchestrator loop
-> and reasoning-trace anchoring come online.
+> **Status:** Day-4 revision (2026-05-14); **2026-05-19 realignment pending.** The flow
+> below still narrates the retired "connect wallet → pick a risk profile" path. The
+> submission demo MUST follow the locked spine in [`user-stories.md`](user-stories.md):
+> describe intent → generate → rigor-gate → execute → monitor → explore, read-only until
+> Deposit. Steps 2–4 below are superseded; the **rigor gate is the central pitch** — the
+> curation protocol that makes the strategy library trustworthy. Full rewrite tracked as
+> a docs-realignment follow-up.
 > **Pitch length assumption:** 3-minute pitch + ~2 minute live demo + Q&A. Adjust if
 > Canteen tells us otherwise.
 > **Shipped reality the demo can lean on (as of Day 4):**
