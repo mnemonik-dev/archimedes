@@ -99,17 +99,16 @@ async def _startup_populate_rigor_gate():
 
 @app.on_event("startup")
 async def _startup_seed_corpus():
-    """Seed papers table from manifest.jsonl if DB is empty."""
+    """Seed papers table from manifest.jsonl (idempotent — adds new papers only)."""
     import logging
     _logger = logging.getLogger("archimedes.startup")
     try:
-        from archimedes.services.corpus_service import seed_from_manifest, get_paper_count
-        count = get_paper_count()
-        if count > 0:
-            _logger.info("startup: corpus already has %d papers, skipping seed", count)
-            return
+        from archimedes.services.corpus_service import seed_from_manifest
         inserted = seed_from_manifest()
-        _logger.info("startup: seeded %d papers from manifest", inserted)
+        if inserted > 0:
+            _logger.info("startup: seeded %d new papers from manifest", inserted)
+        else:
+            _logger.info("startup: corpus seed — no new papers to add")
     except Exception as exc:
         _logger.warning("startup: corpus seed failed (non-fatal): %s", exc)
 
