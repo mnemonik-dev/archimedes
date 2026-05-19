@@ -73,7 +73,11 @@ def compute_dsr(
 
     SR_hat = float(arr.mean()) / sigma  # per-bar, un-annualized
     gamma_3 = float(sp_skew(arr))
-    gamma_4 = float(sp_kurtosis(arr, fisher=True))  # excess kurtosis
+    # Bailey-LdP (2014) eq. 8 uses raw (Pearson) kurtosis (γ₄ = 3 for normal),
+    # NOT Fisher excess kurtosis. The coefficient (γ₄ − 1)/4 in _dsr_from_stats
+    # is derived for the raw-kurtosis convention; using fisher=True here would
+    # shift the denominator by a constant (3/4)·ŜR² and bias every DSR.
+    gamma_4 = float(sp_kurtosis(arr, fisher=False))  # raw (Pearson) kurtosis
 
     dsr, p_val = _dsr_from_stats(SR_hat, T, gamma_3, gamma_4, num_trials)
     return dsr, p_val
@@ -92,7 +96,9 @@ def _dsr_from_stats(
         SR_hat: Per-bar (un-annualized) Sharpe ratio.
         T: Number of bars in the return series.
         gamma_3: Skewness of the per-bar return series.
-        gamma_4: Excess kurtosis (Fisher) of the per-bar return series.
+        gamma_4: Raw (Pearson) kurtosis of the per-bar return series — γ₄ = 3
+            for normal returns. This matches Bailey-LdP (2014) eq. 8 directly;
+            do NOT pass Fisher excess kurtosis here (it would bias the denom).
         N: Number of trials in the selection set.
 
     Returns:

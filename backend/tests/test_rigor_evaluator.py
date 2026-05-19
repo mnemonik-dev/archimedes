@@ -5,11 +5,15 @@ Pinned to the three sanity-check cases from the spec:
   docs/specs/selection-bias-corrections-spec.md
   § "Numerical sanity-check examples (for unit test seed)"
 
-| Case | SR_ann | T    | skew  | ex_kurt | N    | SR_zero   | z      | dsr_p_value |
-|------|--------|------|-------|---------|------|-----------|--------|-------------|
-| A    | 1.8    | 2520 | -0.4  | 3.2     | 10   | 0.0314    | 4.013  | ~1.0000     |
-| B    | 0.9    | 1260 | -0.2  | 2.0     | 20   | 0.0536    | 0.110  | ~0.5439     |
-| C    | 0.3    |  504 |  0.0  | 0.0     | 1000 | 0.1451    | -2.831 | ~0.0023     |
+Note: ``gamma_4`` below is **raw (Pearson) kurtosis** (normal = 3.0), matching
+Bailey-LdP (2014) eq. 8 directly. Previous versions of this table used Fisher
+excess kurtosis with the raw-kurtosis coefficient, biasing the DSR denominator.
+
+| Case | SR_ann | T    | skew  | raw_kurt | N    | SR_zero   | z      | dsr_p_value |
+|------|--------|------|-------|----------|------|-----------|--------|-------------|
+| A    | 1.8    | 2520 | -0.4  | 6.2      | 10   | 0.0314    | 3.994  | ~1.0000     |
+| B    | 0.9    | 1260 | -0.2  | 5.0      | 20   | 0.0536    | 0.110  | ~0.5439     |
+| C    | 0.3    |  504 |  0.0  | 3.0      | 1000 | 0.1451    | -2.831 | ~0.0023     |
 
 No network, no database, no on-chain dependencies.
 """
@@ -36,22 +40,22 @@ _ANNUALIZATION = 252
 
 
 @pytest.mark.parametrize(
-    "SR_ann, T, skew, ex_kurt, N, expected_p, p_tol",
+    "SR_ann, T, skew, raw_kurt, N, expected_p, p_tol",
     [
         # Case A — strong: long, smooth backtest, small library → DSR clears gate
-        (1.8, 2520, -0.4, 3.2, 10, 1.0000, 0.001),
+        (1.8, 2520, -0.4, 6.2, 10, 1.0000, 0.001),
         # Case B — borderline: credibly positive but below the 0.95 bar
-        (0.9, 1260, -0.2, 2.0, 20, 0.5439, 0.005),
+        (0.9, 1260, -0.2, 5.0, 20, 0.5439, 0.005),
         # Case C — failure: weak Sharpe from large selection → gate must reject
-        (0.3, 504, 0.0, 0.0, 1000, 0.0023, 0.001),
+        (0.3, 504, 0.0, 3.0, 1000, 0.0023, 0.001),
     ],
 )
 def test_dsr_formula_spec_cases(
-    SR_ann, T, skew, ex_kurt, N, expected_p, p_tol
+    SR_ann, T, skew, raw_kurt, N, expected_p, p_tol
 ):
     """_dsr_from_stats reproduces the spec's reference values within tolerance."""
     SR_hat = SR_ann / math.sqrt(_ANNUALIZATION)
-    dsr, p_val = _dsr_from_stats(SR_hat, T, skew, ex_kurt, N)
+    dsr, p_val = _dsr_from_stats(SR_hat, T, skew, raw_kurt, N)
 
     assert dsr is not None, "DSR should not be None for valid inputs"
     assert p_val is not None, "p_value should not be None for valid inputs"
@@ -63,7 +67,7 @@ def test_dsr_formula_spec_cases(
 def test_dsr_case_a_clears_rigor_gate():
     """Case A p_value should exceed the 0.95 gate threshold."""
     SR_hat = 1.8 / math.sqrt(_ANNUALIZATION)
-    _, p_val = _dsr_from_stats(SR_hat, 2520, -0.4, 3.2, 10)
+    _, p_val = _dsr_from_stats(SR_hat, 2520, -0.4, 6.2, 10)
     assert p_val is not None
     assert p_val >= 0.95, f"Case A should clear the 0.95 gate, got {p_val:.4f}"
 
@@ -71,7 +75,7 @@ def test_dsr_case_a_clears_rigor_gate():
 def test_dsr_case_b_below_rigor_gate():
     """Case B p_value should be below the 0.95 gate threshold."""
     SR_hat = 0.9 / math.sqrt(_ANNUALIZATION)
-    _, p_val = _dsr_from_stats(SR_hat, 1260, -0.2, 2.0, 20)
+    _, p_val = _dsr_from_stats(SR_hat, 1260, -0.2, 5.0, 20)
     assert p_val is not None
     assert p_val < 0.95, f"Case B should NOT clear the 0.95 gate, got {p_val:.4f}"
 
@@ -79,7 +83,7 @@ def test_dsr_case_b_below_rigor_gate():
 def test_dsr_case_c_fails_gate():
     """Case C (thousand-strategy selection, weak Sharpe) should fail hard."""
     SR_hat = 0.3 / math.sqrt(_ANNUALIZATION)
-    _, p_val = _dsr_from_stats(SR_hat, 504, 0.0, 0.0, 1000)
+    _, p_val = _dsr_from_stats(SR_hat, 504, 0.0, 3.0, 1000)
     assert p_val is not None
     assert p_val < 0.05, f"Case C should fail the gate convincingly, got {p_val:.6f}"
 
@@ -88,7 +92,7 @@ def test_dsr_no_correction_when_n_equals_1():
     """With N=1, E_max_N = 0 and DSR equals the raw annualized Sharpe."""
     SR_hat = 1.0 / math.sqrt(_ANNUALIZATION)
     T = 252
-    dsr, _ = _dsr_from_stats(SR_hat, T, 0.0, 0.0, 1)
+    dsr, _ = _dsr_from_stats(SR_hat, T, 0.0, 3.0, 1)
     assert dsr is not None
     # SR_zero = 0 when N=1, so deflated SR = SR_hat * sqrt(252) ≈ 1.0
     assert abs(dsr - 1.0) < 0.01, f"N=1 DSR should approximate raw annualized SR, got {dsr:.4f}"
@@ -109,8 +113,8 @@ def test_dsr_higher_n_lowers_p_value():
     """More trials in selection → more conservative (lower p_value)."""
     SR_hat = 0.8 / math.sqrt(_ANNUALIZATION)
     T = 1000
-    _, p_low_n = _dsr_from_stats(SR_hat, T, 0.0, 0.0, 5)
-    _, p_high_n = _dsr_from_stats(SR_hat, T, 0.0, 0.0, 500)
+    _, p_low_n = _dsr_from_stats(SR_hat, T, 0.0, 3.0, 5)
+    _, p_high_n = _dsr_from_stats(SR_hat, T, 0.0, 3.0, 500)
     assert p_low_n is not None and p_high_n is not None
     assert p_low_n > p_high_n, "Higher N must reduce the DSR p-value"
 
