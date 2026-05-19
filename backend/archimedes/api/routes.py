@@ -93,10 +93,13 @@ _architect = default_architect()
 def _to_strategy_response(s: Strategy) -> StrategyResponse:
     """Map Strategy + persisted BacktestResult to API schema.
 
-    Source of truth for backtest metrics is DB table `backtest_results`.
-    If no row exists yet for a strategy, metrics surface as None.
+
+    Real backtest results from backtest_fixtures.json take priority over DB
+    BacktestResult. DB row is used as fallback when no fixture data is present.
+    is_backtest_placeholder=False when real fixture data is available.
     """
     bt = _strategy_provider.get_backtest_result(s.id)
+    has_real = s.real_sharpe is not None
     return StrategyResponse(
         id=s.id,
         paper_arxiv_id=s.paper_arxiv_id,
@@ -120,19 +123,20 @@ def _to_strategy_response(s: Strategy) -> StrategyResponse:
         on_chain_registration_tx=s.on_chain_registration_tx,
         # Paper claims (for delta display)
         paper_claimed_sharpe=bt.paper_claimed_sharpe if bt else s.paper_claimed_sharpe,
-        # Backtest (real DB row or None fallback)
-        sharpe_ratio=bt.sharpe_ratio if bt else None,
-        sortino_ratio=bt.sortino_ratio if bt else None,
-        cagr=bt.cagr if bt else None,
-        max_drawdown=bt.max_drawdown if bt else None,
-        win_rate=bt.win_rate if bt else None,
-        total_trades=bt.total_trades if bt else None,
-        calmar_ratio=bt.calmar_ratio if bt else None,
-        correlation_to_spy=bt.correlation_to_spy if bt else None,
-        deflated_sharpe_ratio=bt.deflated_sharpe_ratio if bt else None,
-        pbo_score=bt.pbo_score if bt else None,
-        out_of_sample_sharpe=bt.out_of_sample_sharpe if bt else None,
-        is_backtest_placeholder=False,
+        # Backtest — real fixture values first, DB fallback, then stubs
+        sharpe_ratio=s.real_sharpe if has_real else (bt.sharpe_ratio if bt else s.stub_sharpe),
+        sortino_ratio=s.real_sortino if has_real else (bt.sortino_ratio if bt else None),
+        cagr=s.real_cagr if has_real else (bt.cagr if bt else s.stub_cagr),
+        max_drawdown=s.real_max_dd if has_real else (bt.max_drawdown if bt else s.stub_max_dd),
+        win_rate=s.real_win_rate if has_real else (bt.win_rate if bt else s.stub_win_rate),
+        calmar_ratio=s.real_calmar if has_real else (bt.calmar_ratio if bt else s.stub_calmar),
+        correlation_to_spy=s.real_corr_spy if has_real else (bt.correlation_to_spy if bt else s.stub_corr_spy),
+        total_trades=s.real_total_trades if has_real else (bt.total_trades if bt else None),
+        deflated_sharpe_ratio=s.deflated_sharpe_ratio if has_real else (bt.deflated_sharpe_ratio if bt else None),
+        pbo_score=s.pbo_score if has_real else (bt.pbo_score if bt else None),
+        out_of_sample_sharpe=s.out_of_sample_sharpe if has_real else (bt.out_of_sample_sharpe if bt else None),
+        kelly_fraction=s.kelly_fraction,
+        is_backtest_placeholder=not has_real,
     )
 
 
