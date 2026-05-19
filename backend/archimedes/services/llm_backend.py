@@ -43,14 +43,17 @@ class LLMBackend(Protocol):
 
 
 class AnthropicBackend:
-    """Anthropic SDK with ``LLM_API_KEY``."""
+    """Anthropic SDK with ``LLM_API_KEY``.
+
+    Back-compat: falls back to ``ANTHROPIC_API_KEY`` if the new var is empty.
+    """
 
     def __init__(self, model: str = DEFAULT_MODEL, api_key: str | None = None) -> None:
         import anthropic
 
         self._model = model
         self._served = model
-        self._api_key = api_key or os.getenv("LLM_API_KEY", "")
+        self._api_key = api_key or os.getenv("LLM_API_KEY", "") or os.getenv("ANTHROPIC_API_KEY", "")
         if not self._api_key:
             self._client = None
             return
@@ -86,15 +89,19 @@ class AnthropicBackend:
 
 
 class AnthropicCompatibleBackend:
-    """Anthropic SDK with ``LLM_AUTH_TOKEN`` + ``LLM_BASE_URL``."""
+    """Anthropic SDK with ``LLM_AUTH_TOKEN`` + ``LLM_BASE_URL``.
+
+    Back-compat: falls back to ``ANTHROPIC_AUTH_TOKEN`` / ``ANTHROPIC_BASE_URL``
+    if the new vars are empty.
+    """
 
     def __init__(self, model: str = DEFAULT_MODEL) -> None:
         import anthropic
 
         self._model = model
         self._served = model
-        self._auth_token = os.getenv("LLM_AUTH_TOKEN", "")
-        self._base_url = os.getenv("LLM_BASE_URL", "")
+        self._auth_token = os.getenv("LLM_AUTH_TOKEN", "") or os.getenv("ANTHROPIC_AUTH_TOKEN", "")
+        self._base_url = os.getenv("LLM_BASE_URL", "") or os.getenv("ANTHROPIC_BASE_URL", "")
         if self._auth_token and self._base_url:
             self._client: anthropic.Anthropic | None = anthropic.Anthropic(
                 auth_token=self._auth_token, base_url=self._base_url,
