@@ -120,6 +120,7 @@ services:
       - ./analytics-engine/artifacts:/app/analytics-engine/artifacts:ro
       - ./contracts/abis:/contracts/abis:ro
       - ./data/corpus:/app/data/corpus:ro
+      - archimedes-corpus-artifact:/app/data/corpus-artifact
     depends_on:
       postgres:
         condition: service_healthy
@@ -128,3 +129,4 @@ services:
 
 volumes:
   pgdata:
+  archimedes-corpus-artifact:

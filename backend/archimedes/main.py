@@ -96,6 +96,23 @@ async def _startup_populate_rigor_gate():
     except Exception as exc:
         _logger.warning("startup: rigor gate population failed (non-fatal): %s", exc)
 
+
+@app.on_event("startup")
+async def _startup_seed_corpus():
+    """Seed papers table from manifest.jsonl if DB is empty."""
+    import logging
+    _logger = logging.getLogger("archimedes.startup")
+    try:
+        from archimedes.services.corpus_service import seed_from_manifest, get_paper_count
+        count = get_paper_count()
+        if count > 0:
+            _logger.info("startup: corpus already has %d papers, skipping seed", count)
+            return
+        inserted = seed_from_manifest()
+        _logger.info("startup: seeded %d papers from manifest", inserted)
+    except Exception as exc:
+        _logger.warning("startup: corpus seed failed (non-fatal): %s", exc)
+
 # Wire all routers
 app.include_router(assets_router)
 app.include_router(vaults_router)
@@ -121,6 +138,7 @@ async def health():
     from archimedes.chain.client import chain_client
     from archimedes.services.strategy_fusion import fusion_enabled, load_corpus
     from archimedes.services.llm_backend import make_llm_backend
+    from archimedes.services.corpus_service import get_paper_count, get_corpus_meta
     import os
 
     connected = await chain_client.is_connected()
@@ -134,11 +152,31 @@ async def health():
         else backend.model_id if hasattr(backend, "model_id")
         else "unavailable"
     )
+
+    # DB-backed corpus diagnostics
+    db_count = 0
+    corpus_source = "file"
+    corpus_last_intake = None
+    artifact_hash = None
+    try:
+        db_count = get_paper_count()
+        meta = get_corpus_meta()
+        if meta:
+            corpus_source = meta.get("source", "unknown")
+            corpus_last_intake = meta.get("last_intake_at")
+            artifact_hash = meta.get("artifact_hash")
+    except Exception:
+        pass
+
     return {
         "status": "ok" if connected else "degraded",
         "service": "archimedes-backend",
         "chain_connected": connected,
         "corpus_papers": len(corpus),
+        "corpus_db_count": db_count,
+        "corpus_source": corpus_source,
+        "corpus_last_intake": corpus_last_intake,
+        "artifact_hash": artifact_hash,
         "fusion_enabled": _fusion_on,
         "llm_provider": llm_provider,
         "llm_backend": llm_backend,

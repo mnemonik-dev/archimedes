@@ -267,13 +267,39 @@ def _manifest_path() -> Path | None:
 
 
 def load_corpus(path: Path | None = None) -> list[CorpusPaper]:
-    """Defensive line-by-line manifest load. No hard dependency on the file.
+    """Load corpus papers — DB-backed, with file-based fallback.
 
-    A blank / non-JSON line, or one missing arxiv_id or all of
-    title+abstract, is logged at debug and skipped — one bad line never
-    aborts the load (arxiv_pipeline's per-page tolerance posture). A
-    missing/empty manifest yields an empty list (caller declines honestly).
+    Tries the DB first. If the papers table is empty, falls back to the
+    static manifest file (backward-compat for local dev without DB seeding).
     """
+    # DB path first
+    try:
+        from archimedes.services.corpus_service import load_papers_from_db
+        db_rows = load_papers_from_db()
+        if db_rows:
+            papers = [
+                CorpusPaper(
+                    arxiv_id=r["arxiv_id"],
+                    title=r["title"],
+                    abstract=r["abstract"],
+                    primary_category=r.get("primary_category", ""),
+                    categories=tuple(r.get("categories", [])),
+                    published=r.get("published", ""),
+                )
+                for r in db_rows
+                if r.get("arxiv_id") and (r.get("title") or r.get("abstract"))
+            ]
+            logger.info("fusion: loaded %d corpus papers from DB", len(papers))
+            return papers
+    except Exception as exc:
+        logger.debug("fusion: DB corpus load failed, falling back to file: %s", exc)
+
+    # File fallback
+    return _load_corpus_from_file(path)
+
+
+def _load_corpus_from_file(path: Path | None = None) -> list[CorpusPaper]:
+    """Legacy file-based manifest load (backward-compat fallback)."""
     path = path or _manifest_path()
     if path is None or not path.exists():
         logger.info("fusion: no corpus manifest resolvable; empty corpus")
@@ -312,7 +338,7 @@ def load_corpus(path: Path | None = None) -> list[CorpusPaper]:
                 published=str(obj.get("published", "")).strip(),
             )
         )
-    logger.info("fusion: loaded %d corpus papers from %s", len(papers), path)
+    logger.info("fusion: loaded %d corpus papers from file %s", len(papers), path)
     return papers
 
 
