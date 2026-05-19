@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 # Match the model string already used by chat_service.py so the team has one
 # Claude version to reason about. Override per-call via the backend constructor;
 # Opus (`claude-opus-4-7`) is the upgrade lever for the flagship reasoning moment.
-DEFAULT_MODEL = os.getenv("ANTHROPIC_DEFAULT_MODEL", "claude-sonnet-4-20250514")
+DEFAULT_MODEL = os.getenv("LLM_MODEL", os.getenv("ANTHROPIC_DEFAULT_MODEL", "claude-sonnet-4-20250514"))
 MAX_TOKENS = 4096
 
 
@@ -65,46 +65,30 @@ class LLMBackend(Protocol):
 
 
 class ClaudeBackend:
-    """Anthropic-SDK backend. Supports direct Claude (ANTHROPIC_API_KEY) or a
-    GLM-compatible endpoint (ANTHROPIC_AUTH_TOKEN + ANTHROPIC_BASE_URL).
+    """Anthropic-SDK backend. Delegates to the provider-agnostic factory.
 
-    `anthropic` is imported lazily inside `complete` so this module stays
-    importable in dependency-light environments (tests, AST tooling) — the
-    same pattern chat_service.py uses.
+    Supports direct Claude (LLM_API_KEY) or a GLM-compatible endpoint
+    (LLM_AUTH_TOKEN + LLM_BASE_URL). Falls back to ANTHROPIC_* env vars
+    for back-compat.
     """
 
     def __init__(self, model: str = DEFAULT_MODEL, api_key: str | None = None) -> None:
-        import anthropic
-
-        self._model = model
-        self._api_key = api_key or os.getenv("ANTHROPIC_API_KEY", "")
-        self._auth_token = os.getenv("ANTHROPIC_AUTH_TOKEN", "")
-        self._base_url = os.getenv("ANTHROPIC_BASE_URL", "")
-        if self._api_key:
-            self._client: anthropic.Anthropic | None = anthropic.Anthropic(api_key=self._api_key)
-        elif self._auth_token and self._base_url:
-            self._client = anthropic.Anthropic(auth_token=self._auth_token, base_url=self._base_url)
+        from archimedes.services.llm_backend import AnthropicBackend, make_llm_backend
+        if api_key:
+            self._inner: object = AnthropicBackend(model=model, api_key=api_key)
         else:
-            self._client = None
+            self._inner = make_llm_backend()
 
     @property
     def model_id(self) -> str:
-        return self._model
+        return getattr(self._inner, "model_id", DEFAULT_MODEL)
 
     @property
     def available(self) -> bool:
-        return self._client is not None
+        return getattr(self._inner, "available", False)
 
     def complete(self, system: str, user: str) -> str:
-        if self._client is None:
-            raise RuntimeError("no LLM client configured")
-        response = self._client.messages.create(
-            model=self._model,
-            max_tokens=MAX_TOKENS,
-            system=system,
-            messages=[{"role": "user", "content": user}],
-        )
-        return response.content[0].text.strip() if response.content else ""
+        return self._inner.complete(system, user)  # type: ignore[union-attr]
 
 
 class CannedBackend:
@@ -402,12 +386,16 @@ class StrategyArchitect:
 
 
 def default_backend() -> LLMBackend:
-    """Claude or GLM when credentials are present; canned fallback otherwise."""
-    claude = ClaudeBackend()
-    if claude.available:
-        return claude
+    """Claude or GLM when credentials are present; canned fallback otherwise.
+
+    Delegates to the provider-agnostic ``llm_backend.make_llm_backend()`` factory.
+    """
+    from archimedes.services.llm_backend import make_llm_backend
+    backend = make_llm_backend()
+    if getattr(backend, "available", False):
+        return backend  # type: ignore[return-value]
     logger.warning(
-        "No LLM credentials (ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN+ANTHROPIC_BASE_URL) "
+        "No LLM credentials (LLM_* or ANTHROPIC_* env vars) "
         "— strategy architect using canned fallback"
     )
     return CannedBackend()

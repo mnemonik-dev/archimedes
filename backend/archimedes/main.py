@@ -117,12 +117,15 @@ async def health():
     Reports corpus state so silent degradation is visible.
     """
     from archimedes.chain.client import chain_client
-    from archimedes.services.strategy_fusion import fusion_enabled, load_corpus, default_backend
+    from archimedes.services.strategy_fusion import fusion_enabled, load_corpus
+    from archimedes.services.llm_backend import make_llm_backend
+    import os
 
     connected = await chain_client.is_connected()
     corpus = load_corpus()
     _fusion_on = fusion_enabled()
-    backend = default_backend()
+    backend = make_llm_backend()
+    llm_provider = os.getenv("LLM_PROVIDER", "auto")
     llm_backend = (
         "live" if getattr(backend, "available", False)
         else backend.model_id if hasattr(backend, "model_id")
@@ -134,6 +137,7 @@ async def health():
         "chain_connected": connected,
         "corpus_papers": len(corpus),
         "fusion_enabled": _fusion_on,
+        "llm_provider": llm_provider,
         "llm_backend": llm_backend,
     }
 
