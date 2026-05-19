@@ -155,6 +155,7 @@ The repo carries three git submodules at [`submodules/`](submodules/):
   reference for any Arc/Circle integration question.** Start with
   [`submodules/context-arc/AGENTS.md`](submodules/context-arc/AGENTS.md) for the
   task-indexed entry-point table. Highest-leverage files for our build:
+    - `circlefin-skills/use-arc.md` — Arc chain config, USDC-as-gas, Foundry deploy (canonical Arc reference)
     - `circlefin-skills/use-smart-contract-platform.md` — contract deploy + monitor (Chuan's lane)
     - `circlefin-skills/bridge-stablecoin.md` — CCTP + Gateway for RWA bridging (Marten's lane)
     - `circlefin-skills/use-gateway.md` — unified balance + nanopayments

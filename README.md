@@ -432,6 +432,32 @@ arc-canteen rpc eth_chainId
 
 To make these calls available inside the docker stack, paste the URL into `.env` as the `RPC` variable and `docker compose up -d` again (compose re-exports the env vars to the backend container).
 
+### Arc testnet quick reference
+
+| Field | Value |
+|-------|-------|
+| Chain ID | `5042002` (`0x4CEF52`) |
+| RPC | `https://rpc.testnet.arc.network` |
+| Explorer | <https://testnet.arcscan.app> |
+| Faucet | <https://faucet.circle.com> (20 USDC per request, refills every 2h) |
+| CCTP Domain | `26` |
+| USDC (ERC-20, 6 decimals) | `0x3600000000000000000000000000000000000000` |
+| Gas token | USDC (18 decimals native) — no ETH needed |
+
+**Onboarding flow:** visit <https://faucet.circle.com> → connect wallet → receive 20 testnet USDC on Arc. Refills every 2 hours. USDC is the native gas token, so faucet funds cover both gas and trading.
+
+### Circle sponsor alignment
+
+Archimedes uses Circle's sponsor tooling at three layers:
+
+| Layer | What we use | Reference |
+|-------|-------------|-----------|
+| **Arc chain** | 10 Solidity contracts deployed on Arc testnet (AMM, vaults, oracle, trace registry) | `contracts/src/` |
+| **Developer-Controlled Wallets** | `circle_signer.py` — all on-chain writes via Circle API (no raw private keys) | `backend/archimedes/chain/circle_signer.py` |
+| **Arc docs + skills** | `context-arc` submodule with Circle Skills (`use-arc`, `use-smart-contract-platform`, `bridge-stablecoin`) as canonical reference | `submodules/context-arc/` |
+
+**Not yet adopted (evaluated, deferred):** Circle CLI Agent Wallets + x402 nanopayments. These require the `@circle-fin/cli` npm package and an interactive setup flow. Our existing `circle_signer.py` path (Developer-Controlled Wallets) already covers the "agent transacts on Arc" use case. Agent Wallets would add spending-policy caps and x402 service discovery, but would replace the working `circle_signer` path — too destabilizing this close to the demo. Post-hackathon consideration.
+
 ---
 
 ## Understanding the RPC URL
