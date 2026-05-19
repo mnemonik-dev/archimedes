@@ -64,8 +64,10 @@ Non-Normality. *Journal of Portfolio Management* 40(5), 94–107.
 Convention: `SR_hat` is the **per-bar** Sharpe ratio (un-annualized). If the
 caller carries an annualized Sharpe, divide by `sqrt(annualization_factor)`
 before computing DSR (annualization is purely a display transform). Skewness
-`gamma_3` and excess kurtosis `gamma_4` are likewise computed on the per-bar
-return series.
+`gamma_3` and **raw (Pearson) kurtosis** `gamma_4` (γ₄ = 3 for normal) are
+likewise computed on the per-bar return series. Note: the `(γ₄ − 1)/4` coefficient
+in eq. 8 below is derived for the raw-kurtosis convention; passing Fisher
+*excess* kurtosis would bias the denominator by a constant `(3/4)·ŜR²`.
 
 Given `T` per-bar returns, the per-bar Sharpe `SR_hat`, and `N` independent
 trials in the selection set, the DSR is the probability that the true Sharpe
@@ -234,15 +236,16 @@ def compute_pbo(
 ## Numerical sanity-check examples (for unit test seed)
 
 All three cases use the per-bar convention: `SR_per_bar = SR_annualized /
-sqrt(252)` for daily bars, and skew/excess-kurtosis computed on the per-bar
-series. Reference values below were computed against `scipy.stats.norm.ppf`
-and `norm.cdf`; pin the unit tests to these to catch implementation drift.
+sqrt(252)` for daily bars, and skew / **raw (Pearson) kurtosis** (γ₄ = 3 for
+normal) computed on the per-bar series. Reference values below were computed
+against `scipy.stats.norm.ppf` and `norm.cdf`; pin the unit tests to these to
+catch implementation drift.
 
-| Case | `SR_ann` | `T` | `skew` | `ex_kurt` | `N` | `SR_zero` (per-bar) | `z` | `dsr_p_value` |
+| Case | `SR_ann` | `T` | `skew` | `raw_kurt` | `N` | `SR_zero` (per-bar) | `z` | `dsr_p_value` |
 |---|---|---|---|---|---|---|---|---|
-| A — strong | 1.8 | 2520 | −0.4 | 3.2  | 10   | 0.0314 |  4.013 | ~1.0000 |
-| B — borderline | 0.9 | 1260 | −0.2 | 2.0  | 20   | 0.0536 |  0.110 | ~0.5439 |
-| C — failure | 0.3 | 504  |  0.0 | 0.0  | 1000 | 0.1451 | −2.831 | ~0.0023 |
+| A — strong | 1.8 | 2520 | −0.4 | 6.2  | 10   | 0.0314 |  3.994 | ~1.0000 |
+| B — borderline | 0.9 | 1260 | −0.2 | 5.0  | 20   | 0.0536 |  0.110 | ~0.5439 |
+| C — failure | 0.3 | 504  |  0.0 | 3.0  | 1000 | 0.1451 | −2.831 | ~0.0023 |
 
 Case A is the slam-dunk: a long, smooth backtest with a small library.
 Case B is the "credibly positive but not at the 95% bar" boundary used to

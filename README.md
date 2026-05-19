@@ -657,13 +657,13 @@ Or via the canteen CLI: `arc-canteen context sync` (drops a copy into `~/.arc-ca
 
 ## Platform-specific notes
 
-### macOS (Dan, Chuan)
+### macOS (Dan, Chuan, Önder)
 
 mambaforge + everything else works natively. No special setup. If on Apple Silicon, the
 osx-arm64 conda channels are well-supported; psycopg2-binary, web3.py, and backtrader all
 have arm64 wheels.
 
-### Linux (Daniel, Önder)
+### Linux (Daniel)
 
 Native experience. Identical to macOS for our purposes. Standard apt/dnf installs for
 docker + node if not already present.
@@ -694,7 +694,7 @@ WSL2 docs: [microsoft.com/wsl](https://learn.microsoft.com/en-us/windows/wsl/ins
   even on Option B.
 
 Practical take: **Marten, set up WSL2.** It removes every Windows-specific pain point and
-matches Dan + Daniel + Önder's Linux/macOS workflow exactly.
+matches Dan + Chuan + Önder's macOS and Daniel's Linux workflow exactly.
 
 ---
 
