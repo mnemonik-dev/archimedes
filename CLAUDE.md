@@ -1,11 +1,15 @@
 # Archimedes — Claude Code Context
 
-> **Status:** Living context doc. Written 2026-05-12 (Day 2), revised 2026-05-13 (Day 3)
-> for the marketplace pivot and rigor-as-wedge decision, revised 2026-05-14 (Day 4) after
-> the 10-contract Arc-testnet deployment, live UI, and ownership reshuffle. Intent: drop
-> at the root of the `archimedes` repo and read at the start of every Claude Code session.
+> **Status:** Living context doc. Written 2026-05-12 (Day 2); revised 2026-05-13 (Day 3,
+> marketplace pivot + rigor-as-wedge), 2026-05-14 (Day 4, 10-contract Arc deploy + live
+> UI + ownership reshuffle), and 2026-05-19 (build-on-deploy main-only + `develop`
+> retired; GLM intelligence live; product spine locked in `docs/user-stories.md`;
+> agentic-issue pipeline codified). Intent: drop at the root of the `archimedes` repo
+> and read at the start of every Claude Code session.
 >
 > **Architecture lineage to read together:**
+> - [`docs/user-stories.md`](docs/user-stories.md) — **the locked product spine
+>   (canonical); supersedes the older product framing in the docs below**
 > - [`docs/design.md`](docs/design.md) — original single-vault architecture
 > - [`docs/specs/ecosystem-design-spec.md`](docs/specs/ecosystem-design-spec.md) — Day-3
 >   two-tier marketplace pivot (synthetic protocol + AMM + VaultFactory + agent-as-a-service)
@@ -19,9 +23,11 @@
 
 ## Project
 
-**Archimedes** — a fund-of-funds portfolio agent that turns published quant finance research
-into investable, backtested strategies, then constructs personalized portfolios of RWA tokens
-and yield instruments on Arc with USDC settlement.
+**Archimedes** — "Linus for quantitative finance": a single-user agent that turns the
+q-fin research literature into investable, rigor-gated strategies, then executes and
+monitors them in non-custodial vaults on Arc with USDC settlement. The product spine
+(generate → rigor-gate → execute → monitor → explore) is locked in
+[`docs/user-stories.md`](docs/user-stories.md) — the canonical product framing.
 
 > *"Give me a lever long enough and I shall move the world."* The lever here is academic
 > research; the fulcrum is autonomous AI; the world is your portfolio.
@@ -43,10 +49,14 @@ May 11–25, 2026.
 ## North Star
 
 A user with idle USDC who wants thoughtful portfolio management — but is tired of black-box
-robo-advisors, opaque AI funds, and "trust me bro" influencer copy-trading — connects a
-wallet, picks a risk profile, and gets a portfolio constructed from strategies that come
-with a **paper-grounded reasoning trace anchored on-chain**. Every position the agent takes,
-every rebalance it executes, every regime shift it responds to, is hashed and verifiable.
+robo-advisors, opaque AI funds, and "trust me bro" influencer copy-trading — **describes
+what they want**, and Archimedes **generates** a research-grounded strategy, **rigor-gates**
+it (DSR/PBO — the curation protocol that makes the library trustworthy), **executes** it
+into a non-custodial vault, then lets them **monitor** results and **explore** their
+compounding strategy library. Every position, rebalance, and regime shift comes with a
+**paper-grounded reasoning trace anchored on-chain** — hashed and verifiable. Single-user
+is the MVP; a social network of shared strategies is the roadmap vision (canonical detail
+in [`docs/user-stories.md`](docs/user-stories.md)).
 
 The Agora narrative frames this:
 

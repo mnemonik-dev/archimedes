@@ -2,6 +2,11 @@
 
 **Fund-of-Funds Portfolio Agent Powered by Academic Research**
 
+> ⚠️ **Superseded for product framing.** This is the original single-vault design
+> document, retained for architecture lineage. The **canonical product spine** — and
+> the retirement of the "connect wallet → pick a risk profile" flow — is
+> [`user-stories.md`](user-stories.md). Read that first for what the product *is*.
+
 Agora Agents Hackathon | Canteen x Circle x Arc | May 11–25, 2026
 
 ---
