@@ -11,7 +11,7 @@
 ## Contents
 
 - [What is Archimedes?](#what-is-archimedes) · [Why Archimedes?](#why-archimedes)
-- **Get it running:** [Setup](#setup) → [Run Archimedes locally](#run-archimedes-locally) (the one-command path) → [Understanding the RPC URL](#understanding-the-rpc-url)
+- **Get it running:** [Setup](#setup) → [Run Archimedes locally](#run-archimedes-locally) (the one-command path) → [Local↔prod parity](#localprod-parity) → [Understanding the RPC URL](#understanding-the-rpc-url)
 - **Reference:** [Quick Links](#quick-links) (all design docs) · [Repository Structure](#repository-structure) · [Tech Stack](#tech-stack)
 - **Working here:** [Development workflow](#development-workflow) · [Reporting traction](#reporting-traction-the-30-rubric-weight) · [Security notes](#security-notes) · [Platform-specific notes](#platform-specific-notes)
 - [Using the context-arc submodule](#using-the-context-arc-submodule) · [Roadmap](#roadmap) · [Team](#team) · [Contributing](#contributing) · [License](#license)
@@ -480,6 +480,32 @@ Archimedes uses Circle's sponsor tooling at three layers:
 | **Arc docs + skills** | `context-arc` submodule with Circle Skills (`use-arc`, `use-smart-contract-platform`, `bridge-stablecoin`) as canonical reference | `submodules/context-arc/` |
 
 **Not yet adopted (evaluated, deferred):** Circle CLI Agent Wallets + x402 nanopayments. These require the `@circle-fin/cli` npm package and an interactive setup flow. Our existing `circle_signer.py` path (Developer-Controlled Wallets) already covers the "agent transacts on Arc" use case. Agent Wallets would add spending-policy caps and x402 service discovery, but would replace the working `circle_signer` path — too destabilizing this close to the demo. Post-hackathon consideration.
+
+---
+
+## Local↔prod parity
+
+The local docker-compose stack runs the same code as the EC2 deployment. To verify your local setup matches production expectations:
+
+```bash
+# One-command parity check
+./scripts/check-parity.sh              # defaults to http://localhost:8000
+./scripts/check-parity.sh http://18.171.230.205:8000  # or against prod
+```
+
+This checks `/health` and asserts: live LLM backend, non-empty corpus, fusion enabled.
+
+### LLM backends (3 options, same code)
+
+The `LLM_*` env vars (set in `.env`) configure the LLM provider. All three use the same code paths:
+
+| Provider | Config | Use case |
+|----------|--------|----------|
+| **GLM via z.ai** (production) | `LLM_PROVIDER=anthropic_compatible` + `LLM_AUTH_TOKEN` + `LLM_BASE_URL` | Default for deployed stack; also works locally |
+| **Anthropic direct** | `LLM_PROVIDER=anthropic` + `LLM_API_KEY` | BYOK; free tier works for dev |
+| **Ollama local** | `LLM_PROVIDER=ollama` + `LLM_BASE_URL=http://localhost:11434` | Fully offline; no API key needed |
+
+Back-compat: `ANTHROPIC_*` env vars still work (deprecated, WARN logged).
 
 ---
 
