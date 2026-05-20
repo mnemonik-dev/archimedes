@@ -162,10 +162,39 @@ def compute_kelly(
     return round(float(np.clip(fractional * excess / sigma_sq_ann, 0.0, 1.0)), 6)
 
 
+# ── Rigor gate ────────────────────────────────────────────────────────────────
+
+def _compute_passes_rigor_gate(
+    dsr_p: float | None,
+    full_sharpe: float | None,
+    oos_sharpe: float | None,
+    pbo_score: float | None,
+    look_ahead_passed: bool | None,
+) -> bool:
+    """Recompute the rigor gate from fresh metrics (mirrors rigor_evaluator thresholds).
+
+    Gate: DSR p-value ≥ 0.95, OOS Sharpe ≥ 50% of full-sample Sharpe,
+    PBO score ≤ 0.5, and look-ahead audit passed.
+    """
+    if dsr_p is None or dsr_p < 0.95:
+        return False
+    if full_sharpe is None or oos_sharpe is None or oos_sharpe < 0.5 * full_sharpe:
+        return False
+    if pbo_score is None or pbo_score > 0.5:
+        return False
+    return bool(look_ahead_passed)
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main(write: bool = False) -> None:
-    fixtures = json.loads(_FIXTURE_PATH.read_text(encoding="utf-8"))
+    try:
+        fixtures = json.loads(_FIXTURE_PATH.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError) as exc:
+        raise SystemExit(
+            f"Cannot read fixture file {_FIXTURE_PATH}: {exc}\n"
+            "Run from the analytics-engine directory with an existing backtest_fixtures.json."
+        ) from exc
     num_trials = len(fixtures)
     existing = fixtures.get("pipeline_buy_hold", {})
 
@@ -226,7 +255,13 @@ def main(write: bool = False) -> None:
         "num_trials_in_selection": num_trials,
         # PBO requires all strategies' daily returns simultaneously; carry forward.
         "pbo_score": existing.get("pbo_score"),
-        "passes_rigor_gate": existing.get("passes_rigor_gate", False),
+        "passes_rigor_gate": _compute_passes_rigor_gate(
+            dsr_p=dsr_p,
+            full_sharpe=result.sharpe_ratio,
+            oos_sharpe=oos,
+            pbo_score=existing.get("pbo_score"),
+            look_ahead_passed=result.look_ahead_audit_passed,
+        ),
         "kelly_fraction": kelly,
     }
 
@@ -234,13 +269,11 @@ def main(write: bool = False) -> None:
     print(json.dumps({"pipeline_buy_hold": entry}, indent=2))
 
     if write:
-        fixture_path = ROOT / "strategies" / "backtest_fixtures.json"
-        fixtures = json.loads(fixture_path.read_text(encoding="utf-8"))
         fixtures["pipeline_buy_hold"] = entry
-        fixture_path.write_text(
+        _FIXTURE_PATH.write_text(
             json.dumps(fixtures, indent=2) + "\n", encoding="utf-8"
         )
-        print(f"\n✓ Written to {fixture_path}")
+        print(f"\n✓ Written to {_FIXTURE_PATH}")
 
 
 if __name__ == "__main__":
