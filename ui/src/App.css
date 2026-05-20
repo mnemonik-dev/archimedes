@@ -546,6 +546,8 @@ h4, .h4 { font-family: var(--sans); font-size: 0.8rem; font-weight: 600; text-tr
 .mb-4 { margin-bottom: var(--space-4); }
 .mb-5 { margin-bottom: var(--space-5); }
 .mb-6 { margin-bottom: var(--space-6); }
+.mb-7 { margin-bottom: var(--space-7); }
+.mb-8 { margin-bottom: var(--space-8); }
 .mt-4 { margin-top: var(--space-4); }
 
 /* --- Modal --- */
@@ -628,7 +630,8 @@ h4, .h4 { font-family: var(--sans); font-size: 0.8rem; font-weight: 600; text-tr
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 16px;
   max-width: var(--max-w);
-  margin: 0 auto;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 /* Cards for dashboard */
