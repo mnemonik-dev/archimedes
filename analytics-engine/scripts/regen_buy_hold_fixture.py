@@ -29,7 +29,7 @@ BACKTEST_START = "2004-01-02"
 BACKTEST_END = "2026-05-01"  # yfinance end is exclusive; includes bars through 2026-04-30
 INITIAL_CASH = 100_000.0
 TX_COST_BPS = 10
-NUM_TRIALS = 6  # total strategies in the current library (for DSR correction)
+_FIXTURE_PATH = ROOT / "strategies" / "backtest_fixtures.json"
 _EULER = 0.5772156649
 _ANN = 252
 
@@ -81,12 +81,13 @@ def _skew(arr: np.ndarray) -> float:
     return float(np.mean(m ** 3)) / m2 ** 1.5
 
 
-def _excess_kurtosis(arr: np.ndarray) -> float:
+def _raw_kurtosis(arr: np.ndarray) -> float:
+    """Pearson (raw) kurtosis — normal distribution = 3. DSR formula requires this."""
     m = arr - arr.mean()
     m2 = float(np.mean(m ** 2))
     if m2 == 0:
         return 0.0
-    return float(np.mean(m ** 4)) / m2 ** 2 - 3.0
+    return float(np.mean(m ** 4)) / m2 ** 2
 
 
 # ── Rigor metrics ─────────────────────────────────────────────────────────────
@@ -105,7 +106,7 @@ def compute_dsr(
 
     sr_hat = float(arr.mean()) / sigma
     g3 = _skew(arr)
-    g4 = _excess_kurtosis(arr)
+    g4 = _raw_kurtosis(arr)  # Pearson raw kurtosis; DSR formula uses (γ₄−1)/4
     trials = max(1, num_trials)
 
     if trials == 1:
@@ -161,9 +162,62 @@ def compute_kelly(
     return round(float(np.clip(fractional * excess / sigma_sq_ann, 0.0, 1.0)), 6)
 
 
+# ── Rigor gate ────────────────────────────────────────────────────────────────
+
+def _compute_passes_rigor_gate(
+    passes_validation: bool,
+    dsr: float | None,
+    dsr_p: float | None,
+    num_trials: int | None,
+    full_sharpe: float | None,
+    oos_sharpe: float | None,
+    pbo_score: float | None,
+    look_ahead_passed: bool | None,
+) -> bool:
+    """Recompute the rigor gate from fresh metrics.
+
+    Mirrors BacktestResult.passes_rigor_gate criteria 1–6:
+      1. Base validation passes (Sharpe/DD/CAGR/trade-count).
+      2. DSR value, p-value, and num_trials all populated.
+      3. DSR p-value >= 0.95.
+      4. PBO score populated and < 0.5 (strictly; >= 0.5 fails).
+      5. Look-ahead audit passed.
+      6. OOS Sharpe populated; if full Sharpe > 0, OOS/full >= 0.5.
+
+    Note: omits the sharpe_vs_paper >= 0.5 check (criterion 7) because
+    pipeline_buy_hold has no paper_claimed_sharpe. If this helper is ever
+    reused for a paper-grounded strategy, add that check.
+    """
+    if not passes_validation:
+        return False
+    if dsr is None or dsr_p is None or num_trials is None:
+        return False
+    if dsr_p < 0.95:
+        return False
+    if pbo_score is None or pbo_score >= 0.5:
+        return False
+    if look_ahead_passed is not True:
+        return False
+    if oos_sharpe is None:
+        return False
+    if full_sharpe is not None and full_sharpe > 0 and oos_sharpe / full_sharpe < 0.5:
+        return False
+    return True
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main(write: bool = False) -> None:
+    try:
+        fixtures = json.loads(_FIXTURE_PATH.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError) as exc:
+        raise SystemExit(
+            f"Cannot read fixture file {_FIXTURE_PATH}: {exc}\n"
+            f"Ensure the fixture file exists at {_FIXTURE_PATH} and contains valid JSON."
+        ) from exc
+    num_trials = len(fixtures)
+    existing = fixtures.get("pipeline_buy_hold", {})
+
     print(f"Fetching SPY {BACKTEST_START} → {BACKTEST_END}…")
     prices = fetch_ohlcv("SPY", BACKTEST_START, BACKTEST_END)
     print(f"  {len(prices)} bars  "
@@ -183,12 +237,14 @@ def main(write: bool = False) -> None:
           f"  Final: ${result.final_value:,.0f}")
 
     daily = result.daily_returns
-    dsr, dsr_p = compute_dsr(daily, NUM_TRIALS)
+    dsr, dsr_p = compute_dsr(daily, num_trials)
     oos = compute_oos_sharpe(daily)
     kelly = compute_kelly(daily)
     print(f"  DSR: {dsr}  p={dsr_p}  OOS Sharpe: {oos}  Kelly: {kelly}")
 
-    max_dd_frac = (result.max_drawdown_pct or 0.0) / 100.0
+    if result.max_drawdown_pct is None:
+        raise SystemExit("Backtest returned no max_drawdown_pct; cannot write a valid fixture.")
+    max_dd_frac = result.max_drawdown_pct / 100.0
     calmar = None
     if result.cagr is not None and max_dd_frac > 0:
         calmar = round(result.cagr / max_dd_frac, 7)
@@ -218,11 +274,24 @@ def main(write: bool = False) -> None:
         "paper_claimed_max_dd": None,
         "deflated_sharpe_ratio": dsr,
         "dsr_p_value": dsr_p,
-        "num_trials_in_selection": NUM_TRIALS,
-        # PBO requires all strategies' daily returns simultaneously.
-        # Reuse existing value; flag for full cross-strategy recompute.
-        "pbo_score": 0.3899,
-        "passes_rigor_gate": False,
+        "num_trials_in_selection": num_trials,
+        # PBO requires all strategies' daily returns simultaneously; carry forward.
+        "pbo_score": existing.get("pbo_score"),
+        "passes_rigor_gate": _compute_passes_rigor_gate(
+            passes_validation=(
+                result.sharpe_ratio is not None and result.sharpe_ratio > 0.5
+                and max_dd_frac < 0.5
+                and result.cagr is not None and result.cagr < 10.0
+                and (result.total_trades < 2 or result.total_trades >= 10)
+            ),
+            dsr=dsr,
+            dsr_p=dsr_p,
+            num_trials=num_trials,
+            full_sharpe=result.sharpe_ratio,
+            oos_sharpe=oos,
+            pbo_score=existing.get("pbo_score"),
+            look_ahead_passed=result.look_ahead_audit_passed,
+        ),
         "kelly_fraction": kelly,
     }
 
@@ -230,13 +299,11 @@ def main(write: bool = False) -> None:
     print(json.dumps({"pipeline_buy_hold": entry}, indent=2))
 
     if write:
-        fixture_path = ROOT / "strategies" / "backtest_fixtures.json"
-        fixtures = json.loads(fixture_path.read_text(encoding="utf-8"))
         fixtures["pipeline_buy_hold"] = entry
-        fixture_path.write_text(
+        _FIXTURE_PATH.write_text(
             json.dumps(fixtures, indent=2) + "\n", encoding="utf-8"
         )
-        print(f"\n✓ Written to {fixture_path}")
+        print(f"\n✓ Written to {_FIXTURE_PATH}")
 
 
 if __name__ == "__main__":
