@@ -174,15 +174,19 @@ def _compute_passes_rigor_gate(
     pbo_score: float | None,
     look_ahead_passed: bool | None,
 ) -> bool:
-    """Recompute the rigor gate — mirrors BacktestResult.passes_rigor_gate exactly.
+    """Recompute the rigor gate from fresh metrics.
 
-    Criteria (in order):
+    Mirrors BacktestResult.passes_rigor_gate criteria 1–6:
       1. Base validation passes (Sharpe/DD/CAGR/trade-count).
       2. DSR value, p-value, and num_trials all populated.
       3. DSR p-value >= 0.95.
       4. PBO score populated and < 0.5 (strictly; >= 0.5 fails).
       5. Look-ahead audit passed.
       6. OOS Sharpe populated; if full Sharpe > 0, OOS/full >= 0.5.
+
+    Note: omits the sharpe_vs_paper >= 0.5 check (criterion 7) because
+    pipeline_buy_hold has no paper_claimed_sharpe. If this helper is ever
+    reused for a paper-grounded strategy, add that check.
     """
     if not passes_validation:
         return False
@@ -274,7 +278,7 @@ def main(write: bool = False) -> None:
         "passes_rigor_gate": _compute_passes_rigor_gate(
             passes_validation=(
                 result.sharpe_ratio is not None and result.sharpe_ratio > 0.5
-                and max_dd_frac < 0.5
+                and result.max_drawdown_pct is not None and max_dd_frac < 0.5
                 and result.cagr is not None and result.cagr < 10.0
                 and (result.total_trades < 2 or result.total_trades >= 10)
             ),
