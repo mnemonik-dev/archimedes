@@ -39,12 +39,10 @@ export default function Landing({ onNavigate, onConnect, walletAddr }) {
       {/* ── Fixed minimal header ─────────────────────────────────── */}
       <header className="fixed top-0 inset-x-0 z-50 flex items-center justify-between px-5 md:px-8 h-14 bg-[rgba(9,9,11,0.88)] backdrop-blur-[16px] border-b border-[var(--glass-border)]">
         <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-[7px] bg-gradient-to-br from-[#D4A853] to-[#B8892E] flex items-center justify-center flex-shrink-0">
-            <svg className="w-4 h-4" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <path d="M8 1L14 5v6l-6 4-6-4V5l6-4z" stroke="#09090B" strokeWidth="1.5"/>
-              <circle cx="8" cy="8" r="2.5" stroke="#09090B" strokeWidth="1.5"/>
-            </svg>
-          </div>
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" className="w-7 h-7 flex-shrink-0" aria-hidden="true">
+            <rect width="32" height="32" rx="4" fill="#0a0a0b"/>
+            <text x="16" y="23" textAnchor="middle" fontFamily="serif" fontSize="22" fill="#e0a64f">Λ</text>
+          </svg>
           <span className="font-bold text-[1rem] tracking-tight text-[var(--text-1)]">Archimedes</span>
         </div>
         <div className="flex items-center gap-3">

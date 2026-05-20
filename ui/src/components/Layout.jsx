@@ -87,10 +87,10 @@ export default function Layout({ page, setPage, walletAddr, onConnect, onDisconn
       <aside className={`sidebar${menuOpen ? ' sidebar-open' : ''}`} style={showWalletBanner ? { paddingTop: 50 } : undefined}>
         <div className="sidebar-brand">
           <div className="logo-mark">
-            <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <path d="M8 1L14 5v6l-6 4-6-4V5l6-4z" stroke="#09090B" strokeWidth="1.5"/>
-              <circle cx="8" cy="8" r="2.5" stroke="#09090B" strokeWidth="1.5"/>
-            </svg>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+            <rect width="32" height="32" rx="4" fill="#0a0a0b"/>
+            <text x="16" y="23" text-anchor="middle" font-family="serif" font-size="22" fill="#e0a64f">Λ</text>
+          </svg>
           </div>
           <div className="flex-1 min-w-0">
             <div className="logo-text">Archimedes</div>

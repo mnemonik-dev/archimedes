@@ -196,14 +196,8 @@ h4, .h4 { font-family: var(--sans); font-size: 0.8rem; font-weight: 600; text-tr
 .logo-mark {
   width: 28px;
   height: 28px;
-  border-radius: 7px;
-  background: linear-gradient(135deg, var(--accent), #B8892E);
-  display: flex;
-  align-items: center;
-  justify-content: center;
   flex-shrink: 0;
 }
-.logo-mark svg { width: 16px; height: 16px; }
 .logo-text { font-weight: 700; font-size: 1rem; letter-spacing: -0.02em; }
 .logo-sub { font-size: 0.65rem; color: var(--text-4); margin-top: 2px; letter-spacing: 0.04em; }
 
@@ -2134,7 +2128,7 @@ button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 20px;
   width: 100%;
-  max-width: 1040px;
+  max-width: 1040px;  
 }
 .lg-grid-3 {
   display: grid;
