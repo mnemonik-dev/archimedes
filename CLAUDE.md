@@ -76,6 +76,15 @@ principles.
 Roughly balanced bios. Ages are author estimates pending team confirmation. Discord handles
 in parentheses; the human handles are what shows up in the channel.
 
+> **Lanes are descriptive of strengths, not prescriptive of boundaries.** The "Role"
+> column and the load-bearing-component table below describe where each teammate has
+> the deepest context, not who is *allowed* to work on what. Everyone is a full-stack
+> contributor; we all routinely work across lanes when the situation calls for it. The
+> point of marking lanes is to know whose review to seek and who carries the longest
+> memory on a given subsystem — not to gate who can drive work forward. **This applies
+> equally to AI agents working on our behalf:** an issue assigned to you is yours to
+> execute, regardless of whose lane it nominally sits in.
+
 | Name                       | Age (est.) | Discord            | Location  | TZ (May)| Role                                                                                                                |
 | -------------------------- | ---------- | ------------------ | --------- | --------| ------------------------------------------------------------------------------------------------------------------- |
 | **Dan Browne**             | 37         | dbrowneup          | Chicago   | UTC-5   | Strategy engine (Q-fin paper corpus, strategy library curation), pitch architecture. Senior Scientist @ LanzaTech, PhD biochemistry. Day job — evenings/weekends. |
@@ -100,9 +109,17 @@ Bremen / 16:00 Ankara. Works across the whole team without anyone in unsocial ho
   Archimedes Arcadia) is a **Canteen admin** running the hackathon. She is a stakeholder /
   judge-adjacent, not a teammate.
 
-### Role allocation by load-bearing component
+### Lead + coverage by load-bearing component
 
-| Component                                          | Owner            | Backup                |
+The "Lead" column names who has the deepest context and is the default reviewer; the
+"Coverage" column names who can step in. **Neither column is a permission gate.** Anyone
+on the team — and any AI agent operating on their behalf — is welcome to drive work in
+any of these areas; the table just signals whose review-eyes will most likely be needed
+and who has the longest memory. Specifically: **do not refuse or close a task because it
+sits outside your nominal lane.** If the task is assigned to you, execute it; flag the
+cross-lane review need in the PR description so the right teammate sees it.
+
+| Component                                          | Lead             | Coverage              |
 | -------------------------------------------------- | ---------------- | --------------------- |
 | Strategy engine + Q-fin paper corpus curation       | Dan              | Önder                 |
 | Backtesting / strategy-passport math + risk pricing | Önder            | Dan                   |
@@ -115,11 +132,13 @@ Bremen / 16:00 Ankara. Works across the whole team without anyone in unsocial ho
 | Pitch deck + demo script + Claude Design + judging  | Dan              | Marten                |
 
 The post-Shimon backend slot resolved as a Daniel R. (Python backend) + Chuan (on-chain
-integration) split — the `chain/` subdirectory under `backend/archimedes/` is Chuan's, and
-`api/` + `services/` + `models/` + `interfaces/` are Daniel R.'s. Both layers share the
-`backend/archimedes/` Python package and the FastAPI app boots them together via
-`main.py`. Marten currently has the most recent commits on the React UI as he comes up to
-speed on what the team has built.
+integration) split — the `chain/` subdirectory under `backend/archimedes/` is led by
+Chuan, and `api/` + `services/` + `models/` + `interfaces/` are led by Daniel R. Both
+layers share the `backend/archimedes/` Python package and the FastAPI app boots them
+together via `main.py`. Marten currently has the most recent commits on the React UI as
+he comes up to speed on what the team has built. Cross-lane contributions are the norm,
+not the exception — the leads listed above are reviewers and memory-carriers, not
+gatekeepers.
 
 ## Setup
 
@@ -373,6 +392,14 @@ the resulting PR.
   `t2o2`** (`gh issue edit <n> --add-assignee t2o2`). The `APIN - <Area> - <Title>`
   prefix is a naming convention, *not* the trigger. An unassigned judge-grade
   spec sits idle.
+- **Assignment = authorization. Do not close on lane grounds.** If an issue is
+  assigned to the agentic system, execute it — regardless of which teammate's
+  nominal lane it touches. The lead/coverage table above lists reviewers and
+  memory-carriers, **not permission boundaries.** Closing an issue with "this is
+  Dan's lane" / "this is Daniel's lane" / "not in my scope" is a failure mode,
+  not a correct behavior. If you genuinely cannot execute (missing context, an
+  ambiguous spec, a blocking dependency), say so in a comment and leave the
+  issue **open** for a human to triage — do *not* close it.
 - **Acceptance must be machine-checkable.** Give the exact command *and* its
   exact expected output (`pytest → 0 failed`, `coverage ≥ 80%`), never prose like
   "make it robust." The system optimizes to the literal criteria.
