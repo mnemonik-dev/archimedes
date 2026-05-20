@@ -61,14 +61,14 @@ EXTRACTION_LLM: str | None = None
 
 STATUS = "live"
 
-# Stub backtest metrics — superseded by real values in backtest_fixtures.json.
-# strategy_provider ignores these when a fixture entry exists; kept as documentation fallback.
-BACKTEST_SHARPE = 0.51
-BACKTEST_CAGR = 0.073
-BACKTEST_MAX_DD = 0.20
-BACKTEST_WIN_RATE = 0.55
-BACKTEST_CALMAR = 0.37
-BACKTEST_CORR_SPY = 0.62
+# Real backtest metrics — synced from backtest_fixtures.json (2004-01-02 → 2026-04-30, SPY).
+# strategy_provider reads fixture values; these are the documentation fallback.
+BACKTEST_SHARPE = 0.6335
+BACKTEST_CAGR = 0.0670
+BACKTEST_MAX_DD = 0.2465
+BACKTEST_WIN_RATE = 0.3088
+BACKTEST_CALMAR = 0.2720
+BACKTEST_CORR_SPY = 1.0
 
 
 class FaberSMA200(bt.Strategy):

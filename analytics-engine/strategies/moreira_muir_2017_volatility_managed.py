@@ -66,15 +66,15 @@ EXTRACTION_LLM: str | None = None
 
 STATUS = "live"
 
-# Stub backtest metrics — PLACEHOLDER (BACKTEST ENGINE NOT YET RUN)
-# Always-long vol-targeting; leverage-capped version loses the upside boost from levering
-# during low-vol regimes. Expect Sharpe between buy-hold and paper's fully-leveraged version.
-BACKTEST_SHARPE = 0.54       # PLACEHOLDER: between buy-hold and leveraged paper version
-BACKTEST_CAGR = 0.085        # PLACEHOLDER: paper 9% (leveraged), cap-adjusted
-BACKTEST_MAX_DD = 0.18       # PLACEHOLDER: vol-targeting reduces drawdown significantly
-BACKTEST_WIN_RATE = 0.53     # PLACEHOLDER
-BACKTEST_CALMAR = 0.47       # PLACEHOLDER
-BACKTEST_CORR_SPY = 0.78     # PLACEHOLDER: always-long means higher correlation
+# Real backtest metrics — synced from backtest_fixtures.json (2004-01-02 → 2026-04-30, SPY).
+# Leverage-capped (≤1.0×) version. Paper's claimed Sharpe is 0.60 (leveraged, multi-asset);
+# our single-asset cap-constrained backtest exceeds this on the 2004-2026 SPY sample.
+BACKTEST_SHARPE = 0.7689
+BACKTEST_CAGR = 0.0950
+BACKTEST_MAX_DD = 0.3429
+BACKTEST_WIN_RATE = None
+BACKTEST_CALMAR = 0.2769
+BACKTEST_CORR_SPY = 1.0
 
 _ANNUALIZATION = 252
 

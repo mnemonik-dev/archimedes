@@ -127,12 +127,19 @@ class BacktestResult:
 
         Preserves the original behavior for backward compatibility with
         callers that only look at raw Sharpe/DD/CAGR/trade count.
+
+        Trade-count rule: always-on and buy-and-hold strategies produce 0 or 1
+        closed trades in backtrader (position never exits). For these, trade
+        count is meaningless as a quality signal; the Sharpe/DD/CAGR checks are
+        sufficient. Tactical strategies with 2–9 trades have too few signal
+        events for statistical validation and are correctly blocked.
         """
+        trade_count_ok = self.total_trades < 2 or self.total_trades >= 10
         return (
             self.sharpe_ratio > 0.5
             and self.max_drawdown < 0.5
             and self.cagr < 10.0  # Reject >1000% annual as unrealistic
-            and self.total_trades >= 10
+            and trade_count_ok
         )
 
     @property

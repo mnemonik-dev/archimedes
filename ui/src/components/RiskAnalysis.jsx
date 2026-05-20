@@ -275,25 +275,25 @@ function PortfolioRiskSummary({ riskData }) {
         <div className="card-flat" style={{ padding: 12 }}>
           <div className="caption">Avg Sharpe</div>
           <div style={{ fontSize: '1.4rem', fontWeight: 700 }}>
-            {riskData.avg_sharpe.toFixed(2)}
+            {riskData.avg_sharpe != null ? riskData.avg_sharpe.toFixed(2) : '—'}
           </div>
         </div>
         <div className="card-flat" style={{ padding: 12 }}>
           <div className="caption">Worst Max DD</div>
           <div className="negative" style={{ fontSize: '1.4rem', fontWeight: 700 }}>
-            −{(riskData.worst_max_dd * 100).toFixed(1)}%
+            {riskData.worst_max_dd != null ? `−${(riskData.worst_max_dd * 100).toFixed(1)}%` : '—'}
           </div>
         </div>
         <div className="card-flat" style={{ padding: 12 }}>
           <div className="caption">Best Calmar</div>
           <div className="positive" style={{ fontSize: '1.4rem', fontWeight: 700 }}>
-            {riskData.best_calmar.toFixed(2)}
+            {riskData.best_calmar != null ? riskData.best_calmar.toFixed(2) : '—'}
           </div>
         </div>
         <div className="card-flat" style={{ padding: 12 }}>
           <div className="caption">Avg Correlation to SPY</div>
           <div style={{ fontSize: '1.4rem', fontWeight: 700 }}>
-            {riskData.avg_correlation_spy.toFixed(2)}
+            {riskData.avg_correlation_spy != null ? riskData.avg_correlation_spy.toFixed(2) : '—'}
           </div>
         </div>
         <div className="card-flat" style={{ padding: 12 }}>
@@ -305,7 +305,7 @@ function PortfolioRiskSummary({ riskData }) {
         <div className="card-flat" style={{ padding: 12 }}>
           <div className="caption">Concentration (HHI)</div>
           <div style={{ fontSize: '1.4rem', fontWeight: 700, color: hhiColor }}>
-            {riskData.concentration_hhi.toFixed(3)}
+            {riskData.concentration_hhi != null ? riskData.concentration_hhi.toFixed(3) : '—'}
           </div>
           <div className="caption" style={{ color: hhiColor }}>
             {riskData.concentration_label} · {riskData.holding_count} holdings
