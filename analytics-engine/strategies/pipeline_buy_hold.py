@@ -18,7 +18,7 @@ PAPER_CLAIMED_MAX_DD = None
 
 STATUS = "live"
 
-# Backtest results — REAL (run via scripts/regen_buy_hold_fixture.py, 2004-01-02 → 2026-04-29)
+# Backtest results — REAL (run via scripts/regen_buy_hold_fixture.py, 2004-01-02 → 2026-04-30)
 # SPY buy-and-hold over full available history including 2008-09 crisis and 2022 correction
 BACKTEST_SHARPE = 0.5371
 BACKTEST_CAGR = 0.0864

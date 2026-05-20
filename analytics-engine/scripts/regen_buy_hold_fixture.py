@@ -29,7 +29,7 @@ BACKTEST_START = "2004-01-02"
 BACKTEST_END = "2026-05-01"  # yfinance end is exclusive; includes bars through 2026-04-30
 INITIAL_CASH = 100_000.0
 TX_COST_BPS = 10
-NUM_TRIALS = 6  # total strategies in the current library (for DSR correction)
+_FIXTURE_PATH = ROOT / "strategies" / "backtest_fixtures.json"
 _EULER = 0.5772156649
 _ANN = 252
 
@@ -81,12 +81,13 @@ def _skew(arr: np.ndarray) -> float:
     return float(np.mean(m ** 3)) / m2 ** 1.5
 
 
-def _excess_kurtosis(arr: np.ndarray) -> float:
+def _raw_kurtosis(arr: np.ndarray) -> float:
+    """Pearson (raw) kurtosis — normal distribution = 3. DSR formula requires this."""
     m = arr - arr.mean()
     m2 = float(np.mean(m ** 2))
     if m2 == 0:
         return 0.0
-    return float(np.mean(m ** 4)) / m2 ** 2 - 3.0
+    return float(np.mean(m ** 4)) / m2 ** 2
 
 
 # ── Rigor metrics ─────────────────────────────────────────────────────────────
@@ -105,7 +106,7 @@ def compute_dsr(
 
     sr_hat = float(arr.mean()) / sigma
     g3 = _skew(arr)
-    g4 = _excess_kurtosis(arr)
+    g4 = _raw_kurtosis(arr)  # Pearson raw kurtosis; DSR formula uses (γ₄−1)/4
     trials = max(1, num_trials)
 
     if trials == 1:
@@ -164,6 +165,10 @@ def compute_kelly(
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main(write: bool = False) -> None:
+    fixtures = json.loads(_FIXTURE_PATH.read_text(encoding="utf-8"))
+    num_trials = len(fixtures)
+    existing = fixtures.get("pipeline_buy_hold", {})
+
     print(f"Fetching SPY {BACKTEST_START} → {BACKTEST_END}…")
     prices = fetch_ohlcv("SPY", BACKTEST_START, BACKTEST_END)
     print(f"  {len(prices)} bars  "
@@ -183,7 +188,7 @@ def main(write: bool = False) -> None:
           f"  Final: ${result.final_value:,.0f}")
 
     daily = result.daily_returns
-    dsr, dsr_p = compute_dsr(daily, NUM_TRIALS)
+    dsr, dsr_p = compute_dsr(daily, num_trials)
     oos = compute_oos_sharpe(daily)
     kelly = compute_kelly(daily)
     print(f"  DSR: {dsr}  p={dsr_p}  OOS Sharpe: {oos}  Kelly: {kelly}")
@@ -218,11 +223,10 @@ def main(write: bool = False) -> None:
         "paper_claimed_max_dd": None,
         "deflated_sharpe_ratio": dsr,
         "dsr_p_value": dsr_p,
-        "num_trials_in_selection": NUM_TRIALS,
-        # PBO requires all strategies' daily returns simultaneously.
-        # Reuse existing value; flag for full cross-strategy recompute.
-        "pbo_score": 0.3899,
-        "passes_rigor_gate": False,
+        "num_trials_in_selection": num_trials,
+        # PBO requires all strategies' daily returns simultaneously; carry forward.
+        "pbo_score": existing.get("pbo_score"),
+        "passes_rigor_gate": existing.get("passes_rigor_gate", False),
         "kelly_fraction": kelly,
     }
 

@@ -125,9 +125,6 @@ class BacktestResult:
     def passes_validation(self) -> bool:
         """Quick check against design.md § 4.2 validation criteria.
 
-        Preserves the original behavior for backward compatibility with
-        callers that only look at raw Sharpe/DD/CAGR/trade count.
-
         Trade-count rule: always-on and buy-and-hold strategies produce 0 or 1
         closed trades in backtrader (position never exits). For these, trade
         count is meaningless as a quality signal; the Sharpe/DD/CAGR checks are
