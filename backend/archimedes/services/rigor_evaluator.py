@@ -319,6 +319,10 @@ def compute_sharpe_ci(
 
     Returns (lower, upper) at the requested confidence level.
     """
+    if n_obs_daily <= 0:
+        raise ValueError(f"n_obs_daily must be positive, got {n_obs_daily}")
+    if not 0.0 < confidence < 1.0:
+        raise ValueError(f"confidence must be in (0, 1), got {confidence}")
     sr_daily = sharpe_annual / math.sqrt(_ANNUALIZATION)
     se = math.sqrt((1.0 + 0.5 * sr_daily ** 2) * _ANNUALIZATION / n_obs_daily)
     z = norm.ppf((1.0 + confidence) / 2.0)

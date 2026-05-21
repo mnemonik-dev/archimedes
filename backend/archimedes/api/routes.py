@@ -455,15 +455,14 @@ async def get_strategy_signals():
 
 
 @strategies_router.get("/frontier")
-async def get_efficient_frontier(
-    strategy_ids: str = Query("", description="Comma-separated strategy IDs"),
-):
-    """Compute efficient frontier for selected Tier-1 strategies.
+async def get_efficient_frontier():
+    """Compute efficient frontier for all Tier-1 validated strategies.
 
-    Uses synthetic backtest return streams to build the MVO frontier.
+    Uses synthetic daily return streams simulated from backtest summary
+    statistics (SR, CAGR) via mean-variance optimisation (SLSQP sweep).
 
-    NOTE: Returns are simulated from summary statistics (SR, CAGR) since raw
-    daily return series are not stored in backtest_fixtures.json.
+    NOTE: Raw daily return series are not stored; returns are synthesised
+    from summary stats. Results are deterministic (seeded RNG).
     """
     from archimedes.services.portfolio_optimizer import compute_efficient_frontier
     import numpy as np
@@ -476,7 +475,7 @@ async def get_efficient_frontier(
 
     # Build synthetic daily return streams from summary stats
     # SR = mu / sigma (annualized), CAGR ~ mu, so mu_daily = CAGR/252
-    np.random.seed(42)
+    rng = np.random.default_rng(42)
     N_DAYS = 5560
     synthetic_returns = {}
     labels = []
@@ -494,7 +493,7 @@ async def get_efficient_frontier(
         )
         mu_d = cagr / 252
         sigma_d = abs(mu_d / (sr / (252 ** 0.5))) if sr != 0 else 0.01
-        rets = np.random.normal(mu_d, sigma_d, N_DAYS).tolist()
+        rets = rng.normal(mu_d, sigma_d, N_DAYS).tolist()
         synthetic_returns[s.id] = rets
         labels.append({"id": s.id, "title": s.paper_title})
 
@@ -519,23 +518,23 @@ async def get_strategy_correlation():
     if len(strategies) < 2:
         return {"matrix": [], "labels": [], "diversification_ratio": None}
 
-    np.random.seed(42)
+    rng = np.random.default_rng(42)
     N_DAYS = 5560
 
     # Simulate returns with SPY correlation baked in
-    spy_daily = np.random.normal(0.00035, 0.01, N_DAYS)  # SPY ~9% CAGR, ~16% vol
+    spy_daily = rng.normal(0.00035, 0.01, N_DAYS)  # SPY ~9% CAGR, ~16% vol
 
     return_matrix = []
     labels = []
     for s in strategies:
-        sr = s.real_sharpe or 0.5
-        cagr = s.real_cagr or 0.08
-        corr = s.real_corr_spy or 1.0
+        sr = s.real_sharpe if s.real_sharpe is not None else 0.5
+        cagr = s.real_cagr if s.real_cagr is not None else 0.08
+        corr = s.real_corr_spy if s.real_corr_spy is not None else 1.0
         mu_d = cagr / 252
         sigma_d = abs(mu_d / (sr / (252 ** 0.5))) if sr != 0 else 0.01
 
         # Correlated with SPY via Cholesky-style decomposition
-        idio = np.random.normal(0, sigma_d * float(np.sqrt(max(1 - corr**2, 0))), N_DAYS)
+        idio = rng.normal(0, sigma_d * float(np.sqrt(max(1 - corr**2, 0))), N_DAYS)
         rets = corr * (spy_daily * sigma_d / 0.01) + idio + mu_d
         return_matrix.append(rets)
         labels.append({

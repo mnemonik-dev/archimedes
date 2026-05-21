@@ -19,8 +19,10 @@ const CRUMB_MAP = {
   'create-vault': { group: 'Portfolio', groupPage: 'vaults' },
   financial:    { group: 'Portfolio', groupPage: 'dashboard' },
   'vault-detail': { group: 'Portfolio', groupPage: 'vaults' },
-  reasoning:    { group: 'Intelligence', groupPage: 'reasoning' },
-  risk:         { group: 'Intelligence', groupPage: 'reasoning' },
+  reasoning:       { group: 'Intelligence', groupPage: 'reasoning' },
+  risk:            { group: 'Intelligence', groupPage: 'reasoning' },
+  corpus:          { group: 'Intelligence', groupPage: 'reasoning' },
+  'rigor-explainer': { group: 'Intelligence', groupPage: 'reasoning' },
 }
 
 export default function Breadcrumbs({ page, setPage }) {

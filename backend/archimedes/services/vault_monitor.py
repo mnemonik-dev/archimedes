@@ -66,9 +66,19 @@ def compute_sharpe_drift(
     var_r = sum((r - mean_r) ** 2 for r in returns) / max(len(returns) - 1, 1)
     std_r = _math.sqrt(var_r) if var_r > 0 else 0.0
 
+    if std_r <= 0:
+        # Zero variance — flat AUM series; Sharpe is undefined, not zero.
+        return {
+            "live_sharpe": None,
+            "backtest_sharpe": backtest_sharpe,
+            "decay_floor": round(backtest_sharpe * _MCLEAN_PONTIFF_DECAY, 4),
+            "drift_sigma": None,
+            "status": "INSUFFICIENT_DATA",
+        }
+
     # Annualize from snapshot-period returns using periods per year
     periods_per_year = (24 * 60 / snapshot_interval_minutes) * _ANNUALIZATION_FACTOR
-    live_sharpe = (mean_r / std_r) * _math.sqrt(periods_per_year) if std_r > 0 else 0.0
+    live_sharpe = (mean_r / std_r) * _math.sqrt(periods_per_year)
 
     decay_floor = backtest_sharpe * _MCLEAN_PONTIFF_DECAY
 
