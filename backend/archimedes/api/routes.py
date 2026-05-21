@@ -140,6 +140,8 @@ def _to_strategy_response(s: Strategy) -> StrategyResponse:
         kelly_fraction=s.kelly_fraction,
         passes_rigor_gate=s.passes_rigor_gate if has_real else (bt.passes_rigor_gate if bt else s.passes_rigor_gate),
         is_backtest_placeholder=not has_real,
+        sharpe_ci_lower=s.sharpe_ci_lower,
+        sharpe_ci_upper=s.sharpe_ci_upper,
     )
 
 
@@ -207,6 +209,17 @@ async def create_vault(req: VaultCreateRequest):
         raise HTTPException(status_code=500, detail=f"Vault deployment failed: {exc}") from exc
 
     return VaultCreateResponse(vault_address=vault_address, strategy_ids=req.strategy_ids)
+
+
+@vaults_router.get("/{address}/health")
+async def get_vault_health(address: str):
+    """Get vault health snapshot including live Sharpe drift vs backtest baseline.
+
+    Returns AUM trend, rebalance staleness, agent heartbeat, and a
+    McLean-Pontiff-aware Sharpe drift indicator (NORMAL/WARNING/CRITICAL).
+    """
+    from archimedes.services.vault_monitor import vault_monitor
+    return await vault_monitor.get_vault_health(address)
 
 
 @vaults_router.get("/{address}", response_model=VaultDetailResponse)
@@ -441,6 +454,111 @@ async def get_strategy_signals():
         strategies=strat_responses,
         timestamp=datetime.now(timezone.utc).isoformat(),
     )
+
+
+@strategies_router.get("/frontier")
+async def get_efficient_frontier():
+    """Compute efficient frontier for all Tier-1 validated strategies.
+
+    Uses synthetic daily return streams simulated from backtest summary
+    statistics (SR, CAGR) via mean-variance optimisation (SLSQP sweep).
+
+    NOTE: Raw daily return series are not stored; returns are synthesised
+    from summary stats. Results are deterministic (seeded RNG).
+    """
+    from archimedes.services.portfolio_optimizer import compute_efficient_frontier
+    import numpy as np
+
+    strategies = _strategy_provider.list_strategies()
+    active = [s for s in strategies if s.passes_rigor_gate]
+
+    if len(active) < 2:
+        return {"frontier": [], "strategies": [], "message": "Need >= 2 validated strategies"}
+
+    # Build synthetic daily return streams from summary stats
+    # SR = mu / sigma (annualized), CAGR ~ mu, so mu_daily = CAGR/252
+    rng = np.random.default_rng(42)
+    N_DAYS = 5560
+    synthetic_returns = {}
+    labels = []
+
+    for s in active[:5]:  # cap at 5 for performance
+        sr = (
+            s.real_sharpe
+            if s.real_sharpe is not None
+            else s.stub_sharpe if s.stub_sharpe is not None else 0.5
+        )
+        cagr = (
+            s.real_cagr
+            if s.real_cagr is not None
+            else s.stub_cagr if s.stub_cagr is not None else 0.08
+        )
+        mu_d = cagr / 252
+        sigma_d = abs(mu_d / (sr / (252 ** 0.5))) if sr != 0 else 0.01
+        rets = rng.normal(mu_d, sigma_d, N_DAYS).tolist()
+        synthetic_returns[s.id] = rets
+        labels.append({"id": s.id, "title": s.paper_title})
+
+    frontier = compute_efficient_frontier(list(synthetic_returns.keys()), synthetic_returns)
+    return {"frontier": frontier, "strategies": labels, "message": None}
+
+
+@strategies_router.get("/correlation")
+async def get_strategy_correlation():
+    """Pairwise correlation matrix for the active strategy library.
+
+    Simulates correlated return streams from backtest summary statistics.
+    All strategies in this library track broad equity markets (corr_to_spy ~ 1.0),
+    so inter-strategy correlations are expected to be high — this is shown honestly.
+
+    NOTE: Returns are simulated from summary statistics since raw daily return
+    series are not stored in backtest_fixtures.json.
+    """
+    import numpy as np
+
+    strategies = [s for s in _strategy_provider.list_strategies() if s.real_sharpe is not None]
+    if len(strategies) < 2:
+        return {"matrix": [], "labels": [], "diversification_ratio": None}
+
+    rng = np.random.default_rng(42)
+    N_DAYS = 5560
+
+    # Simulate returns with SPY correlation baked in
+    spy_daily = rng.normal(0.00035, 0.01, N_DAYS)  # SPY ~9% CAGR, ~16% vol
+
+    return_matrix = []
+    labels = []
+    for s in strategies:
+        sr = s.real_sharpe if s.real_sharpe is not None else 0.5
+        cagr = s.real_cagr if s.real_cagr is not None else 0.08
+        corr = s.real_corr_spy if s.real_corr_spy is not None else 1.0
+        mu_d = cagr / 252
+        sigma_d = abs(mu_d / (sr / (252 ** 0.5))) if sr != 0 else 0.01
+
+        # Correlated with SPY via Cholesky-style decomposition
+        idio = rng.normal(0, sigma_d * float(np.sqrt(max(1 - corr**2, 0))), N_DAYS)
+        rets = corr * (spy_daily * sigma_d / 0.01) + idio + mu_d
+        return_matrix.append(rets)
+        labels.append({
+            "id": s.id,
+            "title": s.paper_title[:30],
+            "passes_rigor_gate": s.passes_rigor_gate,
+        })
+
+    R = np.array(return_matrix)
+    corr_matrix = np.corrcoef(R)
+
+    # Average pairwise correlation (honest; higher = less diversified)
+    n = len(strategies)
+    off_diag = [corr_matrix[i, j] for i in range(n) for j in range(n) if i != j]
+    avg_corr = sum(off_diag) / len(off_diag) if off_diag else 1.0
+
+    return {
+        "matrix": [[round(float(corr_matrix[i, j]), 3) for j in range(n)] for i in range(n)],
+        "labels": labels,
+        "avg_pairwise_correlation": round(avg_corr, 3),
+        "note": "Strategies track broad equity markets — high inter-strategy correlation is expected and shown honestly.",
+    }
 
 
 @strategies_router.get("/{strategy_id}", response_model=StrategyResponse)

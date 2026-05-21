@@ -20,9 +20,10 @@ const NAV = [
     { id: 'financial',    label: 'Financial Analysis' },
   ]},
   { group: 'Intelligence', items: [
-    { id: 'reasoning',  label: 'Reasoning' },
-    { id: 'risk',        label: 'Risk Analysis' },
-    { id: 'corpus',      label: 'Corpus Explorer' },
+    { id: 'reasoning',       label: 'Reasoning' },
+    { id: 'risk',             label: 'Risk Analysis' },
+    { id: 'corpus',           label: 'Corpus Explorer' },
+    { id: 'rigor-explainer', label: 'Rigor Gate' },
   ]},
 ]
 
@@ -41,6 +42,7 @@ export const PAGE_LABELS = {
   reasoning: 'Reasoning',
   risk: 'Risk Analysis',
   corpus: 'Corpus Explorer',
+  'rigor-explainer': 'Rigor Gate',
   about: 'About',
   imprint: 'Imprint',
 }

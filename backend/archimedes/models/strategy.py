@@ -143,6 +143,9 @@ class Strategy:
     out_of_sample_sharpe: float | None = None
     passes_rigor_gate: bool = False
     kelly_fraction: float | None = None
+    sharpe_ci_lower: float | None = None
+    sharpe_ci_upper: float | None = None
+    n_obs_daily: int | None = None
 
     @property
     def is_active(self) -> bool:

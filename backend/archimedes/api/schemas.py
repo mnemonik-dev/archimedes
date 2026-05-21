@@ -192,6 +192,8 @@ class StrategyResponse(BaseModel):
     passes_rigor_gate: bool = False
     paper_claimed_sharpe: float | None = None
     is_backtest_placeholder: bool = False
+    sharpe_ci_lower: float | None = None
+    sharpe_ci_upper: float | None = None
 
     # Equity curve for charting
     equity_curve: list[PricePoint] = []

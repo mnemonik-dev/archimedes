@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
+import EfficientFrontier from './EfficientFrontier'
+import CorrelationMatrix from './CorrelationMatrix'
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? ''
 
@@ -105,7 +107,15 @@ function FeaturedCard({ s }) {
           {hasBacktest ? (
             <>
               <div className="strat-metric-grid">
-                <div><div className="caption">Sharpe</div><div style={{ fontWeight: 700, fontSize: '1.1rem' }}>{fmt(s.sharpe_ratio)}</div></div>
+                <div>
+                  <div className="caption">Sharpe</div>
+                  <div style={{ fontWeight: 700, fontSize: '1.1rem' }}>{fmt(s.sharpe_ratio)}</div>
+                  {s.sharpe_ci_lower != null && s.sharpe_ci_upper != null && (
+                    <div className="caption" style={{ color: 'var(--text-3)', fontSize: '0.7rem' }}>
+                      95% CI [{fmt(s.sharpe_ci_lower, 2)}, {fmt(s.sharpe_ci_upper, 2)}]
+                    </div>
+                  )}
+                </div>
                 <div><div className="caption">CAGR</div><div className="positive" style={{ fontWeight: 700, fontSize: '1.1rem' }}>{fmtPct(s.cagr)}</div></div>
                 <div><div className="caption">Max DD</div><div className="negative" style={{ fontWeight: 700, fontSize: '1.1rem' }}>−{fmtPct(s.max_drawdown)}</div></div>
                 <div><div className="caption">Win Rate</div><div style={{ fontWeight: 700, fontSize: '1.1rem' }}>{fmtPct(s.win_rate)}</div></div>
@@ -655,6 +665,20 @@ export default function Strategies() {
 
       {/* Paper corpus table */}
       {!loading && strategies.length > 0 && <CorpusTable strategies={strategies} />}
+
+      {/* Efficient frontier visualization */}
+      {!loading && strategies.length > 0 && (
+        <div className="mb-6">
+          <EfficientFrontier />
+        </div>
+      )}
+
+      {/* Library correlation matrix */}
+      {!loading && strategies.length > 0 && (
+        <div className="mb-6">
+          <CorrelationMatrix />
+        </div>
+      )}
 
       {/* Placeholder disclaimer */}
       {strategies.some(s => s.is_backtest_placeholder) && (

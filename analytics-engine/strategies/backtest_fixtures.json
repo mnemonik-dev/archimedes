@@ -1,5 +1,6 @@
 {
   "faber_2007_sma200_timing": {
+    "n_obs_daily": 5560,
     "sharpe_ratio": 0.6335053371,
     "sortino_ratio": 0.7016035946,
     "max_drawdown": 0.246452784213471,
@@ -28,6 +29,7 @@
     "kelly_fraction": 0.839545
   },
   "moreira_muir_2017_volatility_managed": {
+    "n_obs_daily": 5560,
     "sharpe_ratio": 0.768895751079107,
     "sortino_ratio": 0.7076813393568112,
     "max_drawdown": 0.34293786262327136,
@@ -56,6 +58,7 @@
     "kelly_fraction": 1.0
   },
   "moskowitz_ooi_pedersen_2012_tsmom": {
+    "n_obs_daily": 5560,
     "sharpe_ratio": 0.6498500041076123,
     "sortino_ratio": 0.5282956772203458,
     "max_drawdown": 0.2906736584211427,
@@ -84,6 +87,7 @@
     "kelly_fraction": 0.978763
   },
   "pipeline_buy_hold": {
+    "n_obs_daily": 5560,
     "sharpe_ratio": 0.5371036368,
     "sortino_ratio": 0.5066125449,
     "max_drawdown": 0.5627065675925472,
@@ -112,6 +116,7 @@
     "kelly_fraction": 0.721066
   },
   "capital_preservation_tbill": {
+    "n_obs_daily": 5560,
     "sharpe_ratio": 0.4812,
     "sortino_ratio": 0.7344,
     "max_drawdown": 0.0273,
@@ -140,6 +145,7 @@
     "kelly_fraction": 0.08
   },
   "george_hwang_2004_52w_high": {
+    "n_obs_daily": 5560,
     "sharpe_ratio": 0.6198650403,
     "sortino_ratio": 0.6929249859,
     "max_drawdown": 0.314844820243875,
