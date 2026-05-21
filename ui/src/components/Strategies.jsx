@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import EfficientFrontier from './EfficientFrontier'
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? ''
 
@@ -646,6 +647,13 @@ export default function Strategies() {
 
       {/* Paper corpus table */}
       {!loading && strategies.length > 0 && <CorpusTable strategies={strategies} />}
+
+      {/* Efficient frontier visualization */}
+      {!loading && strategies.length > 0 && (
+        <div className="mb-6">
+          <EfficientFrontier />
+        </div>
+      )}
 
       {/* Placeholder disclaimer */}
       {strategies.some(s => s.is_backtest_placeholder) && (
