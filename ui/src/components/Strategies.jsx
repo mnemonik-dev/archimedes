@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import EfficientFrontier from './EfficientFrontier'
+import CorrelationMatrix from './CorrelationMatrix'
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? ''
 
@@ -652,6 +653,13 @@ export default function Strategies() {
       {!loading && strategies.length > 0 && (
         <div className="mb-6">
           <EfficientFrontier />
+        </div>
+      )}
+
+      {/* Library correlation matrix */}
+      {!loading && strategies.length > 0 && (
+        <div className="mb-6">
+          <CorrelationMatrix />
         </div>
       )}
 
