@@ -145,6 +145,28 @@ class TestStrategyRoutes:
         data = resp.json()
         assert data["id"] == sid
 
+    def test_rigor_gate_fields_present_in_list(self, client, seeded_db):
+        """dsr_p_value and passes_rigor_gate must be present on every strategy response."""
+        resp = client.get("/api/strategies/")
+        assert resp.status_code == 200
+        for s in resp.json()["strategies"]:
+            assert "dsr_p_value" in s, f"dsr_p_value missing for {s.get('id')}"
+            assert "passes_rigor_gate" in s, f"passes_rigor_gate missing for {s.get('id')}"
+
+    def test_rigor_gate_fields_correct_for_tier1(self, client, seeded_db):
+        """Moreira-Muir fixture values flow correctly: dsr_p_value ≥ 0.95, passes_rigor_gate=True."""
+        resp = client.get("/api/strategies/")
+        assert resp.status_code == 200
+        mm = next(
+            (s for s in resp.json()["strategies"] if "Volatility" in s.get("paper_title", "")),
+            None,
+        )
+        if mm is None:
+            pytest.skip("Moreira-Muir strategy not found in fixture")
+        assert mm["passes_rigor_gate"] is True
+        assert mm["dsr_p_value"] is not None
+        assert mm["dsr_p_value"] >= 0.95, f"Expected p≥0.95, got {mm['dsr_p_value']}"
+
 
 class TestRiskRoutes:
     def test_risk_profiles(self, client):

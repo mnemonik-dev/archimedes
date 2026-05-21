@@ -138,7 +138,7 @@ def _to_strategy_response(s: Strategy) -> StrategyResponse:
         pbo_score=s.pbo_score if has_real else (bt.pbo_score if bt else None),
         out_of_sample_sharpe=s.out_of_sample_sharpe if has_real else (bt.out_of_sample_sharpe if bt else None),
         kelly_fraction=s.kelly_fraction,
-        passes_rigor_gate=s.passes_rigor_gate,
+        passes_rigor_gate=s.passes_rigor_gate if has_real else (bt.passes_rigor_gate if bt else s.passes_rigor_gate),
         is_backtest_placeholder=not has_real,
     )
 
