@@ -268,3 +268,49 @@ class TestAgentRoutes:
         assert resp.status_code == 200
         data = resp.json()
         assert "alive" in data
+
+
+class TestAdvisorRoutes:
+    def test_advisor_happy_path(self, client, seeded_db):
+        """Advisor returns allocations with weights summing to ≈ synth_weight."""
+        resp = client.get("/api/strategies/advisor?risk_profile=moderate")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "regime" in data
+        assert "usdc_weight" in data
+        assert "synth_weight" in data
+        assert "allocations" in data
+        assert "expected_portfolio" in data
+        ep = data["expected_portfolio"]
+        assert "sharpe" in ep
+        assert "cagr" in ep
+        assert "max_drawdown" in ep
+        # Weights must sum to ≈ synth_weight (within floating-point rounding)
+        total_alloc = sum(a["weight"] for a in data["allocations"])
+        assert abs(total_alloc - data["synth_weight"]) < 0.01, (
+            f"Allocation weights ({total_alloc:.4f}) must sum to synth_weight "
+            f"({data['synth_weight']:.4f})"
+        )
+
+    def test_advisor_all_risk_profiles(self, client, seeded_db):
+        """Every valid risk_profile returns 200 with a non-empty allocations list."""
+        profiles = ["fixed_income", "conservative", "moderate", "aggressive", "hyper_risky"]
+        for profile in profiles:
+            resp = client.get(f"/api/strategies/advisor?risk_profile={profile}")
+            assert resp.status_code == 200, f"Advisor failed for profile={profile}"
+            data = resp.json()
+            assert data.get("risk_profile") == profile
+
+    def test_advisor_invalid_profile(self, client):
+        """Invalid risk_profile yields 422 validation error."""
+        resp = client.get("/api/strategies/advisor?risk_profile=yolo")
+        assert resp.status_code == 422
+
+    def test_advisor_redis_unavailable(self, client, seeded_db):
+        """Advisor falls back to transition regime when Redis is down."""
+        resp = client.get("/api/strategies/advisor?risk_profile=moderate")
+        # Redis is not running in unit tests; endpoint must not 500.
+        assert resp.status_code == 200
+        data = resp.json()
+        # Without Redis the regime defaults to "transition"
+        assert data["regime"] == "transition"

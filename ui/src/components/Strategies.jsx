@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import EfficientFrontier from './EfficientFrontier'
 import CorrelationMatrix from './CorrelationMatrix'
+import RegimePanel from './RegimePanel'
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? ''
 
@@ -56,7 +57,7 @@ function WeightBar({ weight, accent }) {
 
 // ── Featured Passport Card ────────────────────────────────────
 
-function FeaturedCard({ s }) {
+function FeaturedCard({ s, regime }) {
   const [open, setOpen] = useState(false)
   const hasBacktest = s.sharpe_ratio != null
   const isGatePassed = s.passes_rigor_gate === true
@@ -64,14 +65,33 @@ function FeaturedCard({ s }) {
   const pctOfClaim = s.paper_claimed_sharpe && s.sharpe_ratio != null
     ? ((s.sharpe_ratio / s.paper_claimed_sharpe) * 100).toFixed(0)
     : null
+  const recommended = isRecommendedForRegime(s, regime)
 
   return (
     <div className="card-elevated mb-6 fade-up fade-up-3">
+      {recommended && regime && (
+        <div style={{
+          padding: '6px 14px', borderRadius: '8px 8px 0 0', marginBottom: 16,
+          background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.25)',
+          fontSize: '0.78rem', fontWeight: 600, color: 'var(--positive)',
+        }}>
+          Recommended for current {regime.regime.replace(/_/g, ' ')} regime
+        </div>
+      )}
       <div className="flex items-center justify-between mb-5">
         <div>
           <div className="flex items-center gap-3 mb-2">
             <h3 style={{ fontSize: '1.2rem' }}>{s.paper_title}</h3>
             <span className={`tag ${statusTag(s.status)}`} style={{ textTransform: 'capitalize' }}>{s.status}</span>
+            {recommended && (
+              <span style={{
+                fontSize: '0.72rem', fontWeight: 700, padding: '2px 7px', borderRadius: 4,
+                background: 'rgba(16,185,129,0.15)', color: 'var(--positive)',
+                border: '1px solid rgba(16,185,129,0.35)',
+              }}>
+                ★ Recommended now
+              </span>
+            )}
             {s.is_backtest_placeholder && (
               <span className="strat-placeholder-note">est. metrics</span>
             )}
@@ -248,16 +268,26 @@ function FeaturedCard({ s }) {
 
 // ── Strategy Grid Card ────────────────────────────────────────
 
-function StrategyCard({ s }) {
+function StrategyCard({ s, regime }) {
   const [open, setOpen] = useState(false)
   const hasBacktest = s.sharpe_ratio != null
   const isGatePassed = s.passes_rigor_gate === true
   const isGateFailed = hasBacktest && s.passes_rigor_gate === false
+  const recommended = isRecommendedForRegime(s, regime)
 
   return (
-    <div className="card fade-up fade-up-4">
+    <div className="card fade-up fade-up-4" style={recommended ? { border: '1px solid rgba(16,185,129,0.3)' } : {}}>
       <div className="flex items-center gap-3 mb-3" style={{ flexWrap: 'wrap' }}>
         <h3 style={{ flex: 1 }}>{s.paper_title}</h3>
+        {recommended && (
+          <span style={{
+            fontSize: '0.68rem', fontWeight: 700, padding: '2px 6px', borderRadius: 4,
+            background: 'rgba(16,185,129,0.12)', color: 'var(--positive)',
+            border: '1px solid rgba(16,185,129,0.3)',
+          }}>
+            ★ Recommended now
+          </span>
+        )}
         <span className={`tag ${statusTag(s.status)}`} style={{ textTransform: 'capitalize' }}>{s.status}</span>
       </div>
       <div className="caption mb-3">
@@ -563,11 +593,41 @@ function StrategyArchitect({ strategies }) {
 
 // ── Main export ───────────────────────────────────────────────
 
+// ── Regime helpers ────────────────────────────────────────────
+
+function regimeBg(r) {
+  if (r === 'risk_on') return 'rgba(16,185,129,0.08)'
+  if (r === 'crisis') return 'rgba(239,68,68,0.12)'
+  if (r === 'risk_off') return 'rgba(239,68,68,0.08)'
+  return 'rgba(245,158,11,0.08)'
+}
+function regimeBorder(r) {
+  if (r === 'risk_on') return 'rgba(16,185,129,0.3)'
+  if (r === 'crisis' || r === 'risk_off') return 'rgba(239,68,68,0.3)'
+  return 'rgba(245,158,11,0.3)'
+}
+function regimeLabel(r) {
+  if (r === 'risk_on') return 'Trend-following strategies favoured'
+  if (r === 'risk_off') return 'Volatility-managed strategies favoured'
+  if (r === 'crisis') return 'Capital preservation strategies favoured'
+  return 'Mixed signals — all strategies under review'
+}
+function isRecommendedForRegime(strategy, regime) {
+  if (!regime || regime.regime === 'unknown') return false
+  const title = (strategy.paper_title || '').toLowerCase()
+  if (regime.regime === 'risk_on') return title.includes('momentum') || title.includes('52-week') || title.includes('tsmom')
+  if (regime.regime === 'risk_off' || regime.regime === 'transition')
+    return title.includes('volatility') || title.includes('managed')
+  if (regime.regime === 'crisis') return title.includes('preservation') || title.includes('t-bill')
+  return false
+}
+
 export default function Strategies() {
   const [strategies, setStrategies] = useState([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [activeFilter, setActiveFilter] = useState('all')
+  const [regime, setRegime] = useState(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -587,6 +647,10 @@ export default function Strategies() {
 
   useEffect(() => { load() }, [load])
 
+  useEffect(() => {
+    apiGet('/api/regime/current').then(setRegime).catch(() => {})
+  }, [])
+
   const counts = {
     all: strategies.length,
     live: strategies.filter(s => s.status === 'live').length,
@@ -594,14 +658,27 @@ export default function Strategies() {
     candidate: strategies.filter(s => s.status === 'candidate').length,
   }
 
-  const visible = activeFilter === 'all'
+  const filtered = activeFilter === 'all'
     ? strategies
     : strategies.filter(s => s.status === activeFilter)
+
+  // Sort recommended strategies to top within the filtered list
+  const visible = [...filtered].sort((a, b) => {
+    const aRec = isRecommendedForRegime(a, regime) ? 0 : 1
+    const bRec = isRecommendedForRegime(b, regime) ? 0 : 1
+    return aRec - bRec
+  })
 
   // Featured = highest Sharpe among visible live strategies; fall back to first live, then first
   const liveWithSharpe = visible
     .filter(s => s.status === 'live' && s.sharpe_ratio != null)
-    .sort((a, b) => b.sharpe_ratio - a.sharpe_ratio)
+    .sort((a, b) => {
+      // Recommended first, then by Sharpe
+      const aRec = isRecommendedForRegime(a, regime) ? 1 : 0
+      const bRec = isRecommendedForRegime(b, regime) ? 1 : 0
+      if (aRec !== bRec) return bRec - aRec
+      return b.sharpe_ratio - a.sharpe_ratio
+    })
   const featured = liveWithSharpe[0]
     ?? visible.find(s => s.status === 'live')
     ?? visible[0]
@@ -617,6 +694,9 @@ export default function Strategies() {
 
   return (
     <div>
+      {/* ── Regime Panel ─────────────────────────────────── */}
+      <RegimePanel regime={regime} />
+
       {/* ── Explorer ──────────────────────────────────────── */}
       <div className="fade-up fade-up-1" style={{ maxWidth: 640, marginBottom: 28 }}>
         <h2 className="serif" style={{ fontSize: '2rem', marginBottom: 10 }}>Paper-Grounded Strategies</h2>
@@ -625,6 +705,24 @@ export default function Strategies() {
           or curated by hand, backtested against real data, with paper-claim deltas surfaced honestly.
         </p>
       </div>
+
+      {/* Regime banner */}
+      {regime && regime.regime !== 'unknown' && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px',
+          borderRadius: 8, marginBottom: 20,
+          background: regimeBg(regime.regime),
+          border: `1px solid ${regimeBorder(regime.regime)}`,
+        }}>
+          <span style={{ fontWeight: 700, fontSize: '0.85rem', textTransform: 'uppercase' }}>
+            {regime.regime.replace(/_/g, ' ')}
+          </span>
+          <span className="caption">confidence {fmtPct(regime.confidence)}</span>
+          <span className="caption" style={{ marginLeft: 'auto', color: 'var(--text-3)' }}>
+            {regimeLabel(regime.regime)}
+          </span>
+        </div>
+      )}
 
       {/* Filter tabs */}
       <div className="strat-filter-bar fade-up fade-up-2">
@@ -654,12 +752,12 @@ export default function Strategies() {
       )}
 
       {/* Featured passport card */}
-      {featured && <FeaturedCard s={featured} />}
+      {featured && <FeaturedCard s={featured} regime={regime} />}
 
       {/* Strategy grid */}
       {grid.length > 0 && (
         <div className="strat-grid-2 mb-6">
-          {grid.map(s => <StrategyCard key={s.id} s={s} />)}
+          {grid.map(s => <StrategyCard key={s.id} s={s} regime={regime} />)}
         </div>
       )}
 
