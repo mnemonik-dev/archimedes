@@ -57,25 +57,26 @@ export default function CorrelationMatrix() {
   const n = labels.length
 
   /**
-   * Colour interpolation: green (0) → neutral (0.5) → red (1).
+   * Colour interpolation: green (0) → neutral grey (0.5) → red (1).
    * Uses RGBA so it works on any background.
+   * green = rgba(16,185,129), neutral = rgba(120,120,120), red = rgba(239,68,68)
    */
   function cellColor(value) {
     const v = Math.max(0, Math.min(1, value))
     if (v <= 0.5) {
-      // 0 → pure green, 0.5 → neutral
+      // green → neutral grey
       const t = v * 2
-      const r = Math.round(16 + t * (239 - 16))   // 16→239
-      const g = Math.round(185 + t * (68 - 185))   // 185→68
-      const b = Math.round(129 + t * (68 - 129))   // 129→68
-      return `rgba(${r},${g},${b},${0.15 + t * 0.25})`
+      const r = Math.round(16  + t * (120 - 16))
+      const g = Math.round(185 + t * (120 - 185))
+      const b = Math.round(129 + t * (120 - 129))
+      return `rgba(${r},${g},${b},${0.15 + t * 0.20})`
     } else {
-      // 0.5 → neutral, 1 → pure red
+      // neutral grey → red
       const t = (v - 0.5) * 2
-      const r = Math.round(239)
-      const g = Math.round(68 - t * 68)
-      const b = Math.round(68 - t * 68)
-      return `rgba(${r},${g},${b},${0.15 + t * 0.35})`
+      const r = Math.round(120 + t * (239 - 120))
+      const g = Math.round(120 + t * (68  - 120))
+      const b = Math.round(120 + t * (68  - 120))
+      return `rgba(${r},${g},${b},${0.35 + t * 0.15})`
     }
   }
 
