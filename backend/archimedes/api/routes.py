@@ -621,11 +621,11 @@ async def get_portfolio_advisor(
     # Score strategies via Kelly + risk-parity
     scored = []
     for s in strategies:
-        sr = s.real_sharpe or 0.5
+        sr = s.real_sharpe if s.real_sharpe is not None else 0.5
         if sr < 0.3:
             continue
         # Estimate daily vol from SR and CAGR
-        mu_d = (s.real_cagr or 0.08) / 252
+        mu_d = (s.real_cagr if s.real_cagr is not None else 0.08) / 252
         sigma_d = abs(mu_d / (sr / math.sqrt(252))) if sr != 0 else 0.01
         vol_ann = sigma_d * math.sqrt(252)
         # Kelly fraction (half-Kelly cap at 0.5)
@@ -635,8 +635,8 @@ async def get_portfolio_advisor(
             "title": s.paper_title,
             "symbol": (s.asset_universe[0] if s.asset_universe else "sSPY"),
             "sharpe": round(sr, 4),
-            "cagr": round(s.real_cagr or 0.0, 4),
-            "max_drawdown": round(s.real_max_dd or 0.0, 4),
+            "cagr": round(s.real_cagr if s.real_cagr is not None else 0.0, 4),
+            "max_drawdown": round(s.real_max_dd if s.real_max_dd is not None else 0.0, 4),
             "vol_ann": round(vol_ann, 4),
             "kelly_fraction": round(kelly, 4),
             "passes_rigor_gate": s.passes_rigor_gate,
