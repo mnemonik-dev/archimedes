@@ -621,11 +621,11 @@ async def get_portfolio_advisor(
     # Score strategies via Kelly + risk-parity
     scored = []
     for s in strategies:
-        sr = s.real_sharpe or 0.5
+        sr = s.real_sharpe if s.real_sharpe is not None else 0.5
         if sr < 0.3:
             continue
         # Estimate daily vol from SR and CAGR
-        mu_d = (s.real_cagr or 0.08) / 252
+        mu_d = (s.real_cagr if s.real_cagr is not None else 0.08) / 252
         sigma_d = abs(mu_d / (sr / math.sqrt(252))) if sr != 0 else 0.01
         vol_ann = sigma_d * math.sqrt(252)
         # Kelly fraction (half-Kelly cap at 0.5)
@@ -635,8 +635,8 @@ async def get_portfolio_advisor(
             "title": s.paper_title,
             "symbol": (s.asset_universe[0] if s.asset_universe else "sSPY"),
             "sharpe": round(sr, 4),
-            "cagr": round(s.real_cagr or 0.0, 4),
-            "max_drawdown": round(s.real_max_dd or 0.0, 4),
+            "cagr": round(s.real_cagr if s.real_cagr is not None else 0.0, 4),
+            "max_drawdown": round(s.real_max_dd if s.real_max_dd is not None else 0.0, 4),
             "vol_ann": round(vol_ann, 4),
             "kelly_fraction": round(kelly, 4),
             "passes_rigor_gate": s.passes_rigor_gate,
@@ -1371,6 +1371,8 @@ async def get_current_regime():
     state = AgentStateStore()
     try:
         data = await state.load_regime()
+    except Exception:
+        data = None
     finally:
         await state.close()
 
@@ -1459,6 +1461,9 @@ async def get_regime_transitions():
         data = await state.load_regime()
         transitions = data.get("transition_probabilities") if data else None
         history = data.get("regime_history_summary") if data else None
+    except Exception:
+        transitions = None
+        history = None
     finally:
         await state.close()
 
@@ -1636,40 +1641,44 @@ async def get_agent_status():
         heartbeat = await state.get_heartbeat()
         regime_data = await state.load_regime()
         events = await state.get_events(count=10)
+    except Exception:
+        heartbeat = None
+        regime_data = None
+        events = []
+    finally:
+        await state.close()
 
-        alive = False
-        if heartbeat:
-            try:
-                hb_time = datetime.fromisoformat(heartbeat)
-                age = (datetime.now(timezone.utc) - hb_time).total_seconds()
-                alive = age < 600
-            except Exception:
-                pass
-
-        regime = regime_data.get("regime") if regime_data else None
-        confidence = regime_data.get("confidence") if regime_data else None
-        source = regime_data.get("source") if regime_data else None
-        strat_count = regime_data.get("strategy_count", 0) if regime_data else 0
-
-        vault_count = 0
+    alive = False
+    if heartbeat:
         try:
-            vaults = await chain_executor.get_all_vaults()
-            vault_count = len(vaults) if vaults else 0
+            hb_time = datetime.fromisoformat(heartbeat)
+            age = (datetime.now(timezone.utc) - hb_time).total_seconds()
+            alive = age < 600
         except Exception:
             pass
 
-        return AgentStatusResponse(
-            alive=alive,
-            last_heartbeat=heartbeat,
-            regime=regime,
-            regime_confidence=confidence,
-            regime_source=source,
-            strategy_count=strat_count,
-            managed_vaults=vault_count,
-            recent_events=events,
-        )
-    finally:
-        await state.close()
+    regime = regime_data.get("regime") if regime_data else None
+    confidence = regime_data.get("confidence") if regime_data else None
+    source = regime_data.get("source") if regime_data else None
+    strat_count = regime_data.get("strategy_count", 0) if regime_data else 0
+
+    vault_count = 0
+    try:
+        vaults = await chain_executor.get_all_vaults()
+        vault_count = len(vaults) if vaults else 0
+    except Exception:
+        pass
+
+    return AgentStatusResponse(
+        alive=alive,
+        last_heartbeat=heartbeat,
+        regime=regime,
+        regime_confidence=confidence,
+        regime_source=source,
+        strategy_count=strat_count,
+        managed_vaults=vault_count,
+        recent_events=events,
+    )
 
 
 @agent_router.get("/circle-status")
