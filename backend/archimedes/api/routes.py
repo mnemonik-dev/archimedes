@@ -580,6 +580,8 @@ async def get_portfolio_advisor(
     state = AgentStateStore()
     try:
         regime_data = await state.load_regime()
+    except Exception:
+        regime_data = None
     finally:
         await state.close()
 
@@ -1391,16 +1393,16 @@ async def get_current_regime():
         regime_to_keywords = {
             "risk_on":    ["momentum", "tsmom", "52w_high", "52-week"],
             "transition": ["volatility", "managed", "tsmom"],
-            "risk_off":   ["volatility", "managed", "tbill"],
-            "crisis":     ["tbill", "preservation", "capital"],
+            "risk_off":   ["volatility", "managed", "t-bill"],
+            "crisis":     ["t-bill", "preservation", "capital"],
         }
         all_strats = _strategy_provider.list_strategies()
         regime_keywords = regime_to_keywords.get(regime_value, [])
         recommended_ids: list[str] = []
         for keyword in regime_keywords:
             for s in all_strats:
-                title_lower = s.paper_title.lower()
-                if keyword in title_lower or keyword.replace("_", " ") in title_lower:
+                title_lower = s.paper_title.lower().replace("_", " ")
+                if keyword in title_lower or keyword.replace("-", "") in title_lower.replace("-", ""):
                     if s.id not in recommended_ids:
                         recommended_ids.append(s.id)
                         break
@@ -1411,7 +1413,7 @@ async def get_current_regime():
             timestamp=data.get("timestamp", ""),
             regime_changed=data.get("regime_changed", False),
             signals=RegimeSignalsResponse(
-                vix_level=data.get("vix_level", 0.0),
+                vix_level=data.get("vix_level") or data.get("vix", 0.0),
                 sp500_above_ma50=data.get("sp500_above_ma50", True),
                 sp500_above_ma200=data.get("sp500_above_ma200", True),
                 vix_rate_of_change=data.get("vix_rate_of_change"),

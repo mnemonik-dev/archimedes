@@ -36,7 +36,7 @@ function regimeBorder(regime) {
 }
 
 function MiniBar({ value, max, color }) {
-  const pct = Math.min((value / (max || 1)) * 100, 100)
+  const pct = Math.max(0, Math.min((value / (max || 1)) * 100, 100))
   return (
     <div style={{ background: 'rgba(255,255,255,0.06)', borderRadius: 3, height: 6, overflow: 'hidden', flex: 1 }}>
       <div style={{ width: `${pct.toFixed(1)}%`, height: '100%', background: color || 'var(--accent)' }} />
@@ -59,16 +59,19 @@ function TransitionRow({ from, to, prob }) {
   )
 }
 
-export default function RegimePanel() {
-  const [regime, setRegime] = useState(null)
-  const [loading, setLoading] = useState(true)
+export default function RegimePanel({ regime: regimeProp = null }) {
+  const [fetchedRegime, setFetchedRegime] = useState(null)
+  const [loading, setLoading] = useState(regimeProp == null)
 
   useEffect(() => {
+    if (regimeProp != null) return
     apiGet('/api/regime/current')
-      .then(setRegime)
+      .then(setFetchedRegime)
       .catch(() => {})
       .finally(() => setLoading(false))
-  }, [])
+  }, [regimeProp])
+
+  const regime = regimeProp ?? fetchedRegime
 
   if (loading) {
     return (

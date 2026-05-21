@@ -695,7 +695,7 @@ export default function Strategies() {
   return (
     <div>
       {/* ── Regime Panel ─────────────────────────────────── */}
-      <RegimePanel />
+      <RegimePanel regime={regime} />
 
       {/* ── Explorer ──────────────────────────────────────── */}
       <div className="fade-up fade-up-1" style={{ maxWidth: 640, marginBottom: 28 }}>
