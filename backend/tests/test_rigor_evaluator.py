@@ -31,6 +31,7 @@ from archimedes.services.rigor_evaluator import (
     compute_kelly_fraction,
     compute_oos_sharpe,
     compute_pbo,
+    compute_sharpe_ci,
 )
 
 _ANNUALIZATION = 252
@@ -270,3 +271,75 @@ def test_kelly_is_clipped_to_unit_interval():
     assert f is not None
     assert f <= 1.0, "Kelly fraction must be clipped to ≤ 1.0"
     assert f >= 0.0
+
+
+# ─── Sharpe CI (Lo 2002) ─────────────────────────────────────────────
+
+
+def test_sharpe_ci_symmetric_around_point_estimate():
+    """CI must be symmetric: point estimate is the midpoint of (lower, upper)."""
+    sr = 1.0
+    lower, upper = compute_sharpe_ci(sr, n_obs_daily=252, confidence=0.95)
+    mid = (lower + upper) / 2
+    assert abs(mid - sr) < 1e-9, f"CI midpoint {mid:.6f} must equal SR {sr}"
+
+
+def test_sharpe_ci_wider_with_fewer_obs():
+    """Fewer observations → wider confidence interval."""
+    sr = 0.8
+    lo_wide, hi_wide = compute_sharpe_ci(sr, n_obs_daily=252)
+    lo_narrow, hi_narrow = compute_sharpe_ci(sr, n_obs_daily=2520)
+    assert (hi_wide - lo_wide) > (hi_narrow - lo_narrow), (
+        "CI with 252 obs must be wider than CI with 2520 obs"
+    )
+
+
+def test_sharpe_ci_wider_with_higher_confidence():
+    """Higher confidence level → wider interval."""
+    sr = 0.7
+    lo_95, hi_95 = compute_sharpe_ci(sr, n_obs_daily=500, confidence=0.95)
+    lo_99, hi_99 = compute_sharpe_ci(sr, n_obs_daily=500, confidence=0.99)
+    assert (hi_99 - lo_99) > (hi_95 - lo_95), "99% CI must be wider than 95% CI"
+
+
+def test_sharpe_ci_lo2002_formula_pinned():
+    """Pin Lo (2002) SE against a manually computed reference value.
+
+    SR_annual = 1.0, n = 252, confidence = 0.95.
+    SR_daily = 1/sqrt(252)
+    SE = sqrt((1 + 0.5*(1/252)) * 252 / 252) = sqrt(1 + 0.5/252) ≈ 1.001
+    z_0.975 ≈ 1.96 → half-width ≈ 1.96 * 1.001 ≈ 1.962
+    """
+    import math
+    sr = 1.0
+    n = 252
+    sr_daily = sr / math.sqrt(252)
+    se = math.sqrt((1 + 0.5 * sr_daily ** 2) * 252 / n)
+    from scipy.stats import norm
+    z = norm.ppf(0.975)
+    expected_lower = sr - z * se
+    expected_upper = sr + z * se
+
+    lower, upper = compute_sharpe_ci(sr, n_obs_daily=n, confidence=0.95)
+    assert abs(lower - expected_lower) < 1e-9
+    assert abs(upper - expected_upper) < 1e-9
+
+
+def test_sharpe_ci_rejects_invalid_n():
+    """n_obs_daily ≤ 0 must raise ValueError."""
+    import pytest
+    with pytest.raises(ValueError, match="n_obs_daily"):
+        compute_sharpe_ci(1.0, n_obs_daily=0)
+    with pytest.raises(ValueError, match="n_obs_daily"):
+        compute_sharpe_ci(1.0, n_obs_daily=-5)
+
+
+def test_sharpe_ci_rejects_invalid_confidence():
+    """Confidence outside (0, 1) must raise ValueError."""
+    import pytest
+    with pytest.raises(ValueError, match="confidence"):
+        compute_sharpe_ci(1.0, n_obs_daily=252, confidence=0.0)
+    with pytest.raises(ValueError, match="confidence"):
+        compute_sharpe_ci(1.0, n_obs_daily=252, confidence=1.0)
+    with pytest.raises(ValueError, match="confidence"):
+        compute_sharpe_ci(1.0, n_obs_daily=252, confidence=1.5)
