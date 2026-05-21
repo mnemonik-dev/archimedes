@@ -195,6 +195,10 @@ class StrategyResponse(BaseModel):
     sharpe_ci_lower: float | None = None
     sharpe_ci_upper: float | None = None
 
+    # Backtest period (ISO date strings; what window the metrics were computed over)
+    backtest_start: str | None = None
+    backtest_end: str | None = None
+
     # Equity curve for charting
     equity_curve: list[PricePoint] = []
 

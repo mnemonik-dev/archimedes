@@ -3,6 +3,9 @@
 .env.*
 !.env.example
 
+# Buffer files
+*~
+
 # Python
 __pycache__/
 *.py[cod]

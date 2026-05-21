@@ -136,6 +136,8 @@ class Strategy:
     real_calmar: float | None = None
     real_corr_spy: float | None = None
     real_total_trades: int | None = None
+    real_backtest_start: str | None = None  # ISO date of the fixture-recorded backtest window
+    real_backtest_end: str | None = None
     deflated_sharpe_ratio: float | None = None
     dsr_p_value: float | None = None
     num_trials_in_selection: int | None = None

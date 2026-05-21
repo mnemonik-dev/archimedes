@@ -47,6 +47,35 @@ function truncHash(h) {
   return h ? `${h.slice(0, 8)}…${h.slice(-6)}` : '—'
 }
 
+// "2002-01-01" -> Date; null on bad input
+function isoToDate(iso) {
+  if (!iso) return null
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? null : d
+}
+
+// Backtest window in fractional years; null if either bound missing/bad
+export function periodInYears(startIso, endIso) {
+  const a = isoToDate(startIso), b = isoToDate(endIso)
+  if (!a || !b) return null
+  const days = (b - a) / 86_400_000
+  return days > 0 ? days / 365.25 : null
+}
+
+// $1k -> $X over `years` at compound `cagr`. Returns null if either missing.
+export function projectedEndValue(principal, cagr, years) {
+  if (cagr == null || years == null) return null
+  return principal * Math.pow(1 + cagr, years)
+}
+
+export function fmtUsd(n, fractionDigits = 0) {
+  if (n == null) return '—'
+  return n.toLocaleString('en-US', {
+    style: 'currency', currency: 'USD',
+    minimumFractionDigits: fractionDigits, maximumFractionDigits: fractionDigits,
+  })
+}
+
 function WeightBar({ weight, accent }) {
   return (
     <div style={{ background: 'rgba(255,255,255,0.06)', borderRadius: 4, height: 8, overflow: 'hidden' }}>
@@ -55,389 +84,65 @@ function WeightBar({ weight, accent }) {
   )
 }
 
-// ── Featured Passport Card ────────────────────────────────────
-
-function FeaturedCard({ s, regime }) {
-  const [open, setOpen] = useState(false)
-  const hasBacktest = s.sharpe_ratio != null
-  const isGatePassed = s.passes_rigor_gate === true
-  const isGateFailed = hasBacktest && s.passes_rigor_gate === false
-  const pctOfClaim = s.paper_claimed_sharpe && s.sharpe_ratio != null
-    ? ((s.sharpe_ratio / s.paper_claimed_sharpe) * 100).toFixed(0)
-    : null
-  const recommended = isRecommendedForRegime(s, regime)
-
-  return (
-    <div className="card-elevated mb-6 fade-up fade-up-3">
-      {recommended && regime && (
-        <div style={{
-          padding: '6px 14px', borderRadius: '8px 8px 0 0', marginBottom: 16,
-          background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.25)',
-          fontSize: '0.78rem', fontWeight: 600, color: 'var(--positive)',
-        }}>
-          Recommended for current {regime.regime.replace(/_/g, ' ')} regime
-        </div>
-      )}
-      <div className="flex items-center justify-between mb-5">
-        <div>
-          <div className="flex items-center gap-3 mb-2">
-            <h3 style={{ fontSize: '1.2rem' }}>{s.paper_title}</h3>
-            <span className={`tag ${statusTag(s.status)}`} style={{ textTransform: 'capitalize' }}>{s.status}</span>
-            {recommended && (
-              <span style={{
-                fontSize: '0.72rem', fontWeight: 700, padding: '2px 7px', borderRadius: 4,
-                background: 'rgba(16,185,129,0.15)', color: 'var(--positive)',
-                border: '1px solid rgba(16,185,129,0.35)',
-              }}>
-                ★ Recommended now
-              </span>
-            )}
-            {s.is_backtest_placeholder && (
-              <span className="strat-placeholder-note">est. metrics</span>
-            )}
-          </div>
-          <div className="body">{s.methodology_summary}</div>
-        </div>
-      </div>
-
-      <div className="strat-grid-3" style={{ gap: 14 }}>
-        {/* Source Paper */}
-        <div className="card-flat" style={{ padding: 20 }}>
-          <div className="label mb-3">Source Paper</div>
-          <div style={{ fontWeight: 600, fontSize: '0.88rem', marginBottom: 4, lineHeight: 1.4 }}>
-            "{s.paper_title}"
-          </div>
-          <div className="caption mb-3">
-            {s.paper_authors?.slice(0, 2).join(', ')}{s.paper_authors?.length > 2 ? ' et al.' : ''}{s.paper_year ? ` (${s.paper_year})` : ''}
-            {s.paper_venue ? ` · ${s.paper_venue}` : ''}
-          </div>
-          <div className="flex gap-2 mb-3">
-            {s.asset_universe?.slice(0, 3).map(a => (
-              <span key={a} className="tag tag-muted">{a}</span>
-            ))}
-          </div>
-          {s.paper_doi && <div className="caption">DOI: <span className="mono" style={{ color: 'var(--info)', fontSize: '0.75rem' }}>{s.paper_doi.slice(0, 20)}…</span></div>}
-          {s.paper_citation_count != null && <div className="caption">Citations: {s.paper_citation_count.toLocaleString()}</div>}
-          {s.curator_note && <div className="caption" style={{ marginTop: 6, fontStyle: 'italic' }}>Curator: Dan</div>}
-        </div>
-
-        {/* Backtest */}
-        <div className="card-flat" style={{ padding: 20 }}>
-          <div className="label mb-3">Backtest Metrics{s.is_backtest_placeholder ? ' (est.)' : ''}</div>
-          {hasBacktest ? (
-            <>
-              <div className="strat-metric-grid">
-                <div>
-                  <div className="caption">Sharpe</div>
-                  <div style={{ fontWeight: 700, fontSize: '1.1rem' }}>{fmt(s.sharpe_ratio)}</div>
-                  {s.sharpe_ci_lower != null && s.sharpe_ci_upper != null && (
-                    <div className="caption" style={{ color: 'var(--text-3)', fontSize: '0.7rem' }}>
-                      95% CI [{fmt(s.sharpe_ci_lower, 2)}, {fmt(s.sharpe_ci_upper, 2)}]
-                    </div>
-                  )}
-                </div>
-                <div><div className="caption">CAGR</div><div className="positive" style={{ fontWeight: 700, fontSize: '1.1rem' }}>{fmtPct(s.cagr)}</div></div>
-                <div><div className="caption">Max DD</div><div className="negative" style={{ fontWeight: 700, fontSize: '1.1rem' }}>−{fmtPct(s.max_drawdown)}</div></div>
-                <div><div className="caption">Win Rate</div><div style={{ fontWeight: 700, fontSize: '1.1rem' }}>{fmtPct(s.win_rate)}</div></div>
-                <div><div className="caption">Calmar</div><div style={{ fontWeight: 700, fontSize: '1.1rem' }}>{fmt(s.calmar_ratio)}</div></div>
-                <div><div className="caption">Corr SPY</div><div style={{ fontWeight: 700, fontSize: '1.1rem' }}>{fmt(s.correlation_to_spy)}</div></div>
-              </div>
-              {s.paper_claimed_sharpe != null && (
-                <>
-                  <div className="divider" style={{ margin: '10px 0 8px' }} />
-                  <div className="caption">Paper claimed: <strong>{fmt(s.paper_claimed_sharpe)}</strong></div>
-                  <div className="caption">Backtest: <strong>{fmt(s.sharpe_ratio)}</strong>
-                    {pctOfClaim && (
-                      <span className={pctOfClaim >= 50 ? 'positive' : 'negative'} style={{ marginLeft: 6 }}>
-                        ({pctOfClaim}% {pctOfClaim >= 50 ? '✓' : '⚠'})
-                      </span>
-                    )}
-                  </div>
-                </>
-              )}
-              {(s.deflated_sharpe_ratio != null || s.pbo_score != null || s.kelly_fraction != null) && (
-                <>
-                  <div className="divider" style={{ margin: '10px 0 8px' }} />
-                  <div className="caption" style={{ marginBottom: 6, color: 'var(--text-3)', letterSpacing: '0.05em', fontSize: '0.7rem', textTransform: 'uppercase' }}>Rigor Metrics</div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 8 }}>
-                    {s.deflated_sharpe_ratio != null && (
-                      <div>
-                        <div className="caption" style={{ fontSize: '0.7rem' }}>DSR</div>
-                        <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>{fmt(s.deflated_sharpe_ratio)}</div>
-                        {s.dsr_p_value != null && (
-                          <div className="caption" style={{ fontSize: '0.65rem', color: s.dsr_p_value >= 0.95 ? 'var(--positive)' : 'var(--text-3)' }}>
-                            p={fmt(s.dsr_p_value, 3)}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                    {s.pbo_score != null && (
-                      <div>
-                        <div className="caption" style={{ fontSize: '0.7rem' }}>PBO</div>
-                        <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>{fmtPct(s.pbo_score)}</div>
-                        <div className="caption" style={{ fontSize: '0.65rem', color: s.pbo_score < 0.5 ? 'var(--positive)' : 'var(--negative)' }}>
-                          {s.pbo_score < 0.5 ? '< 50% threshold' : '≥ 50% threshold'}
-                        </div>
-                      </div>
-                    )}
-                    {s.kelly_fraction != null && (
-                      <div>
-                        <div className="caption" style={{ fontSize: '0.7rem' }}>Kelly f*</div>
-                        <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>{fmtPct(s.kelly_fraction)}</div>
-                      </div>
-                    )}
-                  </div>
-                  {s.out_of_sample_sharpe != null && (
-                    <div className="caption" style={{ marginBottom: 6 }}>
-                      OOS Sharpe: <strong>{fmt(s.out_of_sample_sharpe)}</strong>
-                      <span className="caption" style={{ marginLeft: 4, color: 'var(--text-4)' }}>(walk-forward)</span>
-                    </div>
-                  )}
-                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 8px', borderRadius: 4, fontSize: '0.72rem', fontWeight: 600,
-                    background: isGatePassed ? 'rgba(16,185,129,0.12)' : isGateFailed ? 'rgba(239,68,68,0.12)' : 'rgba(255,255,255,0.06)',
-                    color: isGatePassed ? 'var(--positive)' : isGateFailed ? 'var(--negative)' : 'var(--text-3)',
-                    border: `1px solid ${isGatePassed ? 'rgba(16,185,129,0.3)' : isGateFailed ? 'rgba(239,68,68,0.3)' : 'var(--glass-border)'}`,
-                  }}>
-                    {isGatePassed ? '✓ Rigor Gate: Passed' : isGateFailed ? '✕ Rigor Gate: Failed' : '◌ Rigor Gate: Pending'}
-                  </div>
-                </>
-              )}
-            </>
-          ) : (
-            <div className="caption" style={{ color: 'var(--text-4)', paddingTop: 8 }}>Not yet evaluated — awaiting backtest engine run.</div>
-          )}
-        </div>
-
-        {/* On-chain Provenance */}
-        <div className="card-flat" style={{ padding: 20 }}>
-          <div className="label mb-3">On-Chain Provenance</div>
-          <div className="caption mb-3">
-            Strategy ID<br />
-            <span className="mono" style={{ color: 'var(--info)', wordBreak: 'break-all', fontSize: '0.75rem' }}>{truncHash(s.id)}</span>
-          </div>
-          {s.methodology_hash && (
-            <div className="caption mb-3">
-              Methodology Hash<br />
-              <span className="mono" style={{ color: 'var(--text-2)', wordBreak: 'break-all', fontSize: '0.75rem' }}>{truncHash(s.methodology_hash)}</span>
-            </div>
-          )}
-          {s.on_chain_registration_tx ? (
-            <div className="caption mb-3">
-              Registration Tx<br />
-              <span className="mono" style={{ color: 'var(--info)', fontSize: '0.75rem' }}>{truncHash(s.on_chain_registration_tx)}</span>
-            </div>
-          ) : (
-            <div className="caption mb-3" style={{ color: 'var(--text-4)' }}>Registration Tx: pending</div>
-          )}
-          <div className="caption mb-3">
-            Extraction: <span className="mono">{s.extraction_llm || 'hand-curated'}</span>
-          </div>
-          <div className={s.methodology_hash ? 'verify-panel' : ''} style={{ borderRadius: 6, padding: s.methodology_hash ? '8px 10px' : 0 }}>
-            {s.methodology_hash ? (
-              <div className="verify-badge">
-                <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
-                  <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5" />
-                  <path d="M5 8l2 2 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                </svg>
-                Hash Computed
-              </div>
-            ) : (
-              <div className="verify-badge-pending">Hash Pending</div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Curator note expansion */}
-      {s.curator_note && (
-        <div className="passport-expand">
-          <div className="passport-expand-header" onClick={() => setOpen(o => !o)}>
-            <span className="label">Curator Note</span>
-            <span className="caption">{open ? '▲' : '▼'}</span>
-          </div>
-          {open && (
-            <div className="passport-expand-body">
-              <p className="body" style={{ fontStyle: 'italic' }}>{s.curator_note}</p>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
 
 // ── Strategy Grid Card ────────────────────────────────────────
 
-function StrategyCard({ s, regime }) {
-  const [open, setOpen] = useState(false)
-  const hasBacktest = s.sharpe_ratio != null
-  const isGatePassed = s.passes_rigor_gate === true
-  const isGateFailed = hasBacktest && s.passes_rigor_gate === false
-  const recommended = isRecommendedForRegime(s, regime)
-
+// Inline period + projected-value line. Shows backtest window, the $1k -> $X
+// it would have produced over the same period, and an explicit *backward-looking*
+// disclaimer. Hidden entirely if we don't know the period (CAGR alone isn't
+// enough to make a defensible projection).
+export function BacktestHorizon({ s, principal = 1000 }) {
+  const years = periodInYears(s.backtest_start, s.backtest_end)
+  const endValue = projectedEndValue(principal, s.cagr, years)
+  if (years == null) return null
+  // Backend ships ISO datetimes; strip the T... for display so it reads as a date.
+  const startStr = (s.backtest_start || '').slice(0, 10)
+  const endStr = (s.backtest_end || '').slice(0, 10)
   return (
-    <div className="card fade-up fade-up-4" style={recommended ? { border: '1px solid rgba(16,185,129,0.3)' } : {}}>
-      <div className="flex items-center gap-3 mb-3" style={{ flexWrap: 'wrap' }}>
-        <h3 style={{ flex: 1 }}>{s.paper_title}</h3>
-        {recommended && (
-          <span style={{
-            fontSize: '0.68rem', fontWeight: 700, padding: '2px 6px', borderRadius: 4,
-            background: 'rgba(16,185,129,0.12)', color: 'var(--positive)',
-            border: '1px solid rgba(16,185,129,0.3)',
-          }}>
-            ★ Recommended now
-          </span>
-        )}
-        <span className={`tag ${statusTag(s.status)}`} style={{ textTransform: 'capitalize' }}>{s.status}</span>
-      </div>
-      <div className="caption mb-3">
-        {s.paper_authors?.slice(0, 2).join(', ')}{s.paper_authors?.length > 2 ? ' et al.' : ''}
-        {s.paper_year ? ` (${s.paper_year})` : ''}
-        {s.paper_venue ? ` · ${s.paper_venue}` : ''}
-      </div>
-      {hasBacktest ? (
-        <>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, marginBottom: 8 }}>
-            <div><div className="caption">Sharpe</div><div style={{ fontWeight: 700 }}>{fmt(s.sharpe_ratio)}{s.is_backtest_placeholder ? '*' : ''}</div></div>
-            <div><div className="caption">CAGR</div><div className="positive" style={{ fontWeight: 700 }}>{fmtPct(s.cagr)}</div></div>
-            <div><div className="caption">Max DD</div><div className="negative" style={{ fontWeight: 700 }}>−{fmtPct(s.max_drawdown)}</div></div>
-            <div><div className="caption">Corr SPY</div><div style={{ fontWeight: 700 }}>{fmt(s.correlation_to_spy)}</div></div>
-          </div>
-          {(s.deflated_sharpe_ratio != null || s.pbo_score != null || s.kelly_fraction != null) && (
-            <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
-              {s.deflated_sharpe_ratio != null && (
-                <span className="caption" style={{ background: 'rgba(255,255,255,0.04)', padding: '2px 7px', borderRadius: 4, border: '1px solid var(--glass-border)' }}>
-                  DSR <strong>{fmt(s.deflated_sharpe_ratio)}</strong>
-                  {s.dsr_p_value != null && (
-                    <span style={{ marginLeft: 4, color: s.dsr_p_value >= 0.95 ? 'var(--positive)' : 'var(--text-4)', fontSize: '0.65rem' }}>
-                      p={fmt(s.dsr_p_value, 3)}
-                    </span>
-                  )}
-                </span>
-              )}
-              {s.pbo_score != null && (
-                <span className="caption" style={{ background: 'rgba(255,255,255,0.04)', padding: '2px 7px', borderRadius: 4, border: '1px solid var(--glass-border)' }}>
-                  PBO <strong>{fmtPct(s.pbo_score)}</strong>
-                </span>
-              )}
-              {s.kelly_fraction != null && (
-                <span className="caption" style={{ background: 'rgba(255,255,255,0.04)', padding: '2px 7px', borderRadius: 4, border: '1px solid var(--glass-border)' }}>
-                  Kelly <strong>{fmtPct(s.kelly_fraction)}</strong>
-                </span>
-              )}
-              <span style={{
-                fontSize: '0.68rem', fontWeight: 600, padding: '2px 7px', borderRadius: 4,
-                background: isGatePassed ? 'rgba(16,185,129,0.12)' : isGateFailed ? 'rgba(239,68,68,0.12)' : 'rgba(255,255,255,0.04)',
-                color: isGatePassed ? 'var(--positive)' : isGateFailed ? 'var(--negative)' : 'var(--text-4)',
-                border: `1px solid ${isGatePassed ? 'rgba(16,185,129,0.3)' : isGateFailed ? 'rgba(239,68,68,0.3)' : 'var(--glass-border)'}`,
-              }}>
-                {isGatePassed ? '✓ Rigor Gate' : isGateFailed ? '✕ Rigor Gate: Failed' : '◌ Rigor Gate: Pending'}
-              </span>
-            </div>
-          )}
-        </>
-      ) : (
-        <div className="caption" style={{ marginBottom: 12, color: 'var(--text-4)' }}>Backtest pending</div>
-      )}
-      <div className="flex gap-2 mb-3" style={{ flexWrap: 'wrap' }}>
-        {s.asset_universe?.slice(0, 3).map(a => <span key={a} className="tag tag-muted">{a}</span>)}
-        {s.is_backtest_placeholder && <span className="tag tag-muted">est.</span>}
-      </div>
-
-      {/* Expandable passport detail */}
-      <div
-        className="caption"
-        style={{ cursor: 'pointer', color: 'var(--accent)', marginTop: 4 }}
-        onClick={() => setOpen(o => !o)}
-      >
-        {open ? '▲ hide details' : '▼ full passport'}
-      </div>
-      {open && (
-        <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--glass-border)' }}>
-          <div className="body" style={{ marginBottom: 10 }}>{s.methodology_summary}</div>
-          <div className="caption mb-2">
-            <strong>Position sizing:</strong> {s.position_sizing} · <strong>Rebalance:</strong> {s.rebalance_frequency}
-          </div>
-          {s.methodology_hash && (
-            <div className="caption mb-2">
-              <strong>Methodology hash:</strong><br />
-              <span className="mono" style={{ fontSize: '0.73rem', color: 'var(--text-3)', wordBreak: 'break-all' }}>{s.methodology_hash.slice(0, 32)}…</span>
-            </div>
-          )}
-          {s.paper_citation_count != null && (
-            <div className="caption mb-2"><strong>Citations:</strong> {s.paper_citation_count.toLocaleString()}</div>
-          )}
-          {s.paper_claimed_sharpe != null && s.sharpe_ratio != null && (
-            <div className="caption">
-              <strong>Paper claim:</strong> Sharpe {fmt(s.paper_claimed_sharpe)} →
-              backtest {fmt(s.sharpe_ratio)}{s.is_backtest_placeholder ? '*' : ''}
-              <span className={s.sharpe_ratio / s.paper_claimed_sharpe >= 0.5 ? 'positive' : 'negative'} style={{ marginLeft: 6 }}>
-                ({((s.sharpe_ratio / s.paper_claimed_sharpe) * 100).toFixed(0)}%)
-              </span>
-            </div>
-          )}
-          {s.curator_note && (
-            <div className="caption" style={{ marginTop: 8, fontStyle: 'italic', color: 'var(--text-3)' }}>
-              "{s.curator_note.slice(0, 120)}{s.curator_note.length > 120 ? '…' : ''}"
-            </div>
-          )}
-        </div>
-      )}
+    <div className="caption" style={{ marginBottom: 8, color: 'var(--text-3)', lineHeight: 1.5 }}>
+      Backtested <span className="mono">{startStr}</span> → <span className="mono">{endStr}</span>
+      {' '}({years.toFixed(1)} yrs) ·{' '}
+      <strong>{fmtUsd(principal)}</strong> →{' '}
+      <strong style={{ color: 'var(--positive)' }}>{fmtUsd(endValue)}</strong>
+      {' '}<span style={{ opacity: 0.7 }}>over the backtest window (historical, not a forecast)</span>
     </div>
   )
 }
 
-// ── Paper Corpus Table ────────────────────────────────────────
-
-function CorpusTable({ strategies }) {
-  const paperStrategies = strategies.filter(s => s.paper_year && s.paper_title !== 'Buy-and-Hold Baseline')
-  if (!paperStrategies.length) return null
-
-  return (
-    <div style={{ marginTop: 40 }}>
-      <div className="label mb-3">Paper Corpus</div>
-      <div className="caption mb-4">{paperStrategies.length} papers curated · hand-curated seed library</div>
-      <div className="table-container">
-        <table>
-          <thead>
-            <tr>
-              <th>Paper</th>
-              <th>Authors</th>
-              <th>Year</th>
-              <th>Venue</th>
-              <th className="text-right">Citations</th>
-              <th>Status</th>
-              <th>Curator</th>
-            </tr>
-          </thead>
-          <tbody>
-            {paperStrategies.map(s => (
-              <tr key={s.id}>
-                <td style={{ fontWeight: 500, maxWidth: 240 }}>{s.paper_title}</td>
-                <td className="caption">{s.paper_authors?.slice(0, 2).join(', ')}{s.paper_authors?.length > 2 ? ' et al.' : ''}</td>
-                <td>{s.paper_year ?? '—'}</td>
-                <td className="caption" style={{ maxWidth: 160 }}>{s.paper_venue ?? '—'}</td>
-                <td className="text-right">{s.paper_citation_count?.toLocaleString() ?? '—'}</td>
-                <td>
-                  <span className={`tag ${statusTag(s.status)}`} style={{ textTransform: 'capitalize', fontSize: '0.68rem' }}>
-                    {s.status}
-                  </span>
-                </td>
-                <td className="mono caption" style={{ color: 'var(--info)' }}>
-                  {s.extraction_llm ? s.extraction_llm.split('-').slice(0, 2).join('-') : 'Dan'}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  )
-}
 
 // ── Strategy Architect form ───────────────────────────────────
 
-function StrategyArchitect({ strategies }) {
+// Weighted-sum of per-strategy backtest metrics across the architect's
+// selected portfolio. Honest about partial coverage — if any selected
+// strategy is missing a metric, we return null for that metric rather
+// than silently undercounting.
+function aggregateMetrics(selected, strategies) {
+  if (!selected?.length || !strategies?.length) return null
+  const byId = Object.fromEntries(strategies.map(s => [s.id, s]))
+  const metrics = ['sharpe_ratio', 'cagr', 'max_drawdown']
+  const out = {}
+  let totalWeight = 0
+  let anyMissing = false
+  for (const sel of selected) {
+    const row = byId[sel.strategy_id]
+    if (!row) { anyMissing = true; continue }
+    totalWeight += sel.weight
+    for (const m of metrics) {
+      if (row[m] == null) { anyMissing = true; continue }
+      out[m] = (out[m] || 0) + row[m] * sel.weight
+    }
+  }
+  if (totalWeight === 0) return null
+  return {
+    sharpe_ratio: out.sharpe_ratio ?? null,
+    cagr: out.cagr ?? null,
+    max_drawdown: out.max_drawdown ?? null,
+    coverage_weight: totalWeight,
+    partial: anyMissing,
+  }
+}
+
+export function StrategyArchitect({ strategies }) {
   const [intent, setIntent] = useState(
     'I have idle USDC and want thoughtful, research-backed growth without stomach-churning drawdowns.',
   )
@@ -530,6 +235,46 @@ function StrategyArchitect({ strategies }) {
             {result.risk_profile} · {Number(result.capital_usdc).toLocaleString()} USDC ·
             model: <span className="mono">{result.model_id}</span>
           </p>
+          {(() => {
+            const agg = aggregateMetrics(result.selected, strategies)
+            // Pick the shortest backtest window across selected strategies as the
+            // honest period — projected $→$ can't extrapolate beyond the data we
+            // actually have for the longest-tested strategy.
+            const periods = (result.selected || [])
+              .map(sel => strategies.find(x => x.id === sel.strategy_id))
+              .filter(Boolean)
+              .map(s => periodInYears(s.backtest_start, s.backtest_end))
+              .filter(y => y != null)
+            const minYears = periods.length ? Math.min(...periods) : null
+            const principal = Number(result.capital_usdc) || 0
+            const projEnd = (agg && agg.cagr != null && minYears != null)
+              ? projectedEndValue(principal, agg.cagr, minYears)
+              : null
+            if (!agg) return null
+            return (
+              <div className="card-flat" style={{ padding: 14, marginTop: 14, background: 'rgba(255,255,255,0.03)' }}>
+                <div className="label mb-2">Expected portfolio profile (weighted from per-strategy backtests)</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 8 }}>
+                  <div><div className="caption">Blended Sharpe</div><div style={{ fontWeight: 700, fontSize: '1.1rem' }}>{fmt(agg.sharpe_ratio)}</div></div>
+                  <div><div className="caption">Blended CAGR</div><div className="positive" style={{ fontWeight: 700, fontSize: '1.1rem' }}>{fmtPct(agg.cagr)}</div></div>
+                  <div><div className="caption">Blended Max DD</div><div className="negative" style={{ fontWeight: 700, fontSize: '1.1rem' }}>{agg.max_drawdown != null ? `−${fmtPct(agg.max_drawdown)}` : '—'}</div></div>
+                </div>
+                {minYears != null && projEnd != null && (
+                  <div className="caption" style={{ lineHeight: 1.5 }}>
+                    Over a shared backtest window of <strong>{minYears.toFixed(1)} yrs</strong>,{' '}
+                    <strong>{fmtUsd(principal)}</strong> would have grown to{' '}
+                    <strong style={{ color: 'var(--positive)' }}>{fmtUsd(projEnd)}</strong>{' '}
+                    at the blended CAGR <span style={{ opacity: 0.7 }}>(historical, not a forecast — assumes no rebalance friction)</span>.
+                  </div>
+                )}
+                {agg.partial && (
+                  <div className="caption" style={{ marginTop: 6, color: 'var(--text-4)' }}>
+                    * One or more selected strategies have missing backtest fields; aggregate weighted by available data only.
+                  </div>
+                )}
+              </div>
+            )
+          })()}
           {result.overall_reasoning && (
             <p style={{ marginTop: 12, lineHeight: 1.5 }}>{result.overall_reasoning}</p>
           )}
@@ -591,55 +336,185 @@ function StrategyArchitect({ strategies }) {
   )
 }
 
+// ── Library Table ─────────────────────────────────────────────
+
+// Compact tabular view — replaces the old big-card grid. Dense, scannable,
+// sortable. Click a row → expand inline detail (period + paper-claim delta
+// + rigor metrics). One row per strategy; no visual hierarchy by status (the
+// STATUS column does that job).
+
+function StrategyRow({ s }) {
+  const [open, setOpen] = useState(false)
+  const years = periodInYears(s.backtest_start, s.backtest_end)
+  const endValue = projectedEndValue(1000, s.cagr, years)
+  const startStr = (s.backtest_start || '').slice(0, 10)
+  const endStr = (s.backtest_end || '').slice(0, 10)
+  const paperCite = [
+    s.paper_authors?.[0]?.split(' ').pop(),
+    s.paper_year && `(${s.paper_year})`,
+  ].filter(Boolean).join(' ')
+
+  return (
+    <>
+      <tr className="lib-row" onClick={() => setOpen(o => !o)} style={{ cursor: 'pointer' }}>
+        <td style={{ fontWeight: 600 }}>
+          <span style={{ marginRight: 6, color: 'var(--text-4)', display: 'inline-block', width: 10 }}>{open ? '▾' : '▸'}</span>
+          {s.paper_title}
+        </td>
+        <td className="caption">{paperCite || (s.paper_year ? `(${s.paper_year})` : '—')}</td>
+        <td><span className={`tag ${statusTag(s.status)}`} style={{ textTransform: 'capitalize' }}>{s.status}</span></td>
+        <td className="mono" style={{ textAlign: 'right' }}>{fmt(s.sharpe_ratio)}</td>
+        <td className="mono positive" style={{ textAlign: 'right' }}>{fmtPct(s.cagr)}</td>
+        <td className="mono negative" style={{ textAlign: 'right' }}>{s.max_drawdown != null ? `−${fmtPct(s.max_drawdown)}` : '—'}</td>
+        <td className="mono" style={{ textAlign: 'right', color: 'var(--positive)' }}>{fmtUsd(endValue)}</td>
+        <td className="caption" style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{years != null ? `${years.toFixed(1)} yrs` : '—'}</td>
+      </tr>
+      {open && (
+        <tr className="lib-row-detail">
+          <td colSpan={8} style={{ padding: '12px 18px', background: 'rgba(255,255,255,0.02)' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 18, fontSize: '0.82rem' }}>
+              <div>
+                <div className="label mb-2">Methodology</div>
+                <div className="body">{s.methodology_summary || '—'}</div>
+              </div>
+              <div>
+                <div className="label mb-2">Source paper</div>
+                <div className="body">"{s.paper_title}"</div>
+                <div className="caption" style={{ marginTop: 4 }}>
+                  {s.paper_authors?.slice(0, 3).join(', ')}{s.paper_authors?.length > 3 ? ' et al.' : ''}
+                  {s.paper_year ? ` (${s.paper_year})` : ''}
+                  {s.paper_venue ? ` · ${s.paper_venue}` : ''}
+                </div>
+                {s.paper_arxiv_id && (
+                  <a
+                    href={`https://arxiv.org/abs/${s.paper_arxiv_id}`}
+                    target="_blank" rel="noreferrer"
+                    style={{ color: 'var(--accent)', fontSize: '0.78rem', marginTop: 6, display: 'inline-block' }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    arxiv:{s.paper_arxiv_id} ↗
+                  </a>
+                )}
+              </div>
+              <div>
+                <div className="label mb-2">Rigor metrics</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+                  <div><div className="caption">DSR</div><div className="mono" style={{ fontWeight: 700 }}>{fmt(s.deflated_sharpe_ratio)}</div></div>
+                  <div><div className="caption">PBO</div><div className="mono" style={{ fontWeight: 700 }}>{fmtPct(s.pbo_score)}</div></div>
+                  <div><div className="caption">OOS Sharpe</div><div className="mono" style={{ fontWeight: 700 }}>{fmt(s.out_of_sample_sharpe)}</div></div>
+                </div>
+                {s.paper_claimed_sharpe != null && (
+                  <div className="caption" style={{ marginTop: 8 }}>
+                    Paper claim: <strong>{fmt(s.paper_claimed_sharpe)}</strong> · Backtest: <strong>{fmt(s.sharpe_ratio)}</strong>
+                    {s.sharpe_ratio != null && (
+                      <span className={s.sharpe_ratio / s.paper_claimed_sharpe >= 0.5 ? 'positive' : 'negative'} style={{ marginLeft: 6 }}>
+                        ({((s.sharpe_ratio / s.paper_claimed_sharpe) * 100).toFixed(0)}%)
+                      </span>
+                    )}
+                  </div>
+                )}
+                {years != null && (
+                  <div className="caption" style={{ marginTop: 6 }}>
+                    Window: <span className="mono">{startStr} → {endStr}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
+  )
+}
+
+function StrategyTable({ strategies, emptyState }) {
+  if (!strategies.length) return emptyState
+  return (
+    <div style={{ overflowX: 'auto', border: '1px solid var(--glass-border)', borderRadius: 8 }}>
+      <table className="lib-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+        <thead>
+          <tr style={{ background: 'rgba(255,255,255,0.03)', textAlign: 'left', borderBottom: '1px solid var(--glass-border)' }}>
+            <th style={{ padding: '10px 14px' }}>Strategy</th>
+            <th style={{ padding: '10px 14px' }}>Paper</th>
+            <th style={{ padding: '10px 14px' }}>Status</th>
+            <th style={{ padding: '10px 14px', textAlign: 'right' }}>Sharpe</th>
+            <th style={{ padding: '10px 14px', textAlign: 'right' }}>CAGR</th>
+            <th style={{ padding: '10px 14px', textAlign: 'right' }}>Max DD</th>
+            <th style={{ padding: '10px 14px', textAlign: 'right' }}>$1k →</th>
+            <th style={{ padding: '10px 14px', textAlign: 'right' }}>Period</th>
+          </tr>
+        </thead>
+        <tbody>
+          {strategies.map(s => <StrategyRow key={s.id} s={s} />)}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 // ── Main export ───────────────────────────────────────────────
 
-// ── Regime helpers ────────────────────────────────────────────
-
-function regimeBg(r) {
-  if (r === 'risk_on') return 'rgba(16,185,129,0.08)'
-  if (r === 'crisis') return 'rgba(239,68,68,0.12)'
-  if (r === 'risk_off') return 'rgba(239,68,68,0.08)'
-  return 'rgba(245,158,11,0.08)'
-}
-function regimeBorder(r) {
-  if (r === 'risk_on') return 'rgba(16,185,129,0.3)'
-  if (r === 'crisis' || r === 'risk_off') return 'rgba(239,68,68,0.3)'
-  return 'rgba(245,158,11,0.3)'
-}
-function regimeLabel(r) {
-  if (r === 'risk_on') return 'Trend-following strategies favoured'
-  if (r === 'risk_off') return 'Volatility-managed strategies favoured'
-  if (r === 'crisis') return 'Capital preservation strategies favoured'
-  return 'Mixed signals — all strategies under review'
-}
-function isRecommendedForRegime(strategy, regime) {
-  if (!regime || regime.regime === 'unknown') return false
-  const title = (strategy.paper_title || '').toLowerCase()
-  if (regime.regime === 'risk_on') return title.includes('momentum') || title.includes('52-week') || title.includes('tsmom')
-  if (regime.regime === 'risk_off' || regime.regime === 'transition')
-    return title.includes('volatility') || title.includes('managed')
-  if (regime.regime === 'crisis') return title.includes('preservation') || title.includes('t-bill')
-  return false
+// Map a strategy_store row (fusion/architect output) into the same shape
+// StrategyRow expects. Most metric fields are null on a pre-backtest
+// hypothesis — the row will render those columns as "—", which is the honest
+// signal that fusion-to-backtest hasn't run yet.
+function coerceGenerated(row) {
+  const sourcePapers = Array.isArray(row.source_papers) ? row.source_papers : []
+  const firstPaper = sourcePapers[0]?.arxiv_id || ''
+  const year = row.created_at ? new Date(row.created_at).getFullYear() : null
+  return {
+    id: row.id,
+    paper_title: row.strategy_name || '(unnamed)',
+    paper_arxiv_id: firstPaper,
+    paper_authors: [],
+    paper_year: year,
+    paper_venue: row.generation_method,
+    methodology_summary: row.thesis || '',
+    status: row.status || 'candidate',
+    asset_universe: row.asset_universe || [],
+    sharpe_ratio: null,
+    cagr: null,
+    max_drawdown: null,
+    correlation_to_spy: null,
+    deflated_sharpe_ratio: null,
+    pbo_score: null,
+    out_of_sample_sharpe: null,
+    paper_claimed_sharpe: null,
+    backtest_start: null,
+    backtest_end: null,
+    is_backtest_placeholder: true,
+  }
 }
 
 export default function Strategies() {
-  const [strategies, setStrategies] = useState([])
+  const [examples, setExamples] = useState([])
+  const [generated, setGenerated] = useState([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
-  const [activeFilter, setActiveFilter] = useState('all')
-  const [regime, setRegime] = useState(null)
+  // 'generated' is the first-class tab per product feedback — pushes user
+  // toward Generate when empty.
+  const [activeTab, setActiveTab] = useState('generated')
 
   const load = useCallback(async () => {
     setLoading(true)
     setLoadError('')
     try {
-      const data = await apiGet('/api/strategies/')
-      const sorted = [...(data.strategies || [])].sort(
-        (a, b) => STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status)
-      )
-      setStrategies(sorted)
-    } catch (e) {
-      setLoadError(e.message || 'Failed to load strategies')
+      const [seedRes, genRes] = await Promise.allSettled([
+        apiGet('/api/strategies/'),
+        apiGet('/api/strategies/generated'),
+      ])
+      if (seedRes.status === 'fulfilled') {
+        const sorted = [...(seedRes.value.strategies || [])].sort(
+          (a, b) => STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status)
+        )
+        setExamples(sorted)
+      } else {
+        setLoadError(seedRes.reason?.message || 'Failed to load examples')
+      }
+      if (genRes.status === 'fulfilled') {
+        setGenerated((genRes.value.strategies || []).map(coerceGenerated))
+      }
+      // Generated tab failing is non-fatal — empty state is the honest fallback.
     } finally {
       setLoading(false)
     }
@@ -647,148 +522,90 @@ export default function Strategies() {
 
   useEffect(() => { load() }, [load])
 
-  useEffect(() => {
-    apiGet('/api/regime/current').then(setRegime).catch(() => {})
-  }, [])
-
-  const counts = {
-    all: strategies.length,
-    live: strategies.filter(s => s.status === 'live').length,
-    validated: strategies.filter(s => s.status === 'validated').length,
-    candidate: strategies.filter(s => s.status === 'candidate').length,
-  }
-
-  const filtered = activeFilter === 'all'
-    ? strategies
-    : strategies.filter(s => s.status === activeFilter)
-
-  // Sort recommended strategies to top within the filtered list
-  const visible = [...filtered].sort((a, b) => {
-    const aRec = isRecommendedForRegime(a, regime) ? 0 : 1
-    const bRec = isRecommendedForRegime(b, regime) ? 0 : 1
-    return aRec - bRec
-  })
-
-  // Featured = highest Sharpe among visible live strategies; fall back to first live, then first
-  const liveWithSharpe = visible
-    .filter(s => s.status === 'live' && s.sharpe_ratio != null)
-    .sort((a, b) => {
-      // Recommended first, then by Sharpe
-      const aRec = isRecommendedForRegime(a, regime) ? 1 : 0
-      const bRec = isRecommendedForRegime(b, regime) ? 1 : 0
-      if (aRec !== bRec) return bRec - aRec
-      return b.sharpe_ratio - a.sharpe_ratio
-    })
-  const featured = liveWithSharpe[0]
-    ?? visible.find(s => s.status === 'live')
-    ?? visible[0]
-
-  const grid = featured ? visible.filter(s => s.id !== featured.id) : visible
-
-  const FILTERS = [
-    { key: 'all', label: `All (${counts.all})` },
-    { key: 'live', label: `Live (${counts.live})` },
-    { key: 'validated', label: `Validated (${counts.validated})` },
-    { key: 'candidate', label: `Candidate (${counts.candidate})` },
-  ]
-
   return (
     <div>
-      {/* ── Regime Panel ─────────────────────────────────── */}
-      <RegimePanel regime={regime} />
-
-      {/* ── Explorer ──────────────────────────────────────── */}
-      <div className="fade-up fade-up-1" style={{ maxWidth: 640, marginBottom: 28 }}>
-        <h2 className="serif" style={{ fontSize: '2rem', marginBottom: 10 }}>Paper-Grounded Strategies</h2>
-        <p className="body">
-          Every strategy traces back to published academic research. Methodology extracted by AI
-          or curated by hand, backtested against real data, with paper-claim deltas surfaced honestly.
+      <div className="fade-up fade-up-1" style={{ marginBottom: 18 }}>
+        <h2 className="serif" style={{ fontSize: '2rem', marginBottom: 10 }}>Library</h2>
+        <p className="body" style={{ marginBottom: 6 }}>
+          Your strategies, plus a clearly-separated set of example strategies
+          drawn from published research so you can learn the metric format.
         </p>
       </div>
 
-      {/* Regime banner */}
-      {regime && regime.regime !== 'unknown' && (
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px',
-          borderRadius: 8, marginBottom: 20,
-          background: regimeBg(regime.regime),
-          border: `1px solid ${regimeBorder(regime.regime)}`,
-        }}>
-          <span style={{ fontWeight: 700, fontSize: '0.85rem', textTransform: 'uppercase' }}>
-            {regime.regime.replace(/_/g, ' ')}
-          </span>
-          <span className="caption">confidence {fmtPct(regime.confidence)}</span>
-          <span className="caption" style={{ marginLeft: 'auto', color: 'var(--text-3)' }}>
-            {regimeLabel(regime.regime)}
-          </span>
-        </div>
-      )}
-
-      {/* Filter tabs */}
-      <div className="strat-filter-bar fade-up fade-up-2">
-        {FILTERS.map(f => (
-          <span
-            key={f.key}
-            className={`tag ${activeFilter === f.key ? 'tag-accent' : 'tag-muted'}`}
-            onClick={() => setActiveFilter(f.key)}
-          >
-            {f.label}
-          </span>
-        ))}
+      <div className="strat-filter-bar fade-up fade-up-2" style={{ marginBottom: 16 }}>
+        <span
+          className={`tag ${activeTab === 'generated' ? 'tag-accent' : 'tag-muted'}`}
+          onClick={() => setActiveTab('generated')}
+        >
+          Generated ({generated.length})
+        </span>
+        <span
+          className={`tag ${activeTab === 'examples' ? 'tag-accent' : 'tag-muted'}`}
+          onClick={() => setActiveTab('examples')}
+        >
+          Examples ({examples.length})
+        </span>
       </div>
 
-      {/* Loading / error */}
-      {loading && <div className="caption" style={{ marginBottom: 16 }}>Loading strategies…</div>}
       {loadError && (
         <div className="info-box warning" style={{ marginBottom: 16 }}>
-          Couldn't load strategies: {loadError}
-          <div className="hint" style={{ marginTop: 6 }}>
-            If empty in Docker, the backend needs <code>analytics-engine/strategies/</code> mounted.
+          Couldn't load library: {loadError}
+        </div>
+      )}
+
+      {activeTab === 'generated' && (
+        <>
+          <StrategyTable
+            strategies={generated}
+            emptyState={
+              <div className="card" style={{ padding: 22 }}>
+                <div className="label mb-2">No generated strategies yet</div>
+                <p className="body" style={{ marginBottom: 10 }}>
+                  Multi-paper fusion strategies you create from the{' '}
+                  <a href="/generate" style={{ color: 'var(--accent)' }}>Generate</a> page will
+                  appear here once they've been backtested + cleared the rigor gate.
+                </p>
+                <p className="caption" style={{ color: 'var(--text-3)' }}>
+                  Until the fusion-to-backtest pipeline ships
+                  (<code>docs/specs/fusion-to-backtest-t2o2-issue.md</code>), fusion outputs
+                  are pre-backtest hypotheses — they appear in the agent activity feed on
+                  Portfolio/Reasoning but not in this table.
+                </p>
+              </div>
+            }
+          />
+        </>
+      )}
+
+      {activeTab === 'examples' && (
+        <>
+          <div className="caption" style={{ marginBottom: 12, color: 'var(--text-3)', lineHeight: 1.5 }}>
+            <strong>Example strategies</strong> — hand-curated single-paper implementations
+            from published research. <em>Not</em> outputs of the fusion engine. Included
+            so you can read a strategy card, understand the metrics, and see what a
+            rigor-gate verdict looks like. They're also the candidate pool the curated-library
+            path of Generate picks and weights from.
           </div>
-        </div>
-      )}
-      {!loading && !loadError && visible.length === 0 && (
-        <p className="caption" style={{ marginBottom: 16 }}>No strategies match this filter.</p>
-      )}
-
-      {/* Featured passport card */}
-      {featured && <FeaturedCard s={featured} regime={regime} />}
-
-      {/* Strategy grid */}
-      {grid.length > 0 && (
-        <div className="strat-grid-2 mb-6">
-          {grid.map(s => <StrategyCard key={s.id} s={s} regime={regime} />)}
-        </div>
+          {loading && <div className="caption" style={{ marginBottom: 16 }}>Loading…</div>}
+          {!loading && (
+            <StrategyTable
+              strategies={examples}
+              emptyState={<p className="caption">No example strategies loaded.</p>}
+            />
+          )}
+        </>
       )}
 
-      {/* Paper corpus table */}
-      {!loading && strategies.length > 0 && <CorpusTable strategies={strategies} />}
-
-      {/* Efficient frontier visualization */}
-      {!loading && strategies.length > 0 && (
-        <div className="mb-6">
-          <EfficientFrontier />
-        </div>
-      )}
-
-      {/* Library correlation matrix */}
-      {!loading && strategies.length > 0 && (
-        <div className="mb-6">
-          <CorrelationMatrix />
-        </div>
-      )}
-
-      {/* Placeholder disclaimer */}
-      {strategies.some(s => s.is_backtest_placeholder) && (
+      {examples.some(s => s.is_backtest_placeholder) && (
         <div className="caption" style={{ marginTop: 16, color: 'var(--text-4)' }}>
           * Estimated metrics — sourced from paper claims with McLean-Pontiff post-publication decay
-          applied. Replace with real BacktestResult once the analytics engine runs (Önder's IBacktestEvaluator).
+          applied. Replaced by real BacktestResult once the analytics engine runs.
         </div>
       )}
-
-      {/* ── Strategy Architect ────────────────────────────── */}
-      <hr className="section-divider" />
-      <StrategyArchitect strategies={strategies} />
     </div>
   )
 }
+
+// StrategyArchitect is intentionally NOT rendered here anymore. It moved to the
+// standalone Generate page (/generate), where it belongs per the spine in
+// docs/user-stories.md. It's named-exported so Generate.jsx can import it.

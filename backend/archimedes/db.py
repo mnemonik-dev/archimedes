@@ -35,9 +35,32 @@ SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
 
 def init_db() -> None:
-    """Create all tables (idempotent for hackathon — no Alembic needed)."""
+    """Create all tables (idempotent for hackathon — no Alembic needed).
+
+    Also runs hand-rolled ADD COLUMN IF NOT EXISTS migrations for model fields
+    that were added after the original `papers` table was created. Postgres
+    only; on SQLite (local dev) the create_all on a fresh DB takes the new
+    columns directly. Without this, /api/papers/ returns a 500 in any env
+    where the papers table predates these model additions (i.e. our running
+    docker volume).
+    """
     Base.metadata.create_all(bind=engine)
     logger.info(f"Database tables created at {DATABASE_URL}")
+
+    if DATABASE_URL.startswith("postgresql"):
+        from sqlalchemy import text
+        added_columns_sql = [
+            "ALTER TABLE papers ADD COLUMN IF NOT EXISTS cluster_id TEXT",
+            "ALTER TABLE papers ADD COLUMN IF NOT EXISTS topic_label TEXT",
+            "ALTER TABLE papers ADD COLUMN IF NOT EXISTS content_hash TEXT",
+        ]
+        try:
+            with engine.begin() as conn:
+                for stmt in added_columns_sql:
+                    conn.execute(text(stmt))
+            logger.info("init_db: papers schema patches applied (idempotent)")
+        except Exception as exc:
+            logger.warning("init_db: papers schema patch failed (non-fatal): %s", exc)
 
 
 def get_session() -> Session:

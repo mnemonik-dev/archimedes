@@ -101,30 +101,7 @@ export async function reconnectWallet() {
     if (!accounts?.length) { clearWalletMeta(); return null }
 
     const addr = accounts[0]
-
-    // Ensure Arc Testnet is selected
-    const chainIdHex = '0x4cef52'
-    try {
-      await ethereum.request({
-        method: 'wallet_switchEthereumChain',
-        params: [{ chainId: chainIdHex }],
-      })
-    } catch (switchError) {
-      if (switchError.code === 4902) {
-        await ethereum.request({
-          method: 'wallet_addEthereumChain',
-          params: [{
-            chainId: chainIdHex,
-            chainName: 'Arc Testnet',
-            nativeCurrency: { name: 'USD Coin', symbol: 'USDC', decimals: 18 },
-            rpcUrls: ['https://rpc.testnet.arc.network'],
-            blockExplorerUrls: [],
-          }],
-        })
-      } else {
-        throw switchError
-      }
-    }
+    await ensureArcChain(ethereum)
 
     _provider = ethereum
     _address = addr
@@ -143,6 +120,48 @@ export async function reconnectWallet() {
   }
 }
 
+const ARC_CHAIN_HEX = '0x4cef52'  // 5042002
+
+// MetaMask returns -32002 when a wallet_requestPermissions / eth_requestAccounts
+// is already pending — usually because the user dismissed the popup without
+// confirming, leaving the request live. Turn this into an actionable message
+// instead of bubbling the raw RPC error.
+function isAlreadyPendingError(err) {
+  return err?.code === -32002
+}
+
+async function ensureArcChain(ethereum) {
+  // Skip the switch popup if we're already on Arc.
+  try {
+    const current = await ethereum.request({ method: 'eth_chainId' })
+    if (current?.toLowerCase() === ARC_CHAIN_HEX) return
+  } catch { /* fall through to switch */ }
+
+  try {
+    await ethereum.request({
+      method: 'wallet_switchEthereumChain',
+      params: [{ chainId: ARC_CHAIN_HEX }],
+    })
+  } catch (switchError) {
+    if (switchError.code === 4902) {
+      await ethereum.request({
+        method: 'wallet_addEthereumChain',
+        params: [{
+          chainId: ARC_CHAIN_HEX,
+          chainName: 'Arc Testnet',
+          nativeCurrency: { name: 'USD Coin', symbol: 'USDC', decimals: 18 },
+          rpcUrls: ['https://rpc.testnet.arc.network'],
+          blockExplorerUrls: [],
+        }],
+      })
+    } else if (isAlreadyPendingError(switchError)) {
+      throw new Error('A wallet request is already open — check your MetaMask extension popup, then try again.')
+    } else {
+      throw switchError
+    }
+  }
+}
+
 export async function connectWallet(providerId) {
   const provider = WALLET_PROVIDERS.find(p => p.id === providerId)
   if (!provider) throw new Error(`Unknown provider: ${providerId}`)
@@ -150,34 +169,21 @@ export async function connectWallet(providerId) {
   const ethereum = provider.detect()
   if (!ethereum) throw new Error(`${provider.name} not detected. Please install the extension.`)
 
-  // Request accounts
-  const accounts = await ethereum.request({ method: 'eth_requestAccounts' })
-  if (!accounts?.length) throw new Error('No accounts returned')
-
-  // Switch to Arc Testnet (chain ID from RPC: 0x4cef52 = 5042002)
-  const chainIdHex = '0x4cef52'
+  let accounts
   try {
-    await ethereum.request({
-      method: 'wallet_switchEthereumChain',
-      params: [{ chainId: chainIdHex }],
-    })
-  } catch (switchError) {
-    // Chain not added — add it
-    if (switchError.code === 4902) {
-      await ethereum.request({
-        method: 'wallet_addEthereumChain',
-        params: [{
-          chainId: chainIdHex,
-          chainName: 'Arc Testnet',
-          nativeCurrency: { name: 'USD Coin', symbol: 'USDC', decimals: 18 },
-          rpcUrls: ['https://rpc.testnet.arc.network'],
-          blockExplorerUrls: [],
-        }],
-      })
-    } else {
-      throw switchError
+    accounts = await ethereum.request({ method: 'eth_requestAccounts' })
+  } catch (err) {
+    if (isAlreadyPendingError(err)) {
+      throw new Error('A wallet request is already open — check your MetaMask extension popup, then try again.')
     }
+    if (err?.code === 4001) {
+      throw new Error('Connection rejected — approve the request in MetaMask to continue.')
+    }
+    throw err
   }
+  if (!accounts?.length) throw new Error('No accounts returned from wallet.')
+
+  await ensureArcChain(ethereum)
 
   _provider = ethereum
   _address = accounts[0]
