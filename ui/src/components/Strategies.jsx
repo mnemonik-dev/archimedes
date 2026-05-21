@@ -58,7 +58,7 @@ function FeaturedCard({ s }) {
   const [open, setOpen] = useState(false)
   const hasBacktest = s.sharpe_ratio != null
   const isGatePassed = s.passes_rigor_gate === true
-  const isGateFailed = s.passes_rigor_gate === false
+  const isGateFailed = hasBacktest && s.passes_rigor_gate === false
   const pctOfClaim = s.paper_claimed_sharpe && s.sharpe_ratio != null
     ? ((s.sharpe_ratio / s.paper_claimed_sharpe) * 100).toFixed(0)
     : null
@@ -242,7 +242,7 @@ function StrategyCard({ s }) {
   const [open, setOpen] = useState(false)
   const hasBacktest = s.sharpe_ratio != null
   const isGatePassed = s.passes_rigor_gate === true
-  const isGateFailed = s.passes_rigor_gate === false
+  const isGateFailed = hasBacktest && s.passes_rigor_gate === false
 
   return (
     <div className="card fade-up fade-up-4">
