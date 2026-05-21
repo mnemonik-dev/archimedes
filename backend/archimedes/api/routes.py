@@ -692,14 +692,17 @@ async def get_portfolio_advisor(
     except Exception:
         market_ranking = []
 
-    # Try the LLM portfolio agent first
+    # Try the LLM portfolio agent — multi-turn tool-use first, single-turn fallback.
     agent = get_portfolio_agent()
     agent_portfolio = None
     if agent.available and market_ranking:
+        # Tool-use path: agent investigates with get_asset_stats / get_correlation /
+        # stress_test_portfolio before finalizing.  Falls back if backend doesn't
+        # expose the Anthropic SDK (e.g. OpenAI/Ollama).
         try:
             agent_portfolio = await asyncio.wait_for(
                 asyncio.to_thread(
-                    agent.propose_portfolio,
+                    agent.propose_portfolio_with_tools,
                     regime_value,
                     regime_confidence,
                     risk_profile,
@@ -708,11 +711,31 @@ async def get_portfolio_advisor(
                     market_ranking,
                     strategies,
                     set(DEFAULT_SCAN_UNIVERSE),
+                    price_histories,
                 ),
-                timeout=60.0,
+                timeout=120.0,
             )
         except Exception:
             agent_portfolio = None
+        # Single-turn fallback
+        if agent_portfolio is None:
+            try:
+                agent_portfolio = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        agent.propose_portfolio,
+                        regime_value,
+                        regime_confidence,
+                        risk_profile,
+                        usdc_floor,
+                        synth_budget,
+                        market_ranking,
+                        strategies,
+                        set(DEFAULT_SCAN_UNIVERSE),
+                    ),
+                    timeout=60.0,
+                )
+            except Exception:
+                agent_portfolio = None
 
     # Top-ranked synth codes drive the rule-based fallback scan list.
     top_synths = [r["synth"] for r in market_ranking] if market_ranking else list(price_histories.keys())
@@ -732,6 +755,170 @@ async def get_portfolio_advisor(
         all_signals = []
 
     strat_by_id = {s.id: s for s in strategies}
+
+    from archimedes.services.stress_engine import stress_all as _stress_all
+
+    async def _build_and_anchor_trace(
+        allocations_for_trace: list[dict],
+        thesis_for_trace: str,
+        agent_obj,
+    ) -> dict:
+        """Build a ReasoningTrace from the recommendation, compute the
+        keccak256 hash, and best-effort anchor it on-chain via
+        ReasoningTraceRegistry. Always returns the canonical hash even
+        if publishing fails (UI can still display the verifiable proof).
+        """
+        import uuid
+        from archimedes.models.trace import ReasoningTrace, DecisionType
+        try:
+            trace = ReasoningTrace(
+                id=str(uuid.uuid4()),
+                # Zero-address sentinel — this trace is a *recommendation*,
+                # not tied to a deployed vault. Re-anchored at deploy time.
+                vault_address="0x0000000000000000000000000000000000000000",
+                decision_type=DecisionType.PORTFOLIO_CONSTRUCTION,
+                trigger=f"advisor_request:regime={regime_value}:profile={risk_profile}",
+                market_context={
+                    "regime": regime_value,
+                    "regime_confidence": regime_confidence,
+                    "risk_profile": risk_profile,
+                    "usdc_floor": usdc_floor,
+                    "synth_budget": synth_budget,
+                    "universe_size": len(DEFAULT_SCAN_UNIVERSE),
+                    "universe_fetched": len(price_histories),
+                    "top_opportunities": [
+                        {"symbol": r.get("display"), "score": r.get("score")}
+                        for r in (market_ranking or [])[:10]
+                    ],
+                },
+                portfolio_before={},
+                portfolio_after={
+                    "usdc_weight": round(usdc_floor, 4),
+                    "synth_weight": round(synth_budget, 4),
+                    "picks": [
+                        {
+                            "symbol": a.get("symbol"),
+                            "asset_class": a.get("asset_class"),
+                            "exchange": a.get("exchange"),
+                            "weight": round(float(a.get("weight") or 0.0), 4),
+                            "paper_anchor": a.get("paper_anchor"),
+                            "code_hash": a.get("strategy_code_hash"),
+                        }
+                        for a in allocations_for_trace
+                    ],
+                },
+                reasoning=thesis_for_trace,
+                confidence=float(regime_confidence or 0.0),
+                expected_outcome="Portfolio constructed; pending user vault deployment",
+                trades_executed=[],
+                strategies_referenced=list({
+                    a.get("paper_anchor") for a in allocations_for_trace if a.get("paper_anchor")
+                }),
+            )
+            content_hash = trace.compute_hash()
+
+            # Best-effort on-chain anchor (no-op if signer/registry not configured)
+            tx_hash: str | None = None
+            try:
+                from archimedes.chain.trace_publisher import TracePublisher
+                publisher = TracePublisher()
+                tx_hash = await publisher.publish(trace)
+            except Exception:
+                tx_hash = None
+
+            return {
+                "trace_id": trace.id,
+                "trace_hash": content_hash if content_hash.startswith("0x") else f"0x{content_hash}",
+                "canonical_preview": trace.canonical_json()[:500] + ("…" if len(trace.canonical_json()) > 500 else ""),
+                "anchored_on_chain": tx_hash is not None,
+                "anchor_tx_hash": tx_hash,
+                "registry_address": (
+                    chain_client.settings.reasoning_trace_registry_address
+                    if 'chain_client' in dir() else None
+                ),
+                "decision_type": trace.decision_type.value,
+                "trigger": trace.trigger,
+            }
+        except Exception as e:  # pylint: disable=broad-except
+            return {"trace_id": None, "trace_hash": None, "error": str(e)}
+
+    def _run_stress(allocs: list[dict], usdc_w: float) -> list:
+        try:
+            return _stress_all(allocs, usdc_weight=usdc_w)
+        except Exception:
+            return []
+
+    def _rigor_fields(st) -> dict:
+        """Extract all selection-bias / rigor metrics from a Strategy.
+
+        Surfaces Bailey-López de Prado DSR + PBO + walk-forward OOS +
+        paper-claim deltas + confidence intervals.  This is the wedge
+        per CLAUDE.md § "Architectural primitives" — make it visible.
+        """
+        # Paper-claim deltas: (real - claimed); negative = paper was optimistic
+        paper_delta_sharpe = None
+        if st.paper_claimed_sharpe is not None and st.real_sharpe is not None:
+            paper_delta_sharpe = round(st.real_sharpe - st.paper_claimed_sharpe, 4)
+        paper_delta_cagr = None
+        if st.paper_claimed_cagr is not None and st.real_cagr is not None:
+            paper_delta_cagr = round(st.real_cagr - st.paper_claimed_cagr, 4)
+        paper_delta_max_dd = None
+        if st.paper_claimed_max_dd is not None and st.real_max_dd is not None:
+            paper_delta_max_dd = round(st.real_max_dd - st.paper_claimed_max_dd, 4)
+
+        return {
+            "passes_rigor_gate": st.passes_rigor_gate,
+            "deflated_sharpe_ratio": st.deflated_sharpe_ratio,
+            "dsr_p_value": st.dsr_p_value,
+            "num_trials_in_selection": st.num_trials_in_selection,
+            "pbo_score": st.pbo_score,
+            "out_of_sample_sharpe": st.out_of_sample_sharpe,
+            "paper_claimed_sharpe": st.paper_claimed_sharpe,
+            "paper_claimed_cagr": st.paper_claimed_cagr,
+            "paper_claimed_max_dd": st.paper_claimed_max_dd,
+            "paper_delta_sharpe": paper_delta_sharpe,
+            "paper_delta_cagr": paper_delta_cagr,
+            "paper_delta_max_dd": paper_delta_max_dd,
+            "sharpe_ci_lower": st.sharpe_ci_lower,
+            "sharpe_ci_upper": st.sharpe_ci_upper,
+            "n_obs_daily": st.n_obs_daily,
+            "strategy_code_hash": st.strategy_code_hash,
+        }
+
+    def _build_rigor_summary(active_rows: list[dict]) -> dict:
+        """Portfolio-level rigor stats — how many picks clear which bars."""
+        n = len(active_rows)
+        if n == 0:
+            return {
+                "total_picks": 0, "passes_rigor_gate": 0, "dsr_significant": 0,
+                "pbo_acceptable": 0, "oos_positive": 0,
+            }
+        passes = sum(1 for r in active_rows if r.get("passes_rigor_gate"))
+        dsr_sig = sum(
+            1 for r in active_rows
+            if r.get("dsr_p_value") is not None and r["dsr_p_value"] < 0.05
+        )
+        pbo_ok = sum(
+            1 for r in active_rows
+            if r.get("pbo_score") is not None and r["pbo_score"] < 0.5
+        )
+        oos_pos = sum(
+            1 for r in active_rows
+            if r.get("out_of_sample_sharpe") is not None and r["out_of_sample_sharpe"] > 0
+        )
+        avg_dsr = [r["dsr_p_value"] for r in active_rows if r.get("dsr_p_value") is not None]
+        avg_pbo = [r["pbo_score"] for r in active_rows if r.get("pbo_score") is not None]
+        return {
+            "total_picks": n,
+            "passes_rigor_gate": passes,
+            "dsr_significant": dsr_sig,                # p < 0.05 (post-selection-bias)
+            "dsr_significant_threshold": 0.05,
+            "pbo_acceptable": pbo_ok,                  # PBO < 0.50
+            "pbo_acceptable_threshold": 0.50,
+            "oos_positive": oos_pos,                   # walk-forward OOS Sharpe > 0
+            "avg_dsr_p_value": round(sum(avg_dsr) / len(avg_dsr), 4) if avg_dsr else None,
+            "avg_pbo_score": round(sum(avg_pbo) / len(avg_pbo), 4) if avg_pbo else None,
+        }
 
     scored: list[dict] = []
 
@@ -767,9 +954,7 @@ async def get_portfolio_advisor(
                 "max_drawdown": round(anchor_strat.real_max_dd if anchor_strat.real_max_dd is not None else 0.0, 4),
                 "vol_ann": round(vol_ann, 4),
                 "kelly_fraction": round(pick.weight, 4),  # agent's intended weight as conviction
-                "passes_rigor_gate": anchor_strat.passes_rigor_gate,
-                "dsr_p_value": anchor_strat.dsr_p_value,
-                "pbo_score": anchor_strat.pbo_score,
+                **_rigor_fields(anchor_strat),
                 "signal_reason": pick.reasoning,
                 "agent_weight": pick.weight,
                 "paper_anchor": pick.paper_anchor,
@@ -788,10 +973,14 @@ async def get_portfolio_advisor(
             sr = s.real_sharpe
             if sr < 0.3:
                 continue
-            mu_d = (s.real_cagr if s.real_cagr is not None else 0.08) / 252
-            sigma_d = abs(mu_d / (sr / math.sqrt(252))) if sr != 0 else 0.01
-            vol_ann = sigma_d * math.sqrt(252)
-            base_kelly = min((sr ** 2) / max(vol_ann ** 2, 0.001), 0.5)
+            # μ / σ² = SR / σ — correct single-asset Kelly (Thorp 1969).
+            # Half-Kelly = 0.5 · f* (Bell & Cover 1980 — reduces drawdowns
+            # at modest cost to long-run growth).  Cap at 0.5 as a final
+            # safety bound for cases where SR/σ blows up on low-vol assets.
+            mu_ann = s.real_cagr if s.real_cagr is not None else 0.08
+            vol_ann = abs(mu_ann / sr) if sr != 0 else 0.20
+            full_kelly = mu_ann / max(vol_ann ** 2, 1e-6)
+            base_kelly = min(0.5 * full_kelly, 0.5)
 
             # Pick the highest-conviction (signal weight) picks for this strategy.
             active = [
@@ -816,9 +1005,7 @@ async def get_portfolio_advisor(
                     "max_drawdown": round(s.real_max_dd if s.real_max_dd is not None else 0.0, 4),
                     "vol_ann": round(vol_ann, 4),
                     "kelly_fraction": effective_kelly,
-                    "passes_rigor_gate": s.passes_rigor_gate,
-                    "dsr_p_value": s.dsr_p_value,
-                    "pbo_score": s.pbo_score,
+                    **_rigor_fields(s),
                     "signal_reason": asset_signal.reason,
                 })
 
@@ -833,10 +1020,9 @@ async def get_portfolio_advisor(
             sr = s.real_sharpe if s.real_sharpe is not None else 0.5
             if sr < 0.3:
                 continue
-            mu_d = (s.real_cagr if s.real_cagr is not None else 0.08) / 252
-            sigma_d = abs(mu_d / (sr / math.sqrt(252))) if sr != 0 else 0.01
-            vol_ann = sigma_d * math.sqrt(252)
-            kelly = min((sr ** 2) / max(vol_ann ** 2, 0.001), 0.5)
+            mu_ann = s.real_cagr if s.real_cagr is not None else 0.08
+            vol_ann = abs(mu_ann / sr) if sr != 0 else 0.20
+            kelly = min(0.5 * (mu_ann / max(vol_ann ** 2, 1e-6)), 0.5)
             universe = s.asset_universe if s.asset_universe else ["SPY"]
             per_asset_kelly = round(kelly / len(universe), 4)
             for ticker in universe:
@@ -851,36 +1037,78 @@ async def get_portfolio_advisor(
                     "max_drawdown": round(s.real_max_dd if s.real_max_dd is not None else 0.0, 4),
                     "vol_ann": round(vol_ann, 4),
                     "kelly_fraction": per_asset_kelly,
-                    "passes_rigor_gate": s.passes_rigor_gate,
-                    "dsr_p_value": s.dsr_p_value,
-                    "pbo_score": s.pbo_score,
+                    **_rigor_fields(s),
                     "signal_reason": None,
                 })
 
     if not scored:
         return {"error": "No strategies with real backtest data available", "allocations": []}
 
-    # ── Agent path: use LLM-assigned weights directly ──────────────
+    # ── Agent path: LLM picks names, optimizer picks weights ───────
+    # The LLM is good at name selection + paper anchoring; it's not
+    # good at solving constrained Markowitz problems in its head.  Use
+    # its weights as a prior, then run the covariance-aware Kelly MVO
+    # optimizer to determine the actual portfolio weights.
     if agent_portfolio and agent_portfolio.picks:
-        # Each agent pick is already unique by symbol; skip vote aggregation.
-        # Use the agent's intended weight, capped at 0.20 per asset, normalized
-        # to the synth budget.
-        allocations = []
-        for sc in scored:
-            w = float(sc.get("agent_weight", sc.get("kelly_fraction", 0.0)))
-            w = min(max(w, 0.0), 0.20)
-            allocations.append({**sc, "weight": round(w, 4)})
+        from archimedes.services.portfolio_optimizer import (
+            kelly_optimize_from_prices,
+            kelly_risk_decomposition,
+            correlation_pairs,
+        )
 
-        total = sum(a["weight"] for a in allocations)
-        if total > 0:
-            for a in allocations:
-                a["weight"] = round(a["weight"] / total * synth_budget, 4)
+        # μ_override: use the strategy's annualized backtest CAGR per pick,
+        # so optimizer sees real edge instead of noisy 1y sample mean.
+        pick_synths = [sc["id"].removeprefix("agent_") for sc in scored]
+        mu_override: dict[str, float] = {}
+        for sc, synth in zip(scored, pick_synths):
+            mu_override[synth] = float(sc.get("cagr") or 0.08)
+
+        opt = None
+        try:
+            opt = await asyncio.to_thread(
+                kelly_optimize_from_prices,
+                pick_synths,
+                price_histories,
+                risk_profile,
+                synth_budget,
+                0.20,  # max_weight per asset
+                mu_override,
+            )
+        except Exception:
+            opt = None
+
+        allocations = []
+        risk_decomp: list[dict] = []
+        corr_pairs: list[dict] = []
+
+        if opt is not None:
+            risk_decomp = kelly_risk_decomposition(opt)
+            corr_pairs = correlation_pairs(opt, top_n=8)
+            weight_by_synth = {sym: float(w) for sym, w in zip(opt.symbols, opt.weights)}
+            for sc, synth in zip(scored, pick_synths):
+                w = weight_by_synth.get(synth, 0.0)
+                allocations.append({**sc, "weight": round(w, 4)})
+        else:
+            # Optimizer fallback: keep LLM weights but normalize + cap.
+            for sc in scored:
+                w = float(sc.get("agent_weight", sc.get("kelly_fraction", 0.0)))
+                allocations.append({**sc, "weight": min(max(w, 0.0), 0.20)})
+            total = sum(a["weight"] for a in allocations)
+            if total > 0:
+                for a in allocations:
+                    a["weight"] = round(a["weight"] / total * synth_budget, 4)
 
         allocations.sort(key=lambda x: -x["weight"])
         total_w = sum(a["weight"] for a in allocations)
-        exp_sharpe = sum(a["sharpe"] * a["weight"] for a in allocations) / max(total_w, 1e-9)
-        exp_cagr = sum(a["cagr"] * a["weight"] for a in allocations) / max(total_w, 1e-9)
-        exp_max_dd = sum(a["max_drawdown"] * a["weight"] for a in allocations) / max(total_w, 1e-9)
+        if opt is not None:
+            exp_sharpe = opt.expected_sharpe
+            exp_cagr = opt.expected_return
+            # Approx max-dd from portfolio vol (rough proxy: 2σ event)
+            exp_max_dd = 2.0 * opt.expected_vol
+        else:
+            exp_sharpe = sum(a["sharpe"] * a["weight"] for a in allocations) / max(total_w, 1e-9)
+            exp_cagr = sum(a["cagr"] * a["weight"] for a in allocations) / max(total_w, 1e-9)
+            exp_max_dd = sum(a["max_drawdown"] * a["weight"] for a in allocations) / max(total_w, 1e-9)
 
         regime_narratives_agent = {
             "risk_on": "Markets are calm (low VIX, price above MA). Full synth exposure recommended.",
@@ -901,7 +1129,23 @@ async def get_portfolio_advisor(
                 "sharpe": round(exp_sharpe, 4),
                 "cagr": round(exp_cagr, 4),
                 "max_drawdown": round(exp_max_dd, 4),
+                "vol_ann": round(opt.expected_vol, 4) if opt else None,
+                "diversification_ratio": round(opt.diversification_ratio, 4) if opt else None,
+                "risk_aversion_gamma": round(opt.risk_aversion, 2) if opt else None,
+                "optimizer_converged": opt.converged if opt else False,
             },
+            "risk_decomposition": risk_decomp,
+            "correlation_pairs": corr_pairs,
+            "rigor_summary": _build_rigor_summary(allocations),
+            "stress_tests": [
+                {
+                    "scenario": r.scenario, "label": r.label,
+                    "description": r.description, "portfolio_pnl": r.portfolio_pnl,
+                    "portfolio_value_after": r.portfolio_value_after,
+                    "per_asset_pnl": r.per_asset_pnl,
+                }
+                for r in _run_stress(allocations, usdc_floor)
+            ],
             "market_scan": {
                 "universe_size": len(DEFAULT_SCAN_UNIVERSE),
                 "fetched": len(price_histories),
@@ -913,13 +1157,33 @@ async def get_portfolio_advisor(
                 "model_id": agent_portfolio.model_id,
                 "served_model": agent_portfolio.served_model,
                 "num_picks": len(agent_portfolio.picks),
+                "iterations": agent_portfolio.iterations,
+                "tool_calls": [
+                    {
+                        "tool": tc.tool,
+                        "inputs": tc.inputs,
+                        "output_summary": tc.output_summary,
+                    }
+                    for tc in (agent_portfolio.tool_calls or [])
+                ],
             },
+            "reasoning_trace": await _build_and_anchor_trace(
+                allocations, agent_portfolio.thesis, agent_portfolio,
+            ),
         }
 
     # ── Aggregate by symbol (rule-based path) ──────────────────────
     # Multiple strategies often vote for the same asset.  Collapse the
     # (strategy × asset) rows into one row per asset, with the combined
     # Kelly conviction and the list of strategies that voted for it.
+    _RIGOR_KEYS = (
+        "deflated_sharpe_ratio", "dsr_p_value", "num_trials_in_selection",
+        "pbo_score", "out_of_sample_sharpe",
+        "paper_claimed_sharpe", "paper_claimed_cagr", "paper_claimed_max_dd",
+        "paper_delta_sharpe", "paper_delta_cagr", "paper_delta_max_dd",
+        "sharpe_ci_lower", "sharpe_ci_upper", "n_obs_daily",
+        "strategy_code_hash",
+    )
     agg: dict[str, dict] = {}
     for sc in scored:
         sym = sc["symbol"]
@@ -938,13 +1202,29 @@ async def get_portfolio_advisor(
                 "vol_ann": sc["vol_ann"],
                 "kelly_fraction": 0.0,
                 "passes_rigor_gate": False,
-                "dsr_p_value": sc.get("dsr_p_value"),
-                "pbo_score": sc.get("pbo_score"),
+                **{k: sc.get(k) for k in _RIGOR_KEYS},
             }
         row = agg[sym]
         row["strategies"].append({"title": sc["title"], "kelly": sc["kelly_fraction"]})
         if sc.get("signal_reason"):
             row["signal_reasons"].append(sc["signal_reason"])
+        # Carry forward the strongest rigor metrics across voting strategies.
+        for k in _RIGOR_KEYS:
+            existing = row.get(k)
+            new = sc.get(k)
+            if new is None:
+                continue
+            if existing is None:
+                row[k] = new
+            elif k in ("dsr_p_value", "pbo_score"):
+                row[k] = min(existing, new)        # lower is better
+            elif k in ("deflated_sharpe_ratio", "out_of_sample_sharpe",
+                       "sharpe_ci_lower", "sharpe_ci_upper", "n_obs_daily",
+                       "num_trials_in_selection",
+                       "paper_delta_sharpe", "paper_delta_cagr"):
+                row[k] = max(existing, new)        # higher is better
+            elif k == "paper_delta_max_dd":
+                row[k] = min(existing, new)        # smaller (less negative) is better
         # Take the highest-conviction Kelly (most confident strategy wins),
         # with a small bonus for multi-strategy agreement.
         row["kelly_fraction"] = max(row["kelly_fraction"], sc["kelly_fraction"])
@@ -969,35 +1249,78 @@ async def get_portfolio_advisor(
 
     scored = list(agg.values())
 
-    # Kelly weights (proportional to Kelly fractions)
-    total_kelly = sum(sc["kelly_fraction"] for sc in scored)
-    # Risk-parity weights (inverse vol)
-    inv_vols = [1.0 / max(sc["vol_ann"], 0.001) for sc in scored]
-    total_inv_vol = sum(inv_vols)
-    # Blend 60% Kelly + 40% risk-parity
+    # ── Covariance-aware Kelly MVO (rule-based path) ───────────────
+    # Map each agg row's symbol → its synth code via GLOBAL_ASSETS so
+    # we can feed the optimizer real price histories.  Falls back to
+    # the legacy Kelly+RP blend if the optimizer can't run.
+    from archimedes.services.portfolio_optimizer import (
+        kelly_optimize_from_prices,
+        kelly_risk_decomposition,
+        correlation_pairs,
+    )
+    display_to_synth: dict[str, str] = {
+        d: s for s, (_yf, d, _ac, _ex) in GLOBAL_ASSETS.items()
+    }
+    rule_synths = [display_to_synth.get(sc["symbol"]) for sc in scored]
+    rule_synths_valid = [s for s in rule_synths if s and s in price_histories]
+    mu_override_rb: dict[str, float] = {}
+    for sc, syn in zip(scored, rule_synths):
+        if syn:
+            mu_override_rb[syn] = float(sc.get("cagr") or 0.08)
+
+    opt_rb = None
+    if len(rule_synths_valid) >= 2:
+        try:
+            opt_rb = await asyncio.to_thread(
+                kelly_optimize_from_prices,
+                rule_synths_valid,
+                price_histories,
+                risk_profile,
+                synth_budget,
+                0.20,
+                mu_override_rb,
+            )
+        except Exception:
+            opt_rb = None
+
+    risk_decomp_rb: list[dict] = []
+    corr_pairs_rb: list[dict] = []
     allocations = []
-    for i, sc in enumerate(scored):
-        kelly_w = (sc["kelly_fraction"] / max(total_kelly, 1e-9)) if total_kelly > 0 else 1 / len(scored)
-        rp_w = inv_vols[i] / max(total_inv_vol, 1e-9)
-        blended = 0.6 * kelly_w + 0.4 * rp_w
-        # Cap at 0.35
-        capped = min(blended * synth_budget, 0.35)
-        allocations.append({**sc, "weight": round(capped, 4)})
 
-    # Normalize synth weights
-    total_synth = sum(a["weight"] for a in allocations)
-    if total_synth > 0:
-        for a in allocations:
-            a["weight"] = round(a["weight"] / total_synth * synth_budget, 4)
+    if opt_rb is not None:
+        risk_decomp_rb = kelly_risk_decomposition(opt_rb)
+        corr_pairs_rb = correlation_pairs(opt_rb, top_n=8)
+        weight_by_synth = {sym: float(w) for sym, w in zip(opt_rb.symbols, opt_rb.weights)}
+        for sc, syn in zip(scored, rule_synths):
+            w = weight_by_synth.get(syn, 0.0) if syn else 0.0
+            allocations.append({**sc, "weight": round(w, 4)})
+    else:
+        # Legacy Kelly+RP blend (60/40) — capped at 0.20 per asset for
+        # consistency with the agent path.  Single Kelly = SR/σ already
+        # computed upstream; this just normalizes votes into weights.
+        total_kelly = sum(sc["kelly_fraction"] for sc in scored)
+        inv_vols = [1.0 / max(sc["vol_ann"], 0.001) for sc in scored]
+        total_inv_vol = sum(inv_vols)
+        for i, sc in enumerate(scored):
+            kelly_w = (sc["kelly_fraction"] / max(total_kelly, 1e-9)) if total_kelly > 0 else 1 / len(scored)
+            rp_w = inv_vols[i] / max(total_inv_vol, 1e-9)
+            blended = 0.6 * kelly_w + 0.4 * rp_w
+            allocations.append({**sc, "weight": round(min(blended * synth_budget, 0.20), 4)})
+        total_synth = sum(a["weight"] for a in allocations)
+        if total_synth > 0:
+            for a in allocations:
+                a["weight"] = round(a["weight"] / total_synth * synth_budget, 4)
 
-    # Sort by weight desc
     allocations.sort(key=lambda x: -x["weight"])
-
-    # Compute expected portfolio metrics (weighted average)
     total_w = sum(a["weight"] for a in allocations)
-    exp_sharpe = sum(a["sharpe"] * a["weight"] for a in allocations) / max(total_w, 1e-9)
-    exp_cagr = sum(a["cagr"] * a["weight"] for a in allocations) / max(total_w, 1e-9)
-    exp_max_dd = sum(a["max_drawdown"] * a["weight"] for a in allocations) / max(total_w, 1e-9)
+    if opt_rb is not None:
+        exp_sharpe = opt_rb.expected_sharpe
+        exp_cagr = opt_rb.expected_return
+        exp_max_dd = 2.0 * opt_rb.expected_vol
+    else:
+        exp_sharpe = sum(a["sharpe"] * a["weight"] for a in allocations) / max(total_w, 1e-9)
+        exp_cagr = sum(a["cagr"] * a["weight"] for a in allocations) / max(total_w, 1e-9)
+        exp_max_dd = sum(a["max_drawdown"] * a["weight"] for a in allocations) / max(total_w, 1e-9)
 
     # Regime narrative
     regime_narratives = {
@@ -1019,7 +1342,23 @@ async def get_portfolio_advisor(
             "sharpe": round(exp_sharpe, 4),
             "cagr": round(exp_cagr, 4),
             "max_drawdown": round(exp_max_dd, 4),
+            "vol_ann": round(opt_rb.expected_vol, 4) if opt_rb else None,
+            "diversification_ratio": round(opt_rb.diversification_ratio, 4) if opt_rb else None,
+            "risk_aversion_gamma": round(opt_rb.risk_aversion, 2) if opt_rb else None,
+            "optimizer_converged": opt_rb.converged if opt_rb else False,
         },
+        "risk_decomposition": risk_decomp_rb,
+        "correlation_pairs": corr_pairs_rb,
+        "rigor_summary": _build_rigor_summary(allocations),
+        "stress_tests": [
+            {
+                "scenario": r.scenario, "label": r.label,
+                "description": r.description, "portfolio_pnl": r.portfolio_pnl,
+                "portfolio_value_after": r.portfolio_value_after,
+                "per_asset_pnl": r.per_asset_pnl,
+            }
+            for r in _run_stress(allocations, usdc_floor)
+        ],
         "market_scan": {
             "universe_size": len(DEFAULT_SCAN_UNIVERSE),
             "fetched": len(price_histories),
@@ -1032,6 +1371,62 @@ async def get_portfolio_advisor(
             "served_model": None,
             "num_picks": 0,
         },
+        "reasoning_trace": await _build_and_anchor_trace(
+            allocations,
+            f"Rule-based covariance-aware Kelly MVO for {regime_value} regime, {risk_profile} profile",
+            None,
+        ),
+    }
+
+
+@strategies_router.get("/stress/scenarios")
+async def list_stress_scenarios():
+    """List the available stress scenarios with descriptions.
+
+    Each scenario applies a per-asset-class shock vector to a portfolio
+    and returns the instantaneous mark-to-market P&L.
+    """
+    from archimedes.services.stress_engine import list_scenarios
+    return {"scenarios": list_scenarios()}
+
+
+@strategies_router.post("/stress/run")
+async def run_stress_test(payload: dict):
+    """Apply a stress scenario to a caller-supplied portfolio.
+
+    Body:
+      {
+        "allocations": [{"symbol": "NVDA", "weight": 0.14, "asset_class": "us_stock"}, ...],
+        "scenario": "equity_crash_2008" | "tech_rout_2022" | ... | "all",
+        "usdc_weight": 0.20
+      }
+    """
+    from fastapi import HTTPException
+    from archimedes.services.stress_engine import stress_all, stress_one, SCENARIOS
+
+    allocations = payload.get("allocations") or []
+    if not isinstance(allocations, list) or not allocations:
+        raise HTTPException(status_code=400, detail="allocations[] is required")
+    scenario = payload.get("scenario", "all")
+    usdc_weight = float(payload.get("usdc_weight") or 0.0)
+
+    if scenario == "all":
+        results = stress_all(allocations, usdc_weight=usdc_weight)
+    else:
+        if scenario not in SCENARIOS:
+            raise HTTPException(status_code=404, detail=f"Unknown scenario: {scenario}")
+        results = [stress_one(allocations, scenario, usdc_weight=usdc_weight)]
+
+    return {
+        "results": [
+            {
+                "scenario": r.scenario, "label": r.label,
+                "description": r.description, "portfolio_pnl": r.portfolio_pnl,
+                "portfolio_value_after": r.portfolio_value_after,
+                "per_asset_pnl": r.per_asset_pnl,
+            }
+            for r in results
+        ],
     }
 
 
