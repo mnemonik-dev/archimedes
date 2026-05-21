@@ -310,6 +310,21 @@ def compute_kelly_fraction(
 # ─── Private helpers ─────────────────────────────────────────────────
 
 
+def compute_sharpe_ci(
+    sharpe_annual: float,
+    n_obs_daily: int,
+    confidence: float = 0.95,
+) -> tuple[float, float]:
+    """Lo (2002) confidence interval for annualized Sharpe from daily IID returns.
+
+    Returns (lower, upper) at the requested confidence level.
+    """
+    sr_daily = sharpe_annual / math.sqrt(_ANNUALIZATION)
+    se = math.sqrt((1.0 + 0.5 * sr_daily ** 2) * _ANNUALIZATION / n_obs_daily)
+    z = norm.ppf((1.0 + confidence) / 2.0)
+    return (sharpe_annual - z * se, sharpe_annual + z * se)
+
+
 def _sharpe_per_col(R: np.ndarray) -> np.ndarray:
     """Annualized Sharpe for each column (strategy) of a return matrix."""
     if R.shape[0] < 2:

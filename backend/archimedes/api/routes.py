@@ -138,6 +138,8 @@ def _to_strategy_response(s: Strategy) -> StrategyResponse:
         out_of_sample_sharpe=s.out_of_sample_sharpe if has_real else (bt.out_of_sample_sharpe if bt else None),
         kelly_fraction=s.kelly_fraction,
         is_backtest_placeholder=not has_real,
+        sharpe_ci_lower=s.sharpe_ci_lower,
+        sharpe_ci_upper=s.sharpe_ci_upper,
     )
 
 

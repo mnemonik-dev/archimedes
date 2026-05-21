@@ -226,6 +226,13 @@ def _to_strategy(path: Path, metadata: dict[str, Any], code_hash: str, fixture: 
     out_of_sample_sharpe = fx.get("out_of_sample_sharpe")
     passes_rigor_gate = bool(fx.get("passes_rigor_gate", False))
     kelly_fraction = fx.get("kelly_fraction")
+    n_obs_daily = fx.get("n_obs_daily")
+
+    # Compute Lo (2002) Sharpe 95% CI when real Sharpe and n_obs are available
+    sharpe_ci_lower = sharpe_ci_upper = None
+    if real_sharpe is not None and n_obs_daily is not None:
+        from archimedes.services.rigor_evaluator import compute_sharpe_ci  # local import to avoid circulars
+        sharpe_ci_lower, sharpe_ci_upper = compute_sharpe_ci(float(real_sharpe), int(n_obs_daily))
 
     # Use file mtime so timestamps reflect the strategy file's curation
     # time rather than process start time — otherwise every restart would
@@ -286,6 +293,9 @@ def _to_strategy(path: Path, metadata: dict[str, Any], code_hash: str, fixture: 
         out_of_sample_sharpe=float(out_of_sample_sharpe) if out_of_sample_sharpe is not None else None,
         passes_rigor_gate=passes_rigor_gate,
         kelly_fraction=float(kelly_fraction) if kelly_fraction is not None else None,
+        sharpe_ci_lower=round(sharpe_ci_lower, 4) if sharpe_ci_lower is not None else None,
+        sharpe_ci_upper=round(sharpe_ci_upper, 4) if sharpe_ci_upper is not None else None,
+        n_obs_daily=int(n_obs_daily) if n_obs_daily is not None else None,
     )
 
 

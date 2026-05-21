@@ -103,7 +103,15 @@ function FeaturedCard({ s }) {
           {hasBacktest ? (
             <>
               <div className="strat-metric-grid">
-                <div><div className="caption">Sharpe</div><div style={{ fontWeight: 700, fontSize: '1.1rem' }}>{fmt(s.sharpe_ratio)}</div></div>
+                <div>
+                  <div className="caption">Sharpe</div>
+                  <div style={{ fontWeight: 700, fontSize: '1.1rem' }}>{fmt(s.sharpe_ratio)}</div>
+                  {s.sharpe_ci_lower != null && s.sharpe_ci_upper != null && (
+                    <div className="caption" style={{ color: 'var(--text-3)', fontSize: '0.7rem' }}>
+                      95% CI [{fmt(s.sharpe_ci_lower, 2)}, {fmt(s.sharpe_ci_upper, 2)}]
+                    </div>
+                  )}
+                </div>
                 <div><div className="caption">CAGR</div><div className="positive" style={{ fontWeight: 700, fontSize: '1.1rem' }}>{fmtPct(s.cagr)}</div></div>
                 <div><div className="caption">Max DD</div><div className="negative" style={{ fontWeight: 700, fontSize: '1.1rem' }}>−{fmtPct(s.max_drawdown)}</div></div>
                 <div><div className="caption">Win Rate</div><div style={{ fontWeight: 700, fontSize: '1.1rem' }}>{fmtPct(s.win_rate)}</div></div>
