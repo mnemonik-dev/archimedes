@@ -162,9 +162,12 @@ class VaultMonitor:
             except Exception:
                 pass
 
-        # Sharpe drift — compare live AUM trajectory to backtest baseline
-        # TODO: wire backtest_sharpe from vault's active strategy via StrategyProvider
-        sharpe_drift = compute_sharpe_drift(snapshots, backtest_sharpe=0.7)
+        # Sharpe drift requires a strategy-specific backtest baseline. Until that
+        # baseline is wired in, do not compute drift from a hard-coded value.
+        sharpe_drift = {
+            "available": False,
+            "reason": "baseline_backtest_sharpe_unavailable",
+        }
 
         return {
             "vault_address": vault_address,
