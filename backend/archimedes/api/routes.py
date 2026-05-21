@@ -461,8 +461,6 @@ async def get_efficient_frontier(
     """Compute efficient frontier for selected Tier-1 strategies.
 
     Uses synthetic backtest return streams to build the MVO frontier.
-    Falls back to a two-asset illustration using backtest summary stats
-    when full return series are unavailable.
 
     NOTE: Returns are simulated from summary statistics (SR, CAGR) since raw
     daily return series are not stored in backtest_fixtures.json.
