@@ -770,6 +770,12 @@ async def get_portfolio_advisor(
         """
         import uuid
         from archimedes.models.trace import ReasoningTrace, DecisionType
+        registry_address: str | None = None
+        try:
+            from archimedes.chain.client import chain_client as _cc
+            registry_address = _cc.settings.reasoning_trace_registry_address or None
+        except Exception:
+            registry_address = None
         try:
             trace = ReasoningTrace(
                 id=str(uuid.uuid4()),
@@ -832,10 +838,7 @@ async def get_portfolio_advisor(
                 "canonical_preview": trace.canonical_json()[:500] + ("…" if len(trace.canonical_json()) > 500 else ""),
                 "anchored_on_chain": tx_hash is not None,
                 "anchor_tx_hash": tx_hash,
-                "registry_address": (
-                    chain_client.settings.reasoning_trace_registry_address
-                    if 'chain_client' in dir() else None
-                ),
+                "registry_address": registry_address,
                 "decision_type": trace.decision_type.value,
                 "trigger": trace.trigger,
             }
