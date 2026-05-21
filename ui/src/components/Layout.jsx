@@ -2,59 +2,73 @@ import WalletConnect from './WalletConnect'
 import Breadcrumbs from './Breadcrumbs'
 import { NEW_CONTRACTS } from '../config'
 
+// Spine per docs/user-stories.md. Reasoning is in nav until the per-page modal
+// affordances are fully wired (user-stories.md ideal); for now traces need a
+// browse surface so users can actually inspect them.
 const NAV = [
-  { group: 'Home', items: [
-    { id: 'landing', label: 'Home' },
-  ]},
-  { group: 'Markets', items: [
-    { id: 'explore',    label: 'Explore' },
-    { id: 'strategies', label: 'Strategies' },
-    { id: 'trade',      label: 'Trade' },
-  ]},
-  { group: 'Portfolio', items: [
-    { id: 'dashboard',    label: 'Dashboard' },
-    { id: 'mint',         label: 'Mint / Burn' },
-    { id: 'liquidity',    label: 'Liquidity' },
-    { id: 'vaults',       label: 'Vaults' },
-    { id: 'create-vault', label: 'Create Vault' },
-    { id: 'financial',    label: 'Financial Analysis' },
-  ]},
-  { group: 'Intelligence', items: [
-    { id: 'reasoning',       label: 'Reasoning' },
-    { id: 'risk',             label: 'Risk Analysis' },
-    { id: 'corpus',           label: 'Corpus Explorer' },
-    { id: 'rigor-explainer', label: 'Rigor Gate' },
-    { id: 'advisor',         label: 'Portfolio Advisor' },
+  { group: '', items: [
+    { id: 'landing',   label: 'Home' },
+    { id: 'generate',  label: 'Generate' },
+    { id: 'library',   label: 'Library' },
+    { id: 'corpus',    label: 'Corpus' },
+    { id: 'portfolio', label: 'Portfolio' },
+    { id: 'reasoning', label: 'Reasoning' },
+    { id: 'learnings', label: 'Learnings' },
   ]},
 ]
 
 export const PAGE_LABELS = {
   landing: 'Home',
-  explore: 'Explore',
-  strategies: 'Strategies',
-  trade: 'Trade',
-  dashboard: 'Dashboard',
-  mint: 'Mint / Burn',
-  liquidity: 'Liquidity',
-  vaults: 'Vaults',
-  'create-vault': 'Create Vault',
-  financial: 'Financial Analysis',
-  'vault-detail': 'Vault Details',
+  generate: 'Generate',
+  library: 'Library',
+  corpus: 'Corpus',
+  portfolio: 'Portfolio',
   reasoning: 'Reasoning',
-  risk: 'Risk Analysis',
-  corpus: 'Corpus Explorer',
-  'rigor-explainer': 'Rigor Gate',
-  advisor: 'Portfolio Advisor',
+  learnings: 'Learnings',
+  'vault-detail': 'Vault Details',
   about: 'About',
   imprint: 'Imprint',
 }
 
 export default function Layout({ page, setPage, walletAddr, onConnect, onDisconnect, children }) {
   const blockLabel = Object.keys(NEW_CONTRACTS).length ? 'Arc · Testnet live' : 'Arc · Connecting'
+  // Semi-hard gate: prompt for wallet on every page except Landing (the marketing
+  // surface) until it's connected. Browse is still allowed; deploy + portfolio
+  // surfaces themselves enforce wallet at their own action sites.
+  const showWalletBanner = !walletAddr && page !== 'landing'
 
   return (
     <div className="shell">
-      <aside className="sidebar">
+      {showWalletBanner && (
+        <div
+          role="banner"
+          style={{
+            position: 'fixed', top: 0, left: 0, right: 0, zIndex: 50,
+            background: 'linear-gradient(90deg, rgba(245, 158, 11, 0.18), rgba(245, 158, 11, 0.06))',
+            borderBottom: '1px solid rgba(245, 158, 11, 0.35)',
+            padding: '8px 16px',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16,
+            fontSize: '0.85rem', color: 'var(--text-2)',
+            backdropFilter: 'blur(8px)',
+          }}
+        >
+          <span>
+            <strong style={{ color: 'var(--accent)' }}>⚠ Wallet not connected.</strong>{' '}
+            You can browse and generate strategies, but you can't deploy, deposit, or see your portfolio without a wallet.
+          </span>
+          <a
+            href="#wallet"
+            onClick={(e) => { e.preventDefault(); document.querySelector('.wallet-chip')?.click() }}
+            style={{
+              padding: '4px 12px', borderRadius: 6, background: 'var(--accent)', color: '#0c0a09',
+              fontWeight: 600, textDecoration: 'none', fontSize: '0.8rem',
+            }}
+          >
+            Connect Wallet →
+          </a>
+        </div>
+      )}
+      <aside className="sidebar" style={showWalletBanner ? { paddingTop: 50 } : undefined}>
         <div className="sidebar-brand">
           <div className="logo-mark">
             <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -69,14 +83,14 @@ export default function Layout({ page, setPage, walletAddr, onConnect, onDisconn
         </div>
 
         <nav>
-          {NAV.map(group => (
-            <div key={group.group} className="nav-group">
-              <div className="nav-group-label">{group.group}</div>
+          {NAV.map((group, gi) => (
+            <div key={group.group || gi} className="nav-group">
+              {group.group && <div className="nav-group-label">{group.group}</div>}
               {group.items.map(item => (
                 <button
                   key={item.id}
                   type="button"
-                  className={`nav-link${page === item.id || (item.id === 'vaults' && page === 'vault-detail') ? ' active' : ''}`}
+                  className={`nav-link${page === item.id || (item.id === 'portfolio' && page === 'vault-detail') ? ' active' : ''}`}
                   onClick={() => setPage(item.id)}
                 >
                   {item.label}
@@ -92,7 +106,7 @@ export default function Layout({ page, setPage, walletAddr, onConnect, onDisconn
         </div>
       </aside>
 
-      <div className="main-area">
+      <div className="main-area" style={showWalletBanner ? { paddingTop: 42 } : undefined}>
         <div className="topbar">
           <Breadcrumbs page={page} setPage={setPage} />
           <WalletConnect address={walletAddr} onConnect={onConnect} onDisconnect={onDisconnect} />

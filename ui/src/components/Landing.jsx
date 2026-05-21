@@ -55,17 +55,11 @@ export default function Landing({ onNavigate, onConnect, walletAddr }) {
             — with every decision hashed and verifiable on-chain.
           </p>
           <div className="hero-actions">
-            {walletAddr ? (
-              <button className="btn-primary" onClick={() => onNavigate('explore')}>
-                Explore Marketplace →
-              </button>
-            ) : (
-              <button className="btn-primary" onClick={onConnect}>
-                Connect Wallet to Start
-              </button>
-            )}
-            <button className="btn-secondary" onClick={() => onNavigate('strategies')}>
-              View Strategies
+            <button className="btn-primary" onClick={() => onNavigate('generate')}>
+              Generate a Strategy →
+            </button>
+            <button className="btn-secondary" onClick={() => onNavigate('library')}>
+              Browse Example Library
             </button>
           </div>
         </div>
@@ -305,12 +299,11 @@ export default function Landing({ onNavigate, onConnect, walletAddr }) {
           The world is your portfolio.
         </p>
         <div className="hero-actions">
-          {walletAddr ? (
-            <button className="btn-primary" onClick={() => onNavigate('trade')}>
-              Start Trading →
-            </button>
-          ) : (
-            <button className="btn-primary" onClick={onConnect}>
+          <button className="btn-primary" onClick={() => onNavigate('generate')}>
+            Generate a Strategy →
+          </button>
+          {!walletAddr && (
+            <button className="btn-secondary" onClick={onConnect}>
               Connect Wallet
             </button>
           )}

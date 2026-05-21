@@ -142,6 +142,14 @@ def _to_strategy_response(s: Strategy) -> StrategyResponse:
         is_backtest_placeholder=not has_real,
         sharpe_ci_lower=s.sharpe_ci_lower,
         sharpe_ci_upper=s.sharpe_ci_upper,
+        backtest_start=(
+            s.real_backtest_start if has_real and s.real_backtest_start
+            else (bt.backtest_start.isoformat() if bt and bt.backtest_start else None)
+        ),
+        backtest_end=(
+            s.real_backtest_end if has_real and s.real_backtest_end
+            else (bt.backtest_end.isoformat() if bt and bt.backtest_end else None)
+        ),
     )
 
 
@@ -394,6 +402,38 @@ async def list_strategies(
         strategies=[_to_strategy_response(s) for s in window],
         total=total,
     )
+
+
+@strategies_router.get("/generated")
+async def list_generated_strategies(limit: int = Query(50, ge=1, le=200)):
+    """List fusion/architect-generated strategies from the strategy_store table.
+
+    Separate from the curated seed library returned by `/api/strategies/`.
+    Surfaces the user's own generations in the Library 'Generated' tab so
+    seeds and user output never share visual real estate. Today these are
+    pre-backtest hypotheses (no Sharpe/CAGR/DSR); when the fusion-to-backtest
+    pipeline ships (docs/specs/fusion-to-backtest-t2o2-issue.md) the rigor_verdict
+    field populates and we can expose blended metrics here.
+    """
+    from sqlalchemy.orm import Session as _Session
+    from archimedes.models.strategy_store import StrategyRecord
+
+    rows: list[dict] = []
+    try:
+        with get_session() as session:  # type: _Session
+            records = (
+                session.query(StrategyRecord)
+                .filter(StrategyRecord.is_example.is_(False))
+                .order_by(StrategyRecord.created_at.desc())
+                .limit(limit)
+                .all()
+            )
+            rows = [r.to_dict() for r in records]
+    except Exception as exc:
+        import logging as _logging
+        _logging.getLogger(__name__).warning("list_generated_strategies failed: %s", exc)
+        rows = []
+    return {"strategies": rows, "total": len(rows)}
 
 
 @strategies_router.get("/signals", response_model=StrategySignalsResponse)
@@ -892,6 +932,62 @@ async def _run_fusion_job(job_id: str) -> None:
         except Exception:
             pass
 
+        # Persist a reasoning trace for this fusion so it shows up in
+        # /api/traces (Portfolio + Reasoning feeds). Hash is keccak-shaped
+        # SHA-256 of the canonical fusion JSON; same recompute-and-verify
+        # contract as the construct path, just for a fusion artifact.
+        try:
+            import hashlib, uuid
+            from datetime import datetime, timezone
+            canonical = json.dumps({
+                "strategy_name": result.strategy_name,
+                "thesis": result.thesis,
+                "source_arxiv_ids": sorted(result.source_arxiv_ids),
+                "fusion_reasoning": result.fusion_reasoning,
+                "novelty_rationale": result.novelty_rationale,
+                "risk_notes": result.risk_notes,
+                "model": result.model,
+                "brief": {
+                    "asset_classes": sorted(brief.asset_classes or []),
+                    "risk_appetite": rp.value,
+                    "strategic_direction": brief.strategic_direction or "",
+                    "market_context": brief.market_context or {},
+                },
+            }, sort_keys=True, separators=(",", ":"))
+            trace_hash = "0x" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+            from archimedes.services.redis_state import AgentStateStore
+            state = AgentStateStore()
+            try:
+                await state.save_trace({
+                    "id": str(uuid.uuid4()),
+                    "vault_address": "",
+                    "decision_type": "construction",
+                    "trigger": "fusion_generation",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "market_context": brief.market_context or {},
+                    "portfolio_before": {},
+                    "portfolio_after": {},
+                    "reasoning": (
+                        f"FUSION HYPOTHESIS — {result.strategy_name}\n\n"
+                        f"Thesis: {result.thesis}\n\n"
+                        f"How it fuses: {result.fusion_reasoning}\n\n"
+                        f"Why novel: {result.novelty_rationale}\n\n"
+                        f"Risks: {result.risk_notes}\n\n"
+                        f"Pre-backtest hypothesis — empirical validation (DSR/PBO/OOS) is pending."
+                    ),
+                    "confidence": 0.0,
+                    "trades_executed": [],
+                    "strategies_referenced": result.source_arxiv_ids,
+                    "trace_hash": trace_hash,
+                    "arc_tx_hash": None,
+                    "is_verified": False,
+                })
+            finally:
+                await state.close()
+        except Exception as _exc:
+            import logging as _logging
+            _logging.getLogger(__name__).warning("fusion: trace persistence failed (non-fatal): %s", _exc)
+
         await store.update_status(job_id, "done", result={
             "mode": "fusion",
             "status": result.status,
@@ -913,6 +1009,42 @@ async def _run_fusion_job(job_id: str) -> None:
             pass
     finally:
         await store.close()
+
+
+async def _persist_trace_off_chain(trace) -> None:
+    """Save a ReasoningTrace to Redis so it appears in /api/traces feed.
+
+    Without this, the trace is returned in the response of whatever endpoint
+    built it but never enters the agent-activity feed Portfolio + Reasoning
+    page browse. Non-fatal — failures are logged but don't break the caller.
+    """
+    import logging as _logging
+    _logger = _logging.getLogger(__name__)
+    try:
+        from archimedes.services.redis_state import AgentStateStore
+        state = AgentStateStore()
+        try:
+            await state.save_trace({
+                "id": trace.id,
+                "vault_address": getattr(trace, "vault_address", "") or "",
+                "decision_type": trace.decision_type.value if hasattr(trace.decision_type, "value") else str(trace.decision_type),
+                "trigger": getattr(trace, "trigger", "") or "",
+                "timestamp": trace.timestamp.isoformat() if hasattr(trace.timestamp, "isoformat") else str(trace.timestamp),
+                "market_context": getattr(trace, "market_context", {}) or {},
+                "portfolio_before": getattr(trace, "portfolio_before", {}) or {},
+                "portfolio_after": getattr(trace, "portfolio_after", {}) or {},
+                "reasoning": getattr(trace, "reasoning", "") or "",
+                "confidence": getattr(trace, "confidence", 0.0) or 0.0,
+                "trades_executed": getattr(trace, "trades_executed", []) or [],
+                "strategies_referenced": getattr(trace, "strategies_referenced", []) or [],
+                "trace_hash": getattr(trace, "trace_hash", "") or "",
+                "arc_tx_hash": getattr(trace, "arc_tx_hash", None),
+                "is_verified": bool(getattr(trace, "arc_tx_hash", None)),
+            })
+        finally:
+            await state.close()
+    except Exception as exc:
+        _logger.warning("trace persistence failed (non-fatal): %s", exc)
 
 
 @strategies_router.post("/construct", response_model=StrategyConstructionResponse)
@@ -939,6 +1071,10 @@ async def construct_strategy(req: StrategyConstructionRequest):
         raise HTTPException(status_code=503, detail=f"LLM backend unavailable: {exc}") from exc
     guardrail = apply_guardrail(proposal)
     trace = build_construction_trace(proposal, guardrail)
+
+    # Persist the trace so it appears in /api/traces (Portfolio + Reasoning feeds).
+    # Previously the trace was only returned inline in this response — never indexed.
+    await _persist_trace_off_chain(trace)
 
     by_id = {s.strategy_id: s for s in proposal.selected}
     selected = []

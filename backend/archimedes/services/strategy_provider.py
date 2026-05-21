@@ -219,6 +219,8 @@ def _to_strategy(path: Path, metadata: dict[str, Any], code_hash: str, fixture: 
     real_calmar = fx.get("calmar_ratio")
     real_corr_spy = fx.get("correlation_to_spy")
     real_total_trades = fx.get("total_trades")
+    real_backtest_start = fx.get("backtest_start")
+    real_backtest_end = fx.get("backtest_end")
     deflated_sharpe_ratio = fx.get("deflated_sharpe_ratio")
     dsr_p_value = fx.get("dsr_p_value")
     num_trials_in_selection = fx.get("num_trials_in_selection")
@@ -286,6 +288,8 @@ def _to_strategy(path: Path, metadata: dict[str, Any], code_hash: str, fixture: 
         real_calmar=float(real_calmar) if real_calmar is not None else None,
         real_corr_spy=float(real_corr_spy) if real_corr_spy is not None else None,
         real_total_trades=int(real_total_trades) if real_total_trades is not None else None,
+        real_backtest_start=str(real_backtest_start) if real_backtest_start else None,
+        real_backtest_end=str(real_backtest_end) if real_backtest_end else None,
         deflated_sharpe_ratio=float(deflated_sharpe_ratio) if deflated_sharpe_ratio is not None else None,
         dsr_p_value=float(dsr_p_value) if dsr_p_value is not None else None,
         num_trials_in_selection=int(num_trials_in_selection) if num_trials_in_selection is not None else None,

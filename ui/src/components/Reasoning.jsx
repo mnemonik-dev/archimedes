@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
-  publicClient, getWalletClient, getAddress,
+  publicClient,
   TRACE_REGISTRY_ABI, NEW_CONTRACTS,
 } from '../config'
 
@@ -293,11 +293,6 @@ function OnChainTraces() {
   const [traces, setTraces] = useState([])
   const [totalCount, setTotalCount] = useState(0)
   const [loading, setLoading] = useState(true)
-  const [publishVault, setPublishVault] = useState('')
-  const [publishMsg, setPublishMsg] = useState('')
-  const [publishReasoning, setPublishReasoning] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [status, setStatus] = useState('')
   const [verifying, setVerifying] = useState({})
   const [verifyResults, setVerifyResults] = useState({})
 
@@ -335,40 +330,6 @@ function OnChainTraces() {
 
   useEffect(() => { loadTraces() }, [loadTraces])
 
-  const publishTrace = async () => {
-    if (!publishVault || !publishMsg) return
-    setBusy(true); setStatus('')
-    try {
-      setStatus('Publishing trace…')
-      const res = await fetch(`${API_BASE}/api/traces/publish`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          vault_address: publishVault,
-          decision_type: 'construction',
-          trigger: 'manual_publish',
-          reasoning: publishReasoning || publishMsg,
-          confidence: 0.85,
-          market_context: { source: 'ui' },
-          strategies_referenced: [],
-          trades_executed: [],
-        }),
-      })
-      if (!res.ok) {
-        const err = await res.json()
-        throw new Error(err.detail || 'Publish failed')
-      }
-      const data = await res.json()
-      setStatus(`✅ Published! Hash: ${shortHash(data.trace_hash)} ${data.is_anchored ? '⚓ anchored on Arc' : '(off-chain only)'}`)
-      setPublishMsg('')
-      setPublishReasoning('')
-      loadTraces()
-    } catch (err) {
-      setStatus(`❌ ${err.message}`)
-    }
-    setBusy(false)
-  }
-
   const verifyTrace = async (traceId) => {
     setVerifying(prev => ({ ...prev, [traceId]: true }))
     try {
@@ -389,48 +350,28 @@ function OnChainTraces() {
   return (
     <div>
       <div className="label mb-3">Reasoning Trace Registry ({totalCount} total)</div>
-
-      {/* Publish trace via API */}
-      <div className="card" style={{ marginBottom: 16, padding: 16 }}>
-        <div className="label mb-2">Publish Reasoning Trace</div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-            <input
-              type="text"
-              value={publishVault}
-              onChange={e => setPublishVault(e.target.value)}
-              placeholder="Vault address (0x…)"
-              className="chat-input"
-              style={{ flex: 1, minWidth: 200 }}
-            />
-            <input
-              type="text"
-              value={publishMsg}
-              onChange={e => setPublishMsg(e.target.value)}
-              placeholder="Trigger / title"
-              className="chat-input"
-              style={{ flex: 1, minWidth: 200 }}
-            />
-          </div>
-          <textarea
-            value={publishReasoning}
-            onChange={e => setPublishReasoning(e.target.value)}
-            placeholder="Reasoning (optional — describe the decision context)"
-            className="chat-input"
-            style={{ minHeight: 60, resize: 'vertical' }}
-          />
-          <button className="btn btn-primary" onClick={publishTrace} disabled={busy || !publishVault || !publishMsg}>
-            {busy ? 'Publishing…' : '⚓ Publish & Anchor on Arc'}
-          </button>
-        </div>
-        {status && <div className="caption" style={{ marginTop: 8 }}>{status}</div>}
-      </div>
+      <p className="caption" style={{ marginBottom: 16, maxWidth: 640, lineHeight: 1.5 }}>
+        Every trace below is a real agent decision: an autonomous rebalance, a
+        regime change, or a strategy construction from the Generate page. The hash
+        is computed deterministically off-chain and anchored on Arc via the
+        <code style={{ marginLeft: 4 }}>ReasoningTraceRegistry</code> contract.
+        Click <strong>Verify on-chain</strong> on any trace to recompute and check
+        against the on-chain anchor.
+      </p>
 
       {/* Trace list */}
       {loading ? (
         <div className="caption">Loading traces…</div>
       ) : traces.length === 0 ? (
-        <div className="caption">No traces published yet. Use the form above to publish your first reasoning trace.</div>
+        <div className="card" style={{ padding: 18 }}>
+          <p className="body" style={{ marginBottom: 6 }}>No reasoning traces yet.</p>
+          <p className="caption">
+            Traces accumulate when the autonomous agent rebalances vaults, or when you
+            use the <a href="/generate" style={{ color: 'var(--accent)' }}>Generate</a> page to construct a portfolio (each
+            construction emits a trace). If the page stays empty after generating, the
+            agent runner may not be running locally — check <code>docker compose logs oracle</code>.
+          </p>
+        </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {traces.map((t, i) => {

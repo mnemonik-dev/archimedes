@@ -353,48 +353,86 @@ function KGViewer({ data, openPaper }) {
 }
 
 function PaperDetail({ paper, onBack }) {
+  // Always derive an arxiv URL from the id — backend doesn't always populate
+  // pdf_url, but arxiv.org/abs/{id} is canonical and always works.
+  const arxivAbsUrl = paper.arxiv_id ? `https://arxiv.org/abs/${paper.arxiv_id}` : null
+  const arxivPdfUrl = paper.pdf_url || (paper.arxiv_id ? `https://arxiv.org/pdf/${paper.arxiv_id}` : null)
+
   return (
     <div className="corpus-explorer">
-      <button className="back-btn" onClick={onBack}>Back to Explorer</button>
-      <div className="paper-detail">
-        <h2>{paper.title || paper.arxiv_id}</h2>
-        <div className="paper-detail-meta">
-          <span className="paper-id">{paper.arxiv_id}</span>
-          {paper.primary_category && <span className="paper-cat">{paper.primary_category}</span>}
-          {paper.published && <span className="paper-year">{paper.published}</span>}
-          {paper.cluster_id && <span className="paper-cluster">Cluster: {paper.cluster_id}</span>}
-          {paper.topic_label && <span className="paper-cluster">Topic: {paper.topic_label}</span>}
-        </div>
-        {paper.pdf_url && (
-          <a href={paper.pdf_url} target="_blank" rel="noopener noreferrer" className="arxiv-link">
-            View on arXiv
-          </a>
-        )}
+      <button className="back-btn" onClick={onBack}>← Back to Explorer</button>
+      <div className="paper-detail" style={{ maxWidth: 820 }}>
+        <h2 style={{ lineHeight: 1.3, marginBottom: 8 }}>{paper.title || paper.arxiv_id}</h2>
+
         {paper.authors?.length > 0 && (
-          <div className="paper-authors">
-            <h4>Authors</h4>
-            <p>{paper.authors.join(', ')}</p>
+          <div className="caption" style={{ marginBottom: 12, fontSize: '0.92rem' }}>
+            {paper.authors.join(', ')}
           </div>
         )}
+
+        <div className="paper-detail-meta" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
+          <span className="tag tag-muted mono">arxiv:{paper.arxiv_id}</span>
+          {paper.primary_category && <span className="tag tag-muted">{paper.primary_category}</span>}
+          {paper.published && <span className="tag tag-muted">{(paper.published || '').slice(0, 10)}</span>}
+          {paper.topic_label && <span className="tag tag-accent">Topic: {paper.topic_label}</span>}
+        </div>
+
+        <div style={{ display: 'flex', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
+          {arxivAbsUrl && (
+            <a
+              href={arxivAbsUrl} target="_blank" rel="noopener noreferrer"
+              className="btn btn-primary"
+              style={{ padding: '6px 14px', fontSize: '0.85rem' }}
+            >
+              arxiv.org abstract ↗
+            </a>
+          )}
+          {arxivPdfUrl && (
+            <a
+              href={arxivPdfUrl} target="_blank" rel="noopener noreferrer"
+              className="btn btn-outline"
+              style={{ padding: '6px 14px', fontSize: '0.85rem' }}
+            >
+              PDF ↗
+            </a>
+          )}
+        </div>
+
         {paper.abstract && (
-          <div className="paper-abstract-full">
-            <h4>Abstract</h4>
-            <p>{paper.abstract}</p>
+          <div className="paper-abstract-full" style={{ marginBottom: 24 }}>
+            <h4 style={{ marginBottom: 8, fontSize: '0.9rem', color: 'var(--text-3)', letterSpacing: '0.05em', textTransform: 'uppercase' }}>Abstract</h4>
+            <p style={{ lineHeight: 1.7, fontSize: '0.95rem', color: 'var(--text-2)' }}>{paper.abstract}</p>
           </div>
         )}
-        {paper.citing_strategies?.length > 0 && (
-          <div className="paper-provenance">
-            <h4>Citing Strategies</h4>
-            {paper.citing_strategies.map(s => (
-              <div key={s.name || s.id} className="provenance-link">
-                <span className="strategy-name">{s.name || s.id}</span>
-                {s.source_papers?.length > 0 && (
-                  <span className="source-refs">Sources: {s.source_papers.join(', ')}</span>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
+
+        <div className="paper-provenance" style={{ borderTop: '1px solid var(--glass-border)', paddingTop: 18, marginTop: 18 }}>
+          <h4 style={{ marginBottom: 10, fontSize: '0.9rem', color: 'var(--text-3)', letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+            Cited by {paper.citing_strategies?.length || 0} strateg{paper.citing_strategies?.length === 1 ? 'y' : 'ies'}
+          </h4>
+          {paper.citing_strategies?.length > 0 ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {paper.citing_strategies.map(s => (
+                <div key={s.id || s.name} className="card" style={{ padding: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: '0.92rem' }}>{s.name || s.id}</div>
+                    {s.method && (
+                      <div className="caption" style={{ marginTop: 2 }}>
+                        via <span className="tag tag-muted" style={{ marginLeft: 4 }}>{s.method}</span>
+                        {s.status && <span style={{ marginLeft: 6 }}>· {s.status}</span>}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="caption" style={{ color: 'var(--text-4)' }}>
+              No strategies in the library currently cite this paper. Generate one from{' '}
+              <a href="/generate" style={{ color: 'var(--accent)' }}>Generate</a> — when the
+              fusion engine selects this paper, the link will appear here.
+            </p>
+          )}
+        </div>
       </div>
     </div>
   )
