@@ -96,6 +96,23 @@ def seeded_db():
     return buy_hold.id
 
 
+def _list_all_strategies(client: TestClient, limit: int = 100):
+    strategies = []
+    offset = 0
+    total = None
+    while total is None or len(strategies) < total:
+        resp = client.get("/api/strategies/", params={"limit": limit, "offset": offset})
+        assert resp.status_code == 200
+        data = resp.json()
+        batch = data.get("strategies", [])
+        strategies.extend(batch)
+        total = data.get("total", len(strategies))
+        if not batch:
+            break
+        offset += limit
+    return strategies
+
+
 class TestRootAndHealth:
     def test_root(self, client):
         resp = client.get("/")
@@ -144,6 +161,26 @@ class TestStrategyRoutes:
         assert resp.status_code == 200
         data = resp.json()
         assert data["id"] == sid
+
+    def test_rigor_gate_fields_present_in_list(self, client, seeded_db):
+        """dsr_p_value and passes_rigor_gate must be present on every strategy response."""
+        strategies = _list_all_strategies(client)
+        for s in strategies:
+            assert "dsr_p_value" in s, f"dsr_p_value missing for {s.get('id')}"
+            assert "passes_rigor_gate" in s, f"passes_rigor_gate missing for {s.get('id')}"
+
+    def test_rigor_gate_fields_correct_for_tier1(self, client, seeded_db):
+        """Moreira-Muir fixture values flow correctly: dsr_p_value ≥ 0.95, passes_rigor_gate=True."""
+        strategies = _list_all_strategies(client)
+        mm = next(
+            (s for s in strategies if "Volatility" in s.get("paper_title", "")),
+            None,
+        )
+        if mm is None:
+            pytest.skip("Moreira-Muir strategy not found in fixture")
+        assert mm["passes_rigor_gate"] is True
+        assert mm["dsr_p_value"] is not None
+        assert mm["dsr_p_value"] >= 0.95, f"Expected p≥0.95, got {mm['dsr_p_value']}"
 
 
 class TestRiskRoutes:

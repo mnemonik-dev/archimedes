@@ -57,6 +57,8 @@ function WeightBar({ weight, accent }) {
 function FeaturedCard({ s }) {
   const [open, setOpen] = useState(false)
   const hasBacktest = s.sharpe_ratio != null
+  const isGatePassed = s.passes_rigor_gate === true
+  const isGateFailed = hasBacktest && s.passes_rigor_gate === false
   const pctOfClaim = s.paper_claimed_sharpe && s.sharpe_ratio != null
     ? ((s.sharpe_ratio / s.paper_claimed_sharpe) * 100).toFixed(0)
     : null
@@ -132,12 +134,20 @@ function FeaturedCard({ s }) {
                       <div>
                         <div className="caption" style={{ fontSize: '0.7rem' }}>DSR</div>
                         <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>{fmt(s.deflated_sharpe_ratio)}</div>
+                        {s.dsr_p_value != null && (
+                          <div className="caption" style={{ fontSize: '0.65rem', color: s.dsr_p_value >= 0.95 ? 'var(--positive)' : 'var(--text-3)' }}>
+                            p={fmt(s.dsr_p_value, 3)}
+                          </div>
+                        )}
                       </div>
                     )}
                     {s.pbo_score != null && (
                       <div>
                         <div className="caption" style={{ fontSize: '0.7rem' }}>PBO</div>
                         <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>{fmtPct(s.pbo_score)}</div>
+                        <div className="caption" style={{ fontSize: '0.65rem', color: s.pbo_score < 0.5 ? 'var(--positive)' : 'var(--negative)' }}>
+                          {s.pbo_score < 0.5 ? '< 50% threshold' : '≥ 50% threshold'}
+                        </div>
                       </div>
                     )}
                     {s.kelly_fraction != null && (
@@ -154,11 +164,11 @@ function FeaturedCard({ s }) {
                     </div>
                   )}
                   <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 8px', borderRadius: 4, fontSize: '0.72rem', fontWeight: 600,
-                    background: s.status === 'validated' || s.status === 'live' ? 'rgba(16,185,129,0.12)' : 'rgba(255,255,255,0.06)',
-                    color: s.status === 'validated' || s.status === 'live' ? 'var(--positive)' : 'var(--text-3)',
-                    border: `1px solid ${s.status === 'validated' || s.status === 'live' ? 'rgba(16,185,129,0.3)' : 'var(--glass-border)'}`,
+                    background: isGatePassed ? 'rgba(16,185,129,0.12)' : isGateFailed ? 'rgba(239,68,68,0.12)' : 'rgba(255,255,255,0.06)',
+                    color: isGatePassed ? 'var(--positive)' : isGateFailed ? 'var(--negative)' : 'var(--text-3)',
+                    border: `1px solid ${isGatePassed ? 'rgba(16,185,129,0.3)' : isGateFailed ? 'rgba(239,68,68,0.3)' : 'var(--glass-border)'}`,
                   }}>
-                    {s.status === 'validated' || s.status === 'live' ? '✓ Rigor Gate: Passed' : '◌ Rigor Gate: Candidate'}
+                    {isGatePassed ? '✓ Rigor Gate: Passed' : isGateFailed ? '✕ Rigor Gate: Failed' : '◌ Rigor Gate: Pending'}
                   </div>
                 </>
               )}
@@ -231,6 +241,8 @@ function FeaturedCard({ s }) {
 function StrategyCard({ s }) {
   const [open, setOpen] = useState(false)
   const hasBacktest = s.sharpe_ratio != null
+  const isGatePassed = s.passes_rigor_gate === true
+  const isGateFailed = hasBacktest && s.passes_rigor_gate === false
 
   return (
     <div className="card fade-up fade-up-4">
@@ -256,6 +268,11 @@ function StrategyCard({ s }) {
               {s.deflated_sharpe_ratio != null && (
                 <span className="caption" style={{ background: 'rgba(255,255,255,0.04)', padding: '2px 7px', borderRadius: 4, border: '1px solid var(--glass-border)' }}>
                   DSR <strong>{fmt(s.deflated_sharpe_ratio)}</strong>
+                  {s.dsr_p_value != null && (
+                    <span style={{ marginLeft: 4, color: s.dsr_p_value >= 0.95 ? 'var(--positive)' : 'var(--text-4)', fontSize: '0.65rem' }}>
+                      p={fmt(s.dsr_p_value, 3)}
+                    </span>
+                  )}
                 </span>
               )}
               {s.pbo_score != null && (
@@ -270,11 +287,11 @@ function StrategyCard({ s }) {
               )}
               <span style={{
                 fontSize: '0.68rem', fontWeight: 600, padding: '2px 7px', borderRadius: 4,
-                background: s.status === 'validated' || s.status === 'live' ? 'rgba(16,185,129,0.12)' : 'rgba(255,255,255,0.04)',
-                color: s.status === 'validated' || s.status === 'live' ? 'var(--positive)' : 'var(--text-4)',
-                border: `1px solid ${s.status === 'validated' || s.status === 'live' ? 'rgba(16,185,129,0.3)' : 'var(--glass-border)'}`,
+                background: isGatePassed ? 'rgba(16,185,129,0.12)' : isGateFailed ? 'rgba(239,68,68,0.12)' : 'rgba(255,255,255,0.04)',
+                color: isGatePassed ? 'var(--positive)' : isGateFailed ? 'var(--negative)' : 'var(--text-4)',
+                border: `1px solid ${isGatePassed ? 'rgba(16,185,129,0.3)' : isGateFailed ? 'rgba(239,68,68,0.3)' : 'var(--glass-border)'}`,
               }}>
-                {s.status === 'validated' || s.status === 'live' ? '✓ Rigor Gate' : '◌ Candidate'}
+                {isGatePassed ? '✓ Rigor Gate' : isGateFailed ? '✕ Rigor Gate: Failed' : '◌ Rigor Gate: Pending'}
               </span>
             </div>
           )}
