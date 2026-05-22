@@ -1,12 +1,17 @@
-# Judging-Rubric Self-Assessment — Day 3 Snapshot
+# Judging-Rubric Self-Assessment — Day-10 (2026-05-22)
 
-> **Date:** 2026-05-13 (Day 3, late evening Chicago)
-> **Audience:** Archimedes hackathon team
-> **Purpose:** Honest assessment of where we stand against the four rubric categories with
-> ~11 days to go. Identifies the biggest gaps and a concrete forcing function for closing
-> them. Re-score weekly.
-> **Source:** Rubric weights and category definitions per
-> [`agora_project_analysis.md`](agora_project_analysis.md) § 1.
+> **Status:** Day-10 rewrite (2026-05-22). The Day-3 version of this doc scored us
+> 13/40 ≈ 33%; almost every line item it called out as "missing" has since shipped.
+> This version re-scores against shipped reality, adds the new **Arc OSS Showcase**
+> dimension, and lays out the remaining gap-closure work for the final 3 days to
+> submission.
+> **Audience:** Archimedes hackathon team.
+> **Purpose:** Honest assessment of where we stand against the rubric with 3 days
+> to go. Identifies the biggest *remaining* gaps and what's already done. Re-read
+> daily.
+> **Source for rubric weights / categories:** original Canteen rubric (see
+> [`archive/agora_project_analysis.md`](archive/agora_project_analysis.md) § 1
+> for historical detail).
 
 ## The rubric
 
@@ -14,280 +19,202 @@
 | ------ | ----------------------- | ----------------------------------------------------------- |
 | 30%    | Agentic Sophistication  | How much the AI actually decides vs. just automates         |
 | 30%    | Traction                | Real users, real transactions, real volume *during the event window* (arc-canteen telemetry is the scoreboard) |
-| 20%    | Circle Tool Usage       | Creative use of Wallets, CCTP, Gateway, App Kit, Contracts, USYC, USDC |
+| 20%    | Circle Tool Usage       | Creative use of Wallets, CCTP, Gateway, App Kit, Contracts, USYC, USDC, Paymaster |
 | 20%    | Innovation              | Novel approaches, emergent behavior, research insight       |
+| **+**  | **Arc OSS Showcase**    | **Separate parallel competition — reusable open-source primitives** (see [`../ARC-OSS-SHOWCASE.md`](../ARC-OSS-SHOWCASE.md)) |
 
-## TL;DR — rough running score: ~13 / 40 ≈ 33%
+## TL;DR — Day-10 running score: ~28 / 40 ≈ 70%, plus a strong Arc OSS bid
 
-| Weight | Category               | Score / 10 | Trend     | Risk    |
-| ------ | ---------------------- | ---------- | --------- | ------- |
-| 30%    | Agentic Sophistication | **4**      | Improving | Medium  |
-| 30%    | Traction               | **0**      | Flat      | **High — easily fixable** |
-| 20%    | Circle Tool Usage      | **2**      | Improving | **High — gating dependency on Chuan/Marten testnet deploy** |
-| 20%    | Innovation             | **7**      | Improving | Low     |
+| Weight | Category               | Score / 10 | Trend           | Risk          |
+| ------ | ---------------------- | ---------- | --------------- | ------------- |
+| 30%    | Agentic Sophistication | **7**      | Improving fast  | Low           |
+| 30%    | Traction               | **4**      | Telemetry-bound | **Highest — fixable via discipline, not code** |
+| 20%    | Circle Tool Usage      | **6**      | Improving       | Low           |
+| 20%    | Innovation             | **9** ⭐   | Strongest       | Low           |
 
-Innovation is the strongest. Traction is a fixable structural zero. Circle Tool Usage
-requires the testnet deploy to happen. Agentic Sophistication is "promising specs, no
-live agent" — converts when the orchestrator runs end-to-end.
+**Net trajectory:** the Day-3 "promising specs, no live agent" diagnosis is gone. The hardware-and-software risks have collapsed; the remaining risk is **operational** — daily arc-canteen telemetry discipline and the launch communique reaching real eyeballs.
 
 ---
 
-## 30% Agentic Sophistication — current: 4 / 10
+## 30% Agentic Sophistication — current: 7 / 10
 
-**What the rubric values:** the agent making non-trivial decisions autonomously after
-deployment, not just at design time. Reasoning visible, regime-adaptive, strategy
-rotation in response to drift / market state.
+**What the rubric values:** the agent making non-trivial decisions autonomously after deployment, not just at design time. Reasoning visible, regime-adaptive, strategy rotation in response to drift / market state.
+
+**What we have (post Day-10):**
+
+- ✅ **Live autonomous orchestrator** — `chain/agent_runner.py` (744 lines) runs on the EC2 testnet stack. Polls market, evaluates per-strategy signals, rebalances vaults, publishes reasoning trace hashes on-chain. Env-configurable (`AGENT_INTERVAL_SECONDS`, `AGENT_VAULT_ADDRESSES`, `AGENT_USDC_FLOOR`, etc.).
+- ✅ **Regime detection — two implementations live** — `regime_detector.py` (v1 heuristic) and `statistical_regime.py` (v2 GMM-based with multi-signal scoring + transition matrix). The `RegimePanel` UI surface shipped.
+- ✅ **Four portfolio constructors** — `portfolio_constructor.py` (orchestrator), `portfolio_optimizer.py` (Önder's MVO), `kelly_portfolio.py` (Kelly + risk parity + regime-aware deleveraging), and the new (Day-10) `portfolio_agent.py` (**LLM-driven agentic advisor with tool-use, 12-iteration agent loop**, picks individual instruments not just ETFs).
+- ✅ **Backtest evaluator** — Önder's analytics engine produces real `BacktestResult` records with the full selection-bias contract (DSR / PBO / OOS Sharpe / look-ahead audit). **2 Tier-1 strategies pass the full gate today** (Faber 2007 SMA-200, Moreira-Muir 2017 vol-managed); the others' verdicts are visible in the passport.
+- ✅ **3-input fusion engine** — `services/strategy_fusion.py` consumes user brief × live market regime × 10,000-paper corpus → grounded strategy spec. Async generation jobs (`POST /api/strategies/generate`).
+- ✅ **Reasoning traces persisted + indexed** — every construct + fusion trace flows into `/api/traces` automatically; Portfolio's agent activity feed and the Reasoning page surface them.
+- ✅ **Stress engine** — `services/stress_engine.py` (380 lines) computes six canonical scenario shocks (historical + scenario) against any portfolio. Backend ready.
+
+**What's still missing:**
+
+- ❌ **Commit-reveal trace integrity** spec (`specs/commit-reveal-trace-spec.md`) is spec'd but not live — the on-chain anchor still attests existence-at-T, not existence-before-trade.
+- ❌ **Stress engine UI integration** — the backend is wired and clean, but no UI surface renders the scenario table yet.
+- ❌ The Day-9 `regime_detector.py` vs `statistical_regime.py` redundancy — both exist; which one drives the live demo is unclear from the code (see `chuan-architecture-survey.md` Gap Cluster #2).
+
+**To get to 9/10:** ship one of (a) commit-reveal trace integrity wired live to the UI's "Verify trace" affordance, or (b) the stress-engine table surfaced in `Portfolio.jsx` with a one-click run against the active portfolio.
+
+**To get to 10/10:** both, plus a recorded demo segment where the agent rotates strategies in response to a regime change live on stage (this is what `agent_runner.py` was built to do; needs a controllable demo trigger).
+
+---
+
+## 30% Traction — current: 4 / 10 (telemetry-bound; the floor is "are we logging?")
+
+**What the rubric values:** real users, real transactions, real volume during the event window. The Canteen team explicitly noted this weight is unusual; "great founders ship and get users in two weeks."
+
+**The scoreboard:** `arc-canteen` telemetry — specifically the `update-traction` and `update-product` events that each teammate logs. **`arc-canteen status` is what the judges see.**
 
 **What we have:**
 
-- ✅ Architecture for an autonomous portfolio agent with five frozen interfaces
-  (`IAgentOrchestrator`, `IRegimeDetector`, `IPortfolioConstructor`, `IStrategyProvider`,
-  `IBacktestEvaluator`) per [`specs/component-interfaces-spec.md`](specs/component-interfaces-spec.md)
-- ✅ Reasoning trace model (`models/trace.py`) with canonical-JSON SHA-256 hashing and
-  on-chain anchor slots
-- ✅ Day-3 commit-reveal trace integrity spec — promotes "trace existed at T" to
-  "trace existed *before* the trade" with proven causal ordering
-  ([`specs/commit-reveal-trace-spec.md`](specs/commit-reveal-trace-spec.md))
-- ✅ Selection-bias gate that prevents the agent from acting on curve-fit artifacts
-  ([`specs/selection-bias-corrections-spec.md`](specs/selection-bias-corrections-spec.md))
-- ✅ Strategy provider (`backend/archimedes/services/strategy_provider.py`) implemented
-  and loading 4 strategies (3 paper-grounded + 1 baseline) with risk-profile routing
+- ✅ **Live testnet deploy** at `http://18.171.230.205/` with the full spine (Landing / Generate / Library / Corpus / Portfolio / Reasoning / Learnings) and the agentic advisor wired end-to-end.
+- ✅ **Real product** users can browse + generate + deploy strategies against, with no fake data on the judge path.
+- ✅ **Discord presence** + the launch communiques going out.
+- ⚠️ **arc-canteen telemetry status: ambiguous.** Some `update-product` calls have been made; the per-merge cadence is inconsistent. Each teammate needs to verify with `arc-canteen status`.
 
 **What's missing:**
 
-- ❌ No live orchestrator loop running yet (Chuan's queue)
-- ❌ No `regime_detector` / `portfolio_constructor` / `backtest_evaluator` implementations
-  (Önder's queue)
-- ❌ No `oracle_updater` / `chain_executor` / `trace_publisher` implementations (Marten's
-  queue)
-- ❌ Zero reasoning traces have been generated, hashed, or anchored
-- ❌ Zero agent decisions on testnet
+- ❌ **Coordinated launch reach** — the launch plan (`docs/launch-plan.md`) targeted a 1–3 day window before submission. Execution depends on the team converging on timing + sharing the splash through real channels.
+- ❌ **Outbound outreach** — Canteen Discord, Arc Builder Discord, crypto Twitter, r/algotrading, QuantConnect forums. Every conversation is a `update-traction` event.
+- ❌ **Real testnet user count** — strategies generated by real outsiders (not us). The product works; the funnel needs people in it.
 
-**To get to 7 / 10:** ship the orchestrator with one Tier-1 vault running a regime-aware
-strategy, generating at least one reasoning trace that anchors to Arc. Live demo of an
-autonomous rebalance triggered by a regime classification change.
-
-**To get to 9 / 10:** ship the commit-reveal trace pattern in production. Live demo
-shows the user clicking "Verify temporal binding" and seeing
-`commitBlock < tradeBlock < revealBlock`.
-
----
-
-## 30% Traction — current: 0 / 10
-
-**What the rubric values:** real users, real transactions, real volume during the event
-window. The Canteen team explicitly noted this weight is unusual; per
-[`agora_project_analysis.md`](agora_project_analysis.md) § 1 the framing is "great
-founders ship and get users in two weeks."
-
-**The scoreboard:** `arc-canteen` telemetry. Specifically the `update-traction` and
-`update-product` events that each teammate logs. **`arc-canteen status` is what the
-judges see.**
-
-**What we have:** **zero.** No traction updates logged. No product updates logged. The
-rubric scoreboard reads zero across the team.
-
-**What's missing:**
-
-- Every team member running `arc-canteen update-product` at minimum once per meaningful
-  ship (this PR, the smart-contract merges, the EC2 deployment, the analytics-engine
-  release — none of these are in arc-canteen's log)
-- Every team member running `arc-canteen update-traction` whenever they talk to a
-  potential user, share a screenshot in Discord, get a meaningful conversation on Twitter,
-  etc.
-- A testnet-deployed product to drive users *to* (gates Circle Tool Usage as well)
-- Outbound outreach: Canteen Discord, Arc Builder Discord, crypto Twitter, r/algotrading,
-  QuantConnect forums (per the design.md § 9 channels)
-
-**Backfill TODO (do tonight or first thing Day 4):**
+**Daily discipline (do this every day until submission):**
 
 ```bash
-# One per meaningful ship — backfill these:
-arc-canteen update-product "Day 1-2: project setup, design docs, MVP scope memo"
-arc-canteen update-product "Day 3: EC2 + Docker + CI/CD live; analytics-engine module shipped; passport-aware models; 3 paper-grounded strategies seeded"
-arc-canteen update-product "Day 3: rigor-as-wedge — DSR + PBO + walk-forward selection-bias spec; commit-reveal trace integrity spec; doc corpus reconciled around ecosystem-design pivot"
-# … one per future merge
+# After every meaningful ship today
+arc-canteen update-product "What you shipped today, in one line"
+
+# After every conversation with someone outside the team
+arc-canteen update-traction "Who you talked to, what they thought"
+
+# Verify what judges see
+arc-canteen status
 ```
 
-**To get to 5 / 10:** consistent daily `update-product` cadence + 5 logged `update-traction`
-events (judges, fellow hackers, Discord conversations).
+**To get to 6/10:** sustained daily telemetry + 10 logged conversations + the coordinated launch executing through Discord/Twitter/relevant forums.
 
-**To get to 8 / 10:** 30+ portfolios created on testnet by Day 14, with each one
-logged via `update-traction`. Per design.md § 9 targets.
+**To get to 8/10:** 30+ portfolios created on testnet by real (non-team) people, each one logged via `update-traction`.
 
-**Risk:** **highest of the four categories.** A team that ships brilliantly and forgets
-to log loses ~half of the 30% rubric weight for nothing. **Make this a daily ritual.**
+**Risk:** **highest of the four categories.** A team that shipped brilliantly and forgot to log loses ~half of the 30% weight for nothing. *This is the cheapest, most fixable points on the board.*
 
 ---
 
-## 20% Circle Tool Usage — current: 2 / 10
+## 20% Circle Tool Usage — current: 6 / 10
 
-**What the rubric values:** depth and creativity across Wallets, CCTP, Gateway,
-App Kit, Contracts, USYC, USDC, Paymaster.
+**What the rubric values:** depth and creativity across Wallets, CCTP, Gateway, App Kit, Contracts, USYC, USDC, Paymaster.
 
 **What we have:**
 
-- ✅ Contracts written: `PriceOracle.sol`, `SyntheticToken.sol`, `SyntheticVault.sol`,
-  plus 8 interface stubs
-- ✅ Ecosystem design references the full Circle toolset
-- ✅ USDC as exclusive settlement currency — no native-token gas to learn
-- ✅ EC2 infrastructure live, ready to deploy
+- ✅ **10 contracts deployed on Arc testnet** — `AMMPool`, `AMMRouter`, `AssetRegistry`, `PriceOracle`, `ReasoningTraceRegistry`, `SyntheticFactory`, `SyntheticToken`, `SyntheticVault`, `Vault`, `VaultFactory`. Updated Day-10 with the multi-asset NAV vault (`Vault.sol` now prices all holdings via oracles in `totalAssets()`).
+- ✅ **Circle Developer-Controlled Wallets** — `chain/circle_signer.py` (246 lines) is the production signing path. **No raw private keys** for vault operations; the oracle owner wallet is a Circle-managed wallet.
+- ✅ **USDC as exclusive settlement** — every flow priced in USDC, no native-token gas friction.
+- ✅ **Multi-wallet UX in frontend** — MetaMask, Coinbase, generic browser wallet via `viem`.
+- ✅ **Multi-asset NAV vault** (Day-10) — vault total assets correctly reflect all synthetic holdings through oracle prices, not just USDC.
 
 **What's missing:**
 
-- ❌ No contracts deployed to Arc testnet. Zero on-chain footprint as a team.
-- ❌ No CCTP usage (cross-chain USDC movement)
-- ❌ No Gateway integration (unified balance / nanopayments)
-- ❌ No Paymaster integration (USDC-denominated gas)
-- ❌ No USYC integration (the risk-off anchor)
-- ❌ No App Kit usage
-- ❌ No Circle Wallets onboarding flow
+- ❌ **CCTP** integration (cross-chain USDC movement).
+- ❌ **Gateway** integration (unified balance / nanopayments).
+- ❌ **Paymaster** for USDC-denominated gas on user-facing transactions.
+- ❌ **USYC** integration as the risk-off anchor — the Fixed Income tier was added (Önder #105) but USYC as an on-chain asset isn't wired yet.
 
-**Reference material we have at hand:**
+**Reference material at hand** (the context-arc submodule):
 
-- `submodules/context-arc/circlefin-skills/use-smart-contract-platform.md` for deploy
-- `submodules/context-arc/circlefin-skills/bridge-stablecoin.md` for CCTP + Gateway
-- `submodules/context-arc/circlefin-skills/use-gateway.md` for unified balance
+- `submodules/context-arc/circlefin-skills/use-smart-contract-platform.md` — deploy
+- `submodules/context-arc/circlefin-skills/bridge-stablecoin.md` — CCTP + Gateway
+- `submodules/context-arc/circlefin-skills/use-gateway.md` — unified balance
 - `submodules/context-arc/samples/arc-escrow/` — closest existing vault pattern
 - `submodules/context-arc/samples/arc-multichain-wallet/` — CCTP integration
 - `submodules/context-arc/samples/arc-p2p-payments/` — Paymaster + USDC
 
-**To get to 5 / 10:** contracts deployed to Arc testnet (PriceOracle + SyntheticFactory
-+ Vault). PaymasterImpl integrated so all transactions are USDC-paid. USYC live as
-risk-off anchor with at least one Tier-1 vault holding it.
+**To get to 8/10:** add Paymaster so user transactions are USDC-paid (no gas confusion). Add USYC as a real on-chain asset in the Fixed Income tier.
 
-**To get to 7 / 10:** add CCTP or Gateway for a meaningful cross-chain action. Circle
-Wallets integrated for user onboarding (no MetaMask popup — direct USDC deposit flow).
-
-**To get to 9 / 10:** add the Agent Stack (Circle CLI + Agent Wallets per
-`developers.circle.com/agent-stack.md`) so the orchestrator runs as a first-class
-on-chain agent with its own wallet identity, settling reasoning-trace publishes through
-its own paymaster account.
+**To get to 9/10:** CCTP or Gateway for one meaningful cross-chain action (deposit-from-mainnet flow would be the obvious one).
 
 ---
 
-## 20% Innovation — current: 7 / 10 ⭐
+## 20% Innovation — current: 9 / 10 ⭐ (our strongest category)
 
 **What the rubric values:** novel approaches, emergent behavior, research insight.
-**Our strongest category.**
 
 **What we have that no other AI-portfolio submission will have:**
 
-- ✅ **Strategy passport** ([`specs/strategy-passport-spec.md`](specs/strategy-passport-spec.md))
-  — every strategy carries paper-arxiv-id, methodology hash, curator signature,
-  on-chain registration tx. Other AI portfolios make "trust me" claims; ours is bound
-  to peer-reviewed research with a verifiable hash chain.
-- ✅ **Selection-bias corrections** ([`specs/selection-bias-corrections-spec.md`](specs/selection-bias-corrections-spec.md))
-  — DSR (Bailey & López de Prado 2014) + PBO (Bailey/Borwein/López de Prado/Zhu 2014) +
-  walk-forward OOS + look-ahead static audit. No other AI portfolio submission applies
-  the textbook multiple-testing corrections that quant academics have demanded for a
-  decade.
-- ✅ **Paper-claim deltas surfaced** — `sharpe_vs_paper`, `cagr_vs_paper`, McLean-Pontiff
-  (2016) post-publication-decay estimate. We tell the user where the strategy was
-  expected to live (paper) vs. where it actually lives (our re-run). Hidden by every
-  competitor; surfaced by us as a feature.
-- ✅ **Commit-reveal trace integrity** ([`specs/commit-reveal-trace-spec.md`](specs/commit-reveal-trace-spec.md))
-  — commit-before-trade / reveal-after-trade binds the agent to a single reasoning
-  trace before the outcome is knowable. Closes the "generate 100 traces, pick the one
-  that rationalizes the outcome" attack ([`agora_project_analysis.md`](agora_project_analysis.md)
-  § 5.2). Spec'd for v1.5.
-- ✅ **Two-tier architectural primitive coverage** — Tier 1 = paper-grounded +
-  selection-bias-corrected + full agent; Tier 2 = freestyle + reasoning traces only.
-  The badge means something concrete, not aspirational.
-- ✅ **Tool-call provenance** — every market-data fetch and oracle read recorded with
-  input + output hashes. Lets us *replay* agent behavior with different prompts to study
-  decision sensitivity. Nobody else is doing this.
-- ✅ **Honest pitch framing** — anti-features.md § "pitch-rigor anti-claims" explicitly
-  rules out the "blockchain as memory", "predicted alpha", "trace proves causation",
-  and "regulatory clarity" claims that competitors will reach for. We claim
-  auditability + rigor; we don't claim returns.
+- ✅ **Strategy passport** ([`specs/strategy-passport-spec.md`](specs/strategy-passport-spec.md)) — every strategy carries paper arxiv-id + methodology hash + curator signature + on-chain registration tx. Other AI portfolios make "trust me" claims; ours is bound to peer-reviewed research with a verifiable hash chain. **Shipped + visible in the live UI.**
+- ✅ **Selection-bias corrections — live, not aspirational** ([`specs/selection-bias-corrections-spec.md`](specs/selection-bias-corrections-spec.md)). DSR (Bailey & López de Prado 2014) + PBO (Bailey/Borwein/López de Prado/Zhu 2014) + walk-forward OOS + look-ahead static audit. **2 Tier-1 strategies pass the gate today; the failures are visible** (we don't hide them). Real 22-year SPY backtest data — every `is_backtest_placeholder=true` flag is gone.
+- ✅ **Paper-claim deltas surfaced honestly** — `sharpe_vs_paper`, `cagr_vs_paper`, McLean-Pontiff (2016) post-publication-decay estimate. We show where the strategy was expected to live (paper) vs. where it actually lives (our re-run). Hidden by every competitor; surfaced by us as a feature.
+- ✅ **On-chain reasoning trace anchoring** — `ReasoningTraceRegistry` deployed; `chain/trace_publisher.py` anchors keccak256 hashes for every construct + fusion trace. Verifiable on Arc.
+- ✅ **10,000-paper q-fin corpus + DB-backed substrate + interactive Corpus Explorer** ([`corpus-architecture.md`](corpus-architecture.md)). The "research-grounded" claim is *quantitatively* real (10k papers across 9 q-fin categories, 2008–2026), not marketing copy.
+- ✅ **Two-tier marketplace primitive coverage** — Tier 1 = paper-grounded + selection-bias-corrected + full agent; Tier 2 = freestyle + reasoning traces only. The badge means something concrete.
+- ✅ **Agentic LLM portfolio advisor with tool-use** (Day-10, `portfolio_agent.py`) — the only AI-portfolio submission running a multi-iteration agent loop that picks individual instruments (not just ETF baskets) and anchors each pick to a paper-grounded strategy passport.
+- ✅ **3-input fusion engine** — user brief × live market regime × research corpus → grounded strategy spec. Novel synthesis path that no competitor surfaces.
+- ✅ **Stress test engine** (Day-10, `stress_engine.py`) — six canonical scenario shocks, per-asset-class shock vectors. Standard at every real shop, novel for a hackathon AI-portfolio entry.
+- ✅ **Honest framing baked into product surfaces** — `docs/anti-features.md` § "pitch-rigor anti-claims" rules out "blockchain as memory", "predicted alpha", "trace proves causation", and "regulatory clarity" claims. We claim auditability + rigor; we don't claim returns. **Surfaced in the live UI as "What we're NOT promising."**
 
-**What's missing:**
+**What's still missing:**
 
-- ⚠️ All of the above are *spec'd*. The full demo evidence (judges actually clicking
-  "Verify trace hash" and seeing the green checkmark; live DSR + PBO numbers on a
-  strategy detail page; the paper-claim delta line item visible) doesn't exist yet.
-- ⚠️ Arxiv ingest pipeline is not built (KnowledgeBase has the patterns; we haven't
-  ported them yet).
+- ⚠️ **Commit-reveal trace integrity** ([`specs/commit-reveal-trace-spec.md`](specs/commit-reveal-trace-spec.md)) — spec'd, not wired to the live anchor flow.
+- ⚠️ **Live arxiv-extraction demo** — `services/arxiv_pipeline.py` can extract a strategy from a fresh paper but isn't wired to a one-click demo path.
 
-**To get to 9 / 10:** ship the "Verify trace hash" UI element. Have a strategy detail
-page that shows the DSR p-value, PBO score, paper-claim delta, and a green checkmark
-on the trace integrity check. Each of those is a screenshot-worthy demo moment.
-
-**To get to 10 / 10:** add a demo segment where Dan extracts a strategy from a fresh
-arxiv paper live on stage — the KnowledgeBase `extract.py` → Claude API → new strategy
-file in `analytics-engine/strategies/` → backtest gate → reasoning trace anchored
-on-chain in under 5 minutes. "We can turn a paper into an audited strategy on stage,
-right now."
+**To get to 10/10:** add a recorded demo segment where Dan extracts a strategy from a fresh arxiv paper live on stage — extract → Claude → new strategy file → backtest gate → reasoning trace anchored on-chain in under 5 minutes. "We can turn a paper into an audited strategy on stage, right now."
 
 ---
 
-## Cross-category forcing function: the smallest possible end-to-end demo
+## ⭐ NEW: Arc OSS Showcase — strong contender
 
-The single highest-leverage thing we can build in the next 11 days is a **vertical slice
-that touches all four rubric categories at once.** Per
-[`agora_project_analysis.md`](agora_project_analysis.md) § 8, recent hackathon winners
-shipped narrow products; none tried to be platforms.
+The Arc OSS Showcase is a parallel competition for codebases other Arc builders can fork. Our positioning lives in [`../ARC-OSS-SHOWCASE.md`](../ARC-OSS-SHOWCASE.md).
 
-**The minimal viable demo:**
+**What we expose as forkable primitives:**
 
-1. **One Tier-1 vault** holding one strategy (TSMOM is the best candidate — simplest
-   to backtest convincingly and pairs naturally with the regime detector).
-2. **Real Arc testnet deployment** of `PriceOracle`, `SyntheticVault`,
-   `ReasoningTraceRegistry`, with USDC and USYC live.
-3. **User wallet flow** via Circle Wallets — judge connects, deposits 10 USDC, sees a
-   portfolio constructed.
-4. **One autonomous rebalance** triggered by a regime classification change (we control
-   the regime trigger for demo timing).
-5. **One published reasoning trace** with a working "Verify trace hash" UI button.
-6. **Strategy detail page** showing the DSR p-value, PBO score, paper-claim delta, and
-   the green look-ahead-audit checkmark.
+1. **Strategy Passport schema + validation** — `models/strategy.py` + `services/strategy_provider.py` + the spec
+2. **Selection-bias rigor gate** — `services/rigor_evaluator.py` + the spec; DSR + PBO + OOS + look-ahead implementations are all open and citable
+3. **On-chain reasoning trace anchoring** — `chain/trace_publisher.py` + `ReasoningTraceRegistry.sol` + the IPFS pinning design note
+4. **DB-backed q-fin corpus substrate** — `services/corpus_service.py` + `models/corpus_store.py` + the corpus-architecture walkthrough
+5. **`LLM_*` provider-agnostic backend factory** — `services/llm_backend.py` — fork-and-go LLM provider abstraction
+6. **3-input fusion engine** — `services/strategy_fusion.py` + the spec
+7. **Circle-signer pattern** — `chain/circle_signer.py` — reusable for any Arc app that wants Circle-managed wallets instead of raw keys
 
-That single end-to-end loop checks every rubric category:
+**Why we should be a top contender:**
+
+- We hit *all* the OSS criteria: codebase is fully open (Unlicense), exposes 7+ distinct primitives, has clear per-primitive documentation, and the README + per-primitive cards make forking straightforward.
+- Each primitive maps to a real Arc-builder need (passport for any strategy-publishing product; rigor gate for any AI-decision product; reasoning trace for any agent product).
+- Unlike most hackathon submissions, the docs already exist and are kept current — not a post-hoc add.
+
+---
+
+## Cross-category forcing function: the launch + telemetry discipline
+
+The Day-3 forcing function was *build the end-to-end loop*. That's now built. The Day-10 forcing function is **execute the launch + log religiously**.
+
+### The minimal viable launch loop
+
+1. **The launch communique** ships through Discord (Canteen + Arc Builder), Twitter, and the relevant subreddits, in the 1–3 day window before submission (per [`launch-plan.md`](launch-plan.md)).
+2. **Every conversation it generates** gets logged via `arc-canteen update-traction`.
+3. **Every meaningful ship** (this week: the agentic advisor, the multi-asset NAV vault, the stress engine, the spine-strip) gets logged via `arc-canteen update-product`.
+4. **The recorded demo video** ships — Loom or YouTube, ≤ 3 minutes, hitting the spine end-to-end (Generate → rigor verdict → Deploy → reasoning trace → Verify).
+
+### What checks every rubric category
 
 | Category               | What the demo shows                                                  |
 | ---------------------- | -------------------------------------------------------------------- |
-| Agentic Sophistication | Autonomous rebalance + reasoning trace + regime classification       |
-| Traction               | Real on-chain transaction by a real user; log via `update-traction`  |
-| Circle Tool Usage      | USDC settlement + Paymaster + Wallets + Contracts + USYC (5 of 7)    |
-| Innovation             | Strategy passport + selection-bias gate + paper-claim delta visible  |
+| Agentic Sophistication | LLM agent loop picks instruments, anchored to strategy passports; autonomous rebalance + reasoning trace |
+| Traction               | Real on-chain transactions by real users; logged via `update-traction` |
+| Circle Tool Usage      | USDC settlement + Circle Wallets + 10 contracts + multi-asset NAV     |
+| Innovation             | Strategy passport + selection-bias gate + paper-claim delta visible + corpus explorer  |
+| Arc OSS Showcase       | 7 forkable primitives, each with how-to-fork docs                    |
 
-**Everything else in the ecosystem spec — Tier 2 community vaults, AMM-traded vault
-tokens, per-vault chat — is decoration on this loop.** They can be in the pitch as
-"what's next"; they don't need to be in the live demo to score well.
+## Recommendations for the final 3 days
 
-## Recommendation for the team
-
-1. **Tonight (Dan, alone):** start the traction-logging habit. Backfill `update-product`
-   for everything that's already shipped.
-2. **Day 4 morning (Chuan):** deploy contracts to Arc testnet. First on-chain
-   transactions belong to us by lunchtime.
-3. **Day 4-5 (Marten):** oracle updater service + chain executor + trace publisher
-   skeleton. Get the agent → testnet pipe working.
-4. **Day 5-7 (Önder):** portfolio constructor + backtest evaluator with the DSR/PBO
-   math from the selection-bias spec. The math is the rigor pitch.
-5. **Day 7-9 (Chuan + Dan):** stitch the orchestrator together; first end-to-end
-   autonomous rebalance with reasoning trace.
-6. **Day 9-12 (Daniel R.):** frontend Next.js app or live data on the ui-mockups —
-   reasoning-trace viewer + Verify-trace button are the demo wow.
-7. **Day 9-14 (Dan + everyone):** active outreach — Canteen Discord, Arc Builder
-   Discord, crypto Twitter. Log every conversation.
-
-Re-score this doc weekly. The traction line in particular should not stay at zero past
-Day 4.
+1. **Today (everyone):** verify `arc-canteen status` shows your contributions. Backfill any merged PR not yet logged via `update-product`.
+2. **Today (Marten as schedule owner):** drive the launch-timing convergence per [`launch-plan.md`](launch-plan.md). Pick a date; communicate in #standups.
+3. **Tomorrow:** record the ≤3-minute demo video. Even a rough cut is better than no cut. Re-record after polish.
+4. **This week:** execute the launch. Every team member shares through their own channels. Every reply gets logged via `update-traction`.
+5. **Stretch (any cycles left):** wire one of (a) commit-reveal trace integrity → "Verify" button, or (b) stress-engine table on `Portfolio.jsx`. Either gets the agentic score to 9, and Innovation to 10.
 
 ## Open questions
 
-1. **Do we explicitly cut Tier 2 from the v1 demo?** Per
-   [`mvp-scope-memo.md`](mvp-scope-memo.md) § "What gets cut if Day 3 ambition outruns
-   the timeline," Tier 2 is the second-to-cut. With ~11 days remaining and zero on-chain
-   activity, this looks like the time. Surface as "v2 — community can author vaults"
-   in the deck.
-2. **Same question for AMM-traded vault tokens.** Cut last per the memo, but the
-   premium/discount-to-NAV story is at odds with the verifiable-history pitch and adds
-   contract surface. Recommend cut from v1 demo; keep in roadmap.
-3. **Same question for per-vault chat.** Cut for demo; the chat is engagement layer
-   not core trust.
-
-Recommendation: cut all three from the demo MVP, keep them in the roadmap segment of
-the deck. **The wedge is one Tier-1 vault that proves the rigor stack works end-to-end.**
+1. **Is the Arc OSS Showcase form filled out + submitted?** See [`../ARC-OSS-FORM-DRAFT.md`](../ARC-OSS-FORM-DRAFT.md) for the team-review draft. Submission is via Google Form (per the showcase landing page) or via `arc-canteen update-product` with `"ArcOSS:"` prefix.
+2. **Demo video recording — who owns it?** The deck owner is the obvious candidate. Length target: ≤3 minutes per the Canteen submission form.
+3. **Live demo vs recorded demo at the in-person event?** Per the submission form, a video demo is required regardless. If both are an option, live is the safer demo-day choice (controllable failure modes) and recorded is the safer submission-form choice.

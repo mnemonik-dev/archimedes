@@ -1,8 +1,19 @@
 # Demo Script & Pitch Deck Outline
 
-> **Audience:** Archimedes hackathon team (deck owner + demo runner + Q&A primaries)
-> **Status:** Rewritten 2026-05-19 to the **locked product spine** ([`user-stories.md`](user-stories.md))
-> and the **tiered competitive thesis** ([`competitor-landscape.md`](competitor-landscape.md)).
+> **Audience:** Archimedes hackathon team (deck owner + demo runner + Q&A primaries).
+> **Status:** Day-10 update (2026-05-22) on top of the 2026-05-19 rewrite to the
+> **locked product spine** ([`user-stories.md`](user-stories.md)) and the
+> **tiered competitive thesis** ([`competitor-landscape.md`](competitor-landscape.md)).
+> Day-10 deltas to fold into the deck on next pass: (a) the LLM-driven agentic
+> portfolio advisor ([`portfolio_agent.py`](../backend/archimedes/services/portfolio_agent.py))
+> now picks individual instruments + anchors each to a strategy passport — that's
+> a new demo beat; (b) the stress engine ([`stress_engine.py`](../backend/archimedes/services/stress_engine.py))
+> ships 6 canonical scenario shocks for any portfolio — judges-will-recognize-this
+> standard-at-every-shop tooling; (c) the multi-asset NAV vault upgrade means
+> `Vault.totalAssets()` now prices all synthetic holdings via oracles — fixes the
+> "what does my position actually mean" judge question; (d) Arc OSS Showcase
+> dimension added — see [`../ARC-OSS-SHOWCASE.md`](../ARC-OSS-SHOWCASE.md) and the
+> Day-10 rubric assessment in [`judging-rubric-assessment.md`](judging-rubric-assessment.md).
 > Supersedes the Day-4 "connect wallet → pick a risk profile" script entirely.
 > **Length assumption:** ~3-minute pitch + ~2-minute live demo + Q&A. Adjust if Canteen says otherwise.
 >

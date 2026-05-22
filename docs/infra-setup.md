@@ -1,6 +1,8 @@
 # Infrastructure & CI/CD Setup
 
-> Added 2026-05-13. Owner: Chuan.
+> **Status:** Day-10 update (2026-05-22). Originally added 2026-05-13. Lead: Chuan.
+> The Day-3 3-container stack has grown to **6 containers** (backend + postgres +
+> redis + nginx + oracle + agent); the architecture diagram below is current.
 
 ## Architecture
 
@@ -13,10 +15,17 @@ GitHub Actions (deploy.yml)
     ▼
 EC2 (t3.small, eu-west-2)
     │
-    ├── docker compose
-    │   ├── backend  (FastAPI :8000)
-    │   ├── postgres (PostgreSQL 16 :5432)
-    │   └── redis    (Redis 7 :6379)
+    ├── docker compose (6 services)
+    │   ├── backend   (FastAPI :8000) — health-checked
+    │   ├── postgres  (PostgreSQL 16 :5432) — health-checked
+    │   ├── redis     (Redis 7 :6379) — health-checked
+    │   ├── nginx     (reverse proxy :80) — no HTTP health probe
+    │   ├── oracle    (price-feed loop) — no HTTP health probe
+    │   └── agent     (autonomous strategy runner) — no HTTP health probe
+    │
+    ├── volumes:
+    │   ├── pgdata                       (Postgres data, survives redeploys)
+    │   └── archimedes-corpus-artifact   (heavy KB pipeline artifact, scaffolded)
     │
     └── /opt/archimedes (git repo)
 ```
@@ -40,8 +49,8 @@ EC2 (t3.small, eu-west-2)
 ssh -i infra/archimedes-deploy-key.pem ubuntu@18.171.230.205
 ```
 
-The private key is in `infra/archimedes-deploy-key.pem` (gitignored). Ask Chuan if
-you need a copy.
+The private key is in `infra/archimedes-deploy-key.pem` (gitignored). Ask in
+#infra on Discord if you need a copy.
 
 ### Ports Open (Security Group)
 
@@ -112,7 +121,8 @@ terraform output   # Show current outputs
 ```
 
 **State file** (`terraform.tfstate`) is local and gitignored. Don't lose it —
-it's the only record of what Terraform manages. Ask Chuan for a copy if needed.
+it's the only record of what Terraform manages. Ask in #infra on Discord if you
+need a copy.
 
 ## Troubleshooting
 

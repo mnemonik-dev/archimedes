@@ -1,22 +1,27 @@
 # Component Interfaces & Test Cases — Team Work Split
 
-> **Date:** 2026-05-13 (Day 3)
-> **Status:** Ready for implementation
-> **Purpose:** Frozen interface contracts so 5 people can work concurrently
+> **Status:** Day-10 update (2026-05-22). The original Day-3 (2026-05-13) frozen
+> interface contracts in this doc are **architecturally still correct** — every
+> `I*` Protocol in [`backend/archimedes/interfaces/`](../../backend/archimedes/interfaces/)
+> is alive and consumed by shipped code. **What's changed:** the strict per-person
+> ownership column below has been replaced in practice by a "lead + coverage" model
+> ([`CLAUDE.md`](../../CLAUDE.md) § "Lead + coverage by load-bearing component").
+> Cross-lane contributions are now the norm; the agentic system (`t2o2`) holds the
+> plurality of commits across the backend. The table below documents the *original*
+> ownership intent; the actual current authorship per file is in
+> [`../chuan-architecture-survey.md`](../chuan-architecture-survey.md).
 
----
+## Original team ownership intent (Day-3 — historical context)
 
-## Team Assignments
-
-| Person | Component | Implements | Depends On |
+| Lead   | Component | Implements | Depends On |
 |--------|-----------|------------|------------|
 | **Chuan** | Smart contracts | `contracts/src/*.sol` behind `contracts/src/interfaces/I*.sol` | — |
-| **Chuan** | Backend API | `backend/archimedes/api/routes.py` | Önder, Dan, Marten (via interfaces) |
+| **Chuan** | Backend API | `backend/archimedes/api/routes.py` | other interfaces |
 | **Chuan** | Agent orchestrator | `IAgentOrchestrator` | All other interfaces |
 | **Marten** | On-chain backend | `IOracleUpdater`, `IChainExecutor`, `ITracePublisher` | Contract ABIs |
 | **Önder** | Portfolio math | `IRegimeDetector`, `IPortfolioConstructor`, `IBacktestEvaluator` | Shared data models only |
 | **Dan** | Strategy library | `IStrategyProvider` | Shared data models only |
-| **Daniel** | Frontend | Next.js against REST API + contract ABIs | REST schemas + contract addresses |
+| **Daniel R.** | Frontend | React + Vite against REST API + contract ABIs | REST schemas + contract addresses |
 
 ---
 

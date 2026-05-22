@@ -85,18 +85,18 @@ on-chain reasoning, settled in pure USDC.** That's the gap.
 | 🏗️ Original system architecture (Chuan)         | [`docs/design.md`](docs/design.md)                                         |
 | 🌐 Day-3 ecosystem pivot                        | [`docs/specs/ecosystem-design-spec.md`](docs/specs/ecosystem-design-spec.md) |
 | 🤝 Frozen interface contract (5-person concurrent build) | [`docs/specs/component-interfaces-spec.md`](docs/specs/component-interfaces-spec.md) |
-| 🔬 Red-team synthesis + regulatory survey       | [`docs/agora_project_analysis.md`](docs/agora_project_analysis.md)         |
-| 🎯 MVP scope decisions (5 locked)               | [`docs/mvp-scope-memo.md`](docs/mvp-scope-memo.md)                         |
+| 🔬 Red-team synthesis + regulatory survey       | [`docs/archive/agora_project_analysis.md`](docs/archive/agora_project_analysis.md)         |
+| 🎯 MVP scope decisions (5 locked)               | [`docs/archive/mvp-scope-memo.md`](docs/archive/mvp-scope-memo.md)                         |
 | 🚫 Anti-features                                | [`docs/anti-features.md`](docs/anti-features.md)                           |
 | 🧱 Architectural principles (4 primitives)      | [`docs/architectural-principles.md`](docs/architectural-principles.md)     |
 | 📜 Strategy passport spec                       | [`docs/specs/strategy-passport-spec.md`](docs/specs/strategy-passport-spec.md) |
 | 📐 Selection-bias corrections spec (DSR/PBO)    | [`docs/specs/selection-bias-corrections-spec.md`](docs/specs/selection-bias-corrections-spec.md) |
 | 🔒 Commit-reveal trace integrity (v1.5)         | [`docs/specs/commit-reveal-trace-spec.md`](docs/specs/commit-reveal-trace-spec.md) |
-| ⚖️ Backtrader vs vectorbt decision              | [`docs/specs/backtrader-vs-vectorbt-decision-memo.md`](docs/specs/backtrader-vs-vectorbt-decision-memo.md) |
-| 🎓 Q-fin paper corpus seed                      | [`docs/qfin-paper-corpus-seed.md`](docs/qfin-paper-corpus-seed.md)         |
+| ⚖️ Backtrader vs vectorbt decision              | [`docs/adr/backtrader-vs-vectorbt-decision-memo.md`](docs/adr/backtrader-vs-vectorbt-decision-memo.md) |
+| 🎓 Q-fin paper corpus seed                      | [`docs/archive/qfin-paper-corpus-seed.md`](docs/archive/qfin-paper-corpus-seed.md)         |
 | 🏛️ Pitch deck + demo script                     | [`docs/demo-script-pitch-deck-outline.md`](docs/demo-script-pitch-deck-outline.md) |
 | 🎨 Claude Design prompts                        | [`docs/claude-design-prompts.md`](docs/claude-design-prompts.md)           |
-| 🔭 RFB alignment                                | [`docs/rfb-alignment.md`](docs/rfb-alignment.md)                           |
+| 🔭 RFB alignment                                | [`docs/archive/rfb-alignment.md`](docs/archive/rfb-alignment.md)                           |
 | 🏟️ Competitive landscape                        | [`docs/competitor-landscape.md`](docs/competitor-landscape.md)             |
 | ⚙️ Infra + CI/CD (EC2, Terraform)               | [`docs/infra-setup.md`](docs/infra-setup.md)                              |
 | 📊 Judging-rubric self-assessment               | [`docs/judging-rubric-assessment.md`](docs/judging-rubric-assessment.md)   |

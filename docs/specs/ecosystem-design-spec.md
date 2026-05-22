@@ -1,8 +1,19 @@
 # Archimedes Ecosystem Design Spec
 
-> **Date:** 2026-05-13 (Day 3)
-> **Author:** Chuan Bai (via design session)
-> **Status:** Draft — pending team review
+> **Status:** Day-10 update (2026-05-22). The Day-3 (2026-05-13) ecosystem pivot
+> spec — the foundation of the Synthetic Protocol + AMM Exchange + Vault Factory +
+> Agent-as-a-Service four-layer architecture — is **substantially shipped** as of
+> Day-10. **Shipped:** all 10 contracts deployed on Arc testnet (`AMMPool`,
+> `AMMRouter`, `AssetRegistry`, `PriceOracle`, `ReasoningTraceRegistry`,
+> `SyntheticFactory`, `SyntheticToken`, `SyntheticVault`, `Vault`, `VaultFactory`)
+> + Day-10 multi-asset NAV vault upgrade so `totalAssets()` prices all holdings
+> via oracles. **Deferred to roadmap:** Tier-2 community vaults (cut from MVP
+> per the strip-to-spine page tree); cross-chain RWA bridging via CCTP/Gateway;
+> per-vault chat (cut from MVP).
+> The original Day-3 architecture below remains the canonical reference for
+> what each component *does*. Cross-reference current shipped state in
+> [`../chuan-architecture-survey.md`](../chuan-architecture-survey.md) and
+> [`../user-stories.md`](../user-stories.md) (the locked product spine).
 > **Supersedes:** Original single-vault architecture in [`design.md` § 5.2](../design.md)
 > **Scope:** Hackathon MVP of the full ecosystem vision
 
@@ -685,7 +696,7 @@ Platform revenue streams:
 | Existing Doc | Status |
 |---|---|
 | [`design.md`](../design.md) | **Partially superseded.** Strategy engine (§4.1), backtesting (§4.2), regime detection (§4.3.3) survive. Smart contract architecture (§5.2) replaced by this spec. |
-| [`mvp-scope-memo.md`](../mvp-scope-memo.md) | **Scope expanded.** The three locked decisions (RFB 04, both on-chain stories, curated library) still hold but are now embedded in a larger ecosystem. |
+| [`mvp-scope-memo.md`](../archive/mvp-scope-memo.md) | **Scope expanded.** The three locked decisions (RFB 04, both on-chain stories, curated library) still hold but are now embedded in a larger ecosystem. |
 | [`architectural-principles.md`](../architectural-principles.md) | **Survives intact.** Paper-grounded provenance = Tier 1. Reasoning traces = all agent-managed vaults. Non-custodial = vault architecture. Verifiable history = ReasoningTraceRegistry. |
 | [`strategy-passport-spec.md`](specs/strategy-passport-spec.md) | **Survives for Tier 1 vaults.** Strategy passports apply to Archimedes-curated strategies. Community vaults don't require paper backing. |
 | [`anti-features.md`](../anti-features.md) | **Needs update.** "No third-party strategy onboarding" is now reversed — community vaults ARE third-party strategies. |
