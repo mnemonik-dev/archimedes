@@ -134,7 +134,7 @@ export default function App() {
   const renderPage = () => {
     switch (page) {
       case 'landing':      return <Landing onNavigate={navigateToPage} onConnect={() => {/* topbar handles modal */}} walletAddr={walletAddr} />
-      case 'generate':     return <Generate />
+      case 'generate':     return <Generate onNavigate={navigateToPage} />
       case 'library':      return <Strategies highlightStrategyId={highlightStrategyId} />
       case 'corpus':       return <CorpusExplorer />
       case 'portfolio':    return <Portfolio walletAddr={walletAddr} onSelectVault={selectVault} onSelectTrace={selectTrace} />
