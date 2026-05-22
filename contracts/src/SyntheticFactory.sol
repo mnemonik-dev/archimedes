@@ -41,7 +41,7 @@ contract SyntheticFactory is ISyntheticFactory, Ownable {
         string calldata symbol,
         address oracle
     ) external override onlyOwner returns (address token) {
-        SyntheticToken synthToken = new SyntheticToken(name, symbol, owner());
+        SyntheticToken synthToken = new SyntheticToken(name, symbol, address(this));
         token = address(synthToken);
 
         SyntheticVault vault = new SyntheticVault(
@@ -52,6 +52,9 @@ contract SyntheticFactory is ISyntheticFactory, Ownable {
         );
 
         synthToken.setVault(address(vault));
+
+        // Transfer token ownership to the factory owner (human/governance)
+        synthToken.transferOwnership(owner());
 
         _registered[token] = true;
         _syntheticList.push(token);

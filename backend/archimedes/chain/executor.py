@@ -290,6 +290,56 @@ class ChainExecutor:
         factory = self.loader.vault_factory
         return await factory.functions.vaultCount().call()
 
+    async def set_token_oracles(
+        self,
+        vault_address: str,
+        tokens: list[str],
+        oracles: list[str],
+    ) -> str:
+        """Set oracle addresses on a vault for NAV pricing.
+
+        Uses Circle dev-controlled wallet if configured, falls back to raw private key.
+        """
+        checksummed_tokens = [chain_client.to_checksum(t) for t in tokens]
+        checksummed_oracles = [chain_client.to_checksum(o) for o in oracles]
+
+        # Circle path
+        if circle_signer.is_configured:
+            tx_hash = await circle_signer.execute_contract(
+                contract_address=vault_address,
+                abi_function="setTokenOracles(address[],address[])",
+                abi_params=[checksummed_tokens, checksummed_oracles],
+            )
+            logger.info(f"setTokenOracles via Circle: {tx_hash} for vault {vault_address}")
+            return tx_hash
+
+        # Fallback: raw private key
+        account = chain_client.settings.agent_account
+        if not account:
+            raise RuntimeError("No agent account configured")
+
+        vault = self.loader.vault(vault_address)
+        nonce = await chain_client.w3.eth.get_transaction_count(account.address)
+
+        tx = await vault.functions.setTokenOracles(
+            checksummed_tokens,
+            checksummed_oracles,
+        ).build_transaction(
+            {
+                "from": account.address,
+                "nonce": nonce,
+                "chainId": chain_client.settings.chain_id,
+                "gas": 500_000,
+                "gasPrice": await chain_client.w3.eth.gas_price,
+            }
+        )
+
+        signed = account.sign_transaction(tx)
+        tx_hash = await chain_client.w3.eth.send_raw_transaction(signed.raw_transaction)
+
+        logger.info(f"setTokenOracles tx sent: {tx_hash.hex()} for vault {vault_address}")
+        return tx_hash.hex()
+
     async def set_target_allocations(
         self,
         vault_address: str,

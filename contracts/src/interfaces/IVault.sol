@@ -13,6 +13,7 @@ interface IVault {
     event Withdraw(address indexed sender, address indexed receiver, address indexed owner, uint256 assets, uint256 shares);
     event Rebalanced(address indexed caller, uint256 tradesCount, uint256 timestamp);
     event TargetAllocationsSet(uint256 tokensCount, uint256 timestamp);
+    event TokenOraclesSet(uint256 tokensCount);
     event FeesCollected(uint256 managementFee, uint256 performanceFee);
 
     // ── ERC-4626 Standard ────────────────────────────────────
@@ -101,4 +102,13 @@ interface IVault {
 
     /// @notice USDC token address.
     function asset() external view returns (address);
+
+    /// @notice Oracle address for a held token (used for NAV pricing).
+    function tokenOracle(address token) external view returns (address);
+
+    /// @notice Set oracle addresses for held tokens.
+    function setTokenOracles(
+        address[] calldata tokens,
+        address[] calldata oracles
+    ) external;
 }

@@ -69,3 +69,5 @@ htmlcov/
 
 .loom/
 !.loom/loom.config.json
+.venv/
+.claude/

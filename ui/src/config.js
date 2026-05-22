@@ -310,6 +310,8 @@ export const VAULT_ABI = [
   { name: 'performanceFeeBps',   type: 'function', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint16' }] },
   { name: 'setTargetAllocations', type: 'function', stateMutability: 'nonpayable', inputs: [{ type: 'address[]', name: 'tokens' }, { type: 'uint256[]', name: 'weightsBps' }], outputs: [] },
   { name: 'getTargetAllocations', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ type: 'address[]' }, { type: 'uint256[]' }] },
+  { name: 'setTokenOracles', type: 'function', stateMutability: 'nonpayable', inputs: [{ type: 'address[]', name: 'tokens' }, { type: 'address[]', name: 'oracles' }], outputs: [] },
+  { name: 'tokenOracle', type: 'function', stateMutability: 'view', inputs: [{ type: 'address' }], outputs: [{ type: 'address' }] },
 ]
 
 export const VAULT_FACTORY_ABI = [
@@ -333,19 +335,17 @@ export const VAULT_FACTORY_ABI = [
 export const USDC = "0x3600000000000000000000000000000000000000"
 
 export const ASSETS = [
-  { id: 'TSLA',   name: 'Tesla',      sym: 'sTSLA',   emoji: '🚗', oracle: '0xe1c9f2b11be97097223a66a188fca541e07873a6', vault: '0xf0356600e26c6c403ec4f5b36b0e3380bb0609ab', token: '0xd514cd27baf762c650536765cde9b61c876abacd' },
-  { id: 'NVDA',   name: 'Nvidia',     sym: 'sNVDA',   emoji: '🎮', oracle: '0xeb36acf88e739dd312de8278985262146a017374', vault: '0x4c3cdc2bf44195ad8a4d201c8afbd453949a8781', token: '0x805e75019a1291a598dfc134ad2519121a35fb11' },
-  { id: 'SPY',    name: 'S&P 500',    sym: 'sSPY',    emoji: '📈', oracle: '0xd8161a8eeab7c7100e2863abe3d5f346b5ff9e52', vault: '0xd8d7855f76c384638cf1dfc3575ecff3538764b4', token: '0x6fea38dedea0c6bb66ce93e5383c34385d8b889f' },
-  { id: 'BTC',    name: 'Bitcoin',    sym: 'sBTC',    emoji: '₿',  oracle: '0x6cc5f621c4e3b46152e69e5c9873689cbb4a85e8', vault: '0x92990ed6f5c8cd72752ca9aeafad422269225c43', token: '0x317e82be8f7cba6c162ab968fcf695d88e8e0359' },
-  { id: 'GOLD',   name: 'Gold ETF',   sym: 'sGOLD',   emoji: '🥇', oracle: '0x35fccde01ae8728c7a7cb83c3f59c701ebecc633', vault: '0x124b5c5da57d209b28d4997aaf6d4e96711efd5a', token: '0xf384562c8bdafce52400eb6839f195695f6fa276' },
-  { id: 'OIL',    name: 'Oil ETF',    sym: 'sOIL',    emoji: '🛢️', oracle: '0x79f354524fd09af16d841a2221af2b2b7bc432c8', vault: '0xfa942399e36959c8060c3a82a610d680a7ac6d22', token: '0x46cead4120f17a968ba1168f1a56563962cf3c4b' },
-  { id: 'NIKKEI', name: 'Nikkei ETF', sym: 'sNKY',    emoji: '🗾', oracle: '0xcd34a4103ad64a3cf729b1b1a58295ccc957fcee', vault: '0xb26029ca37c09400ca921f00fc541cd42143b508', token: '0x445b8f0f827a0d384d1b8ccf18cbc6ec8a543376' },
+  { id: 'TSLA',   name: 'Tesla',      sym: 'sTSLA',   emoji: '🚗', oracle: '0x9eEd179B2E4f6Fb54a452D3E727649EA3b15b763', token: '0xE745C07d7d32A1Ca0d6162A1c50e876619CF7388' },
+  { id: 'NVDA',   name: 'Nvidia',     sym: 'sNVDA',   emoji: '🎮', oracle: '0xbDa34c7e3FdF7B8e93c9aa383b50C2e0cE58E0dB', token: '0xC297A15E702C910b71Ac531c6633aFDd90389e1d' },
+  { id: 'SPY',    name: 'S&P 500',    sym: 'sSPY',    emoji: '📈', oracle: '0x2D41e62D6bAD0a84190E257d3F5A90F48Be55Fbe', token: '0x04315D3c35639288949cEE1d1E01Bd6100aDf3f5' },
+  { id: 'BTC',    name: 'Bitcoin',    sym: 'sBTC',    emoji: '₿',  oracle: '0xF9a2B28b9B4D67F43Cb490E54f8C6F4cd59482F1', token: '0xdDbac3Cf2feb7192f963e6a9bB4DE0822C3DF4DB' },
+  { id: 'GOLD',   name: 'Gold ETF',   sym: 'sGOLD',   emoji: '🥇', oracle: '0xbFAd6DaDd35Cb56aE29dC47D9Ac4c46f0fCd9B9A', token: '0xb13Eb59d8CDfACeDE2990207651e8649bdf7A89f' },
 ]
 
 // New contract addresses — set these after deploying via deploy-new.mjs
 export const NEW_CONTRACTS = {
-  ammRouter:       '0xd5b829f9d364a8bbe1caf6c8b19cb05371b178f4',
-  vaultFactory:    '0xca873414070844aeb98b0bf1051f81969c79cc32',
-  traceRegistry:   '0x42d8a23edb897cbee203e9fa197eb05ab5106ca6',
-  assetRegistry:   '0x2d44550711137916df6175587d17886281a0fbc7',
+  ammRouter:       '0x090f8E245F2831b81c9ff21661FBd0cb1383f82D',
+  vaultFactory:    '0x32A3e0D0a8215D77e3B92fa6d9b4Dbe19f255671',
+  traceRegistry:   '0x44bD55c0DdF757e584a41fb7F3B6a47b4C5982ba',
+  assetRegistry:   '0x79fc95A10E8240116006084439B650BA9e72F3cA',
 }

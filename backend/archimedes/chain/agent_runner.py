@@ -210,6 +210,34 @@ class StrategyRunner:
             )
             return
 
+        # Set oracle addresses for NAV pricing (so totalAssets() prices all holdings)
+        try:
+            oracle_tokens = []
+            oracle_addrs = []
+            for t in targets:
+                if t.weight > 0 and t.token_address:
+                    symbol = t.symbol
+                    if symbol == "USDC":
+                        continue
+                    oracle_addr = chain_client.settings.oracle_addresses.get(symbol)
+                    if oracle_addr:
+                        oracle_tokens.append(t.token_address)
+                        oracle_addrs.append(oracle_addr)
+
+            if oracle_tokens:
+                await chain_executor.set_token_oracles(
+                    vault_address, oracle_tokens, oracle_addrs,
+                )
+                logger.info(
+                    "[tick %s] Set %d token oracles on vault %s",
+                    tick_id, len(oracle_tokens), vault_address[:10],
+                )
+        except Exception as e:
+            logger.warning(
+                "[tick %s] Failed to set token oracles on %s: %s",
+                tick_id, vault_address[:10], e,
+            )
+
         # Set target allocations on the vault first (needed for rebalance)
         try:
             alloc_tokens = []

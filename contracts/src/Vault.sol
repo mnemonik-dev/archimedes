@@ -10,6 +10,7 @@ import "@openzeppelin/contracts/utils/Pausable.sol";
 
 import "./interfaces/IVault.sol";
 import "./interfaces/IAMMRouter.sol";
+import "./PriceOracle.sol";
 
 /// @title Vault
 /// @notice ERC-4626 tokenized vault that holds synthetic/bridged assets.
@@ -58,6 +59,9 @@ contract Vault is IVault, ERC20, Ownable, ReentrancyGuard, Pausable {
     mapping(address => uint256) public holdings;
     address[] public heldTokens;
 
+    /// @notice Oracle address for each held token (for NAV pricing)
+    mapping(address => address) public override tokenOracle;
+
     // ─── Errors ──────────────────────────────────────────────────────
 
     error ZeroAmount();
@@ -66,6 +70,7 @@ contract Vault is IVault, ERC20, Ownable, ReentrancyGuard, Pausable {
     error Unauthorized();
     error InvalidAllocations();
     error InsufficientBalance();
+    error InsufficientLiquidity();
 
     // ─── Constructor ─────────────────────────────────────────────────
 
@@ -143,9 +148,14 @@ contract Vault is IVault, ERC20, Ownable, ReentrancyGuard, Pausable {
         shares = _convertToShares(assets);
         if (shares == 0) revert ZeroShares();
 
+        // Ensure we have enough USDC — liquidate positions if needed
+        uint256 usdcOnHand = IERC20(asset).balanceOf(address(this));
+        if (usdcOnHand < assets) {
+            _liquidateToUsdc(assets - usdcOnHand);
+        }
+
         _burn(owner_, shares);
 
-        _removeHolding(address(asset), assets);
         IERC20(asset).safeTransfer(receiver, assets);
 
         emit Withdraw(msg.sender, receiver, owner_, assets, shares);
@@ -167,9 +177,14 @@ contract Vault is IVault, ERC20, Ownable, ReentrancyGuard, Pausable {
         assets = previewRedeem(shares);
         if (assets == 0) revert ZeroAssets();
 
+        // Ensure we have enough USDC — liquidate positions if needed
+        uint256 usdcOnHand = IERC20(asset).balanceOf(address(this));
+        if (usdcOnHand < assets) {
+            _liquidateToUsdc(assets - usdcOnHand);
+        }
+
         _burn(owner_, shares);
 
-        _removeHolding(address(asset), assets);
         IERC20(asset).safeTransfer(receiver, assets);
 
         emit Withdraw(msg.sender, receiver, owner_, assets, shares);
@@ -177,8 +192,25 @@ contract Vault is IVault, ERC20, Ownable, ReentrancyGuard, Pausable {
 
     // ─── Views ───────────────────────────────────────────────────────
 
+    /// @notice Total NAV in USDC terms — prices all held tokens via oracles.
     function totalAssets() public view override returns (uint256) {
-        return IERC20(asset).balanceOf(address(this));
+        uint256 nav = IERC20(asset).balanceOf(address(this));
+
+        for (uint256 i = 0; i < heldTokens.length; i++) {
+            if (heldTokens[i] == address(asset)) continue;
+            uint256 balance = IERC20(heldTokens[i]).balanceOf(address(this));
+            if (balance == 0) continue;
+
+            address oracle = tokenOracle[heldTokens[i]];
+            if (oracle == address(0)) continue;
+
+            // synth tokens: 18 decimals, oracle price: 6 decimals (USDC)
+            // value in USDC (6 decimals) = balance(18) * price(6) / 1e18
+            uint256 price = PriceOracle(oracle).getPrice();
+            nav += (balance * price) / 1e18;
+        }
+
+        return nav;
     }
 
     function previewDeposit(uint256 assets) public view override returns (uint256 shares) {
@@ -279,6 +311,19 @@ contract Vault is IVault, ERC20, Ownable, ReentrancyGuard, Pausable {
         emit TargetAllocationsSet(tokens.length, block.timestamp);
     }
 
+    /// @notice Set oracle addresses for held tokens (needed for NAV pricing).
+    ///         Must be called before rebalance so totalAssets() is accurate.
+    function setTokenOracles(
+        address[] calldata tokens,
+        address[] calldata oracles
+    ) external override onlyManager {
+        if (tokens.length != oracles.length) revert InvalidAllocations();
+        for (uint256 i = 0; i < tokens.length; i++) {
+            tokenOracle[tokens[i]] = oracles[i];
+        }
+        emit TokenOraclesSet(tokens.length);
+    }
+
     function getHoldings()
         external
         view
@@ -324,6 +369,55 @@ contract Vault is IVault, ERC20, Ownable, ReentrancyGuard, Pausable {
     }
 
     // ─── Internal ────────────────────────────────────────────────────
+
+    /// @notice Liquidate non-USDC positions to cover a USDC shortfall.
+    ///         Sells proportionally from each held token via the AMM.
+    function _liquidateToUsdc(uint256 shortfall) internal {
+        // First pass: calculate total non-USDC holdings value
+        uint256 totalNonUsdcValue;
+        for (uint256 i = 0; i < heldTokens.length; i++) {
+            if (heldTokens[i] == address(asset)) continue;
+            uint256 balance = IERC20(heldTokens[i]).balanceOf(address(this));
+            if (balance == 0) continue;
+            address oracle = tokenOracle[heldTokens[i]];
+            if (oracle == address(0)) continue;
+
+            uint256 price = PriceOracle(oracle).getPrice();
+            totalNonUsdcValue += (balance * price) / 1e18;
+        }
+
+        if (totalNonUsdcValue == 0) revert InsufficientLiquidity();
+
+        // Add 0.5% buffer for slippage
+        uint256 liquidationTarget = shortfall + (shortfall / 200);
+
+        // Second pass: sell proportionally from each non-USDC token
+        for (uint256 i = 0; i < heldTokens.length; i++) {
+            if (heldTokens[i] == address(asset)) continue;
+            uint256 balance = IERC20(heldTokens[i]).balanceOf(address(this));
+            if (balance == 0) continue;
+            address oracle = tokenOracle[heldTokens[i]];
+            if (oracle == address(0)) continue;
+
+            uint256 price = PriceOracle(oracle).getPrice();
+            uint256 tokenValue = (balance * price) / 1e18;
+            if (tokenValue == 0) continue;
+
+            // This token's proportional share of the liquidation
+            uint256 targetValue = (liquidationTarget * tokenValue) / totalNonUsdcValue;
+            uint256 tokensToSell = (targetValue * 1e18) / price;
+            if (tokensToSell == 0) continue;
+            if (tokensToSell > balance) tokensToSell = balance;
+
+            // Approve router and swap to USDC
+            IERC20(heldTokens[i]).safeIncreaseAllowance(address(ammRouter), tokensToSell);
+            ammRouter.swap(heldTokens[i], asset, tokensToSell, 0);
+        }
+
+        // Verify we now have enough USDC
+        uint256 usdcAfter = IERC20(asset).balanceOf(address(this));
+        if (usdcAfter < shortfall) revert InsufficientLiquidity();
+    }
 
     function _accrueFees() internal {
         uint256 timeDelta = block.timestamp - lastFeeTimestamp;

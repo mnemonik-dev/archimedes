@@ -337,6 +337,29 @@ async def fund_and_allocate_vaults(vaults: list[dict], minted: dict[str, float])
         except Exception as e:
             print(f"  ⚠️  {vault_info['symbol']}: USDC deposit failed — {e}")
 
+        # Set oracle addresses for NAV pricing
+        oracle_tokens = []
+        oracle_addrs = []
+        for symbol in alloc:
+            if symbol == "USDC":
+                continue
+            token_addr = synth_addresses.get(symbol)
+            oracle_addr = chain_client.settings.oracle_addresses.get(symbol)
+            if token_addr and oracle_addr:
+                oracle_tokens.append(token_addr)
+                oracle_addrs.append(oracle_addr)
+
+        if oracle_tokens:
+            try:
+                await circle_signer.execute_contract(
+                    contract_address=vault_addr,
+                    abi_function="setTokenOracles(address[],address[])",
+                    abi_params=[oracle_tokens, oracle_addrs],
+                )
+                print(f"  🔮 {vault_info['symbol']}: oracles set ({len(oracle_tokens)} tokens)")
+            except Exception as e:
+                print(f"  ⚠️  {vault_info['symbol']}: setTokenOracles failed — {e}")
+
         # Set target allocations
         tokens = []
         weights = []
