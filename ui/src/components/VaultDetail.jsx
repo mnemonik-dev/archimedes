@@ -123,14 +123,28 @@ export default function VaultDetail({ address, onBack }) {
   const loadOnChain = useCallback(async () => {
     if (!address) return
     try {
-      const [totalAssets, totalSupply, creator, tier, paused, asset] = await Promise.all([
-        publicClient.readContract({ address, abi: VAULT_ABI, functionName: 'totalAssets' }),
+      // Read each individually — totalAssets may revert on stale oracle prices
+      const [totalSupply, creator, tier, paused, asset] = await Promise.all([
         publicClient.readContract({ address, abi: VAULT_ABI, functionName: 'totalSupply' }),
         publicClient.readContract({ address, abi: VAULT_ABI, functionName: 'creator' }),
         publicClient.readContract({ address, abi: VAULT_ABI, functionName: 'tier' }),
         publicClient.readContract({ address, abi: VAULT_ABI, functionName: 'paused' }),
         publicClient.readContract({ address, abi: VAULT_ABI, functionName: 'asset' }),
       ])
+
+      // totalAssets may revert (StalePrice) — read separately with fallback to backend API
+      let totalAssets
+      try {
+        totalAssets = await publicClient.readContract({ address, abi: VAULT_ABI, functionName: 'totalAssets' })
+      } catch {
+        // Fallback: use backend API which handles stale prices gracefully
+        try {
+          const backendData = await apiGet(`/api/vaults/${address}`)
+          totalAssets = BigInt(Math.round((backendData.aum_usdc || 0) * 1e6))
+        } catch {
+          totalAssets = 0n
+        }
+      }
 
       // Read target allocations
       let targetAllocs = []
@@ -145,10 +159,17 @@ export default function VaultDetail({ address, onBack }) {
         }))
       } catch {}
 
+      // Read vault name from on-chain
+      let onChainName = ''
+      try {
+        onChainName = await publicClient.readContract({ address, abi: VAULT_ABI, functionName: 'name' })
+      } catch {}
+
       setOnChainData({
         totalAssets: Number(totalAssets) / 1e6,
         totalSupply: Number(totalSupply),
         sharePrice: Number(totalSupply) > 0 ? Number(totalAssets) / Number(totalSupply) / 1e6 : 1,
+        name: onChainName,
         creator, tier: Number(tier), paused, asset,
         targetAllocations: targetAllocs,
       })
@@ -174,7 +195,7 @@ export default function VaultDetail({ address, onBack }) {
     setBusy(false)
   }
 
-  const name = detail?.name || `Vault ${shortAddr(address)}`
+  const name = detail?.name || onChainData?.name || `Vault ${shortAddr(address)}`
   const symbol = detail?.symbol || 'vAULT'
   const tier = onChainData?.tier ?? detail?.tier ?? 1
   const aum = onChainData?.totalAssets ?? detail?.aum_usdc ?? 0
