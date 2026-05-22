@@ -367,19 +367,6 @@ function StrategyDetailView({ strategy, traces }) {
         </div>
       )}
 
-      {/* Related PRs */}
-      <div style={{ marginTop: 20 }}>
-        <div className="label mb-2">Related</div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <a href="https://github.com/hackagora/archimedes-arcadia/pull/37" target="_blank" rel="noopener noreferrer" className="btn btn-outline btn-sm">
-            PR #37 (corpus)
-          </a>
-          <a href="https://github.com/hackagora/archimedes-arcadia/pull/38" target="_blank" rel="noopener noreferrer" className="btn btn-outline btn-sm">
-            PR #38 (fusion)
-          </a>
-        </div>
-      </div>
-
       {/* Efficient Frontier + Correlation Matrix — side-by-side on md+, stacked on small */}
       <div style={{ marginTop: 24 }} className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <EfficientFrontier />
