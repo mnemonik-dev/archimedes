@@ -200,14 +200,17 @@ class StrategyRunner:
             tick_id, vault_address[:10], portfolio.total_value_usdc, len(portfolio.holdings),
         )
 
-        # Skip empty vaults
+        # Skip empty vaults (don't spam traces — just log)
         if portfolio.total_value_usdc <= 0 and not portfolio.holdings:
             logger.info("[tick %s] Vault %s is empty — needs deposit", tick_id, vault_address[:10])
-            await self._publish_trace(
-                vault_address, DecisionType.SKIP, "empty_vault",
-                portfolio, [], all_signals, regime, tick_id,
-                "Vault is empty — awaiting initial deposit.",
-            )
+            # Only publish a trace if we haven't already for this vault
+            last_trace = await self.state.get_last_trace(vault_address)
+            if not last_trace or last_trace.get("trigger") != "empty_vault":
+                await self._publish_trace(
+                    vault_address, DecisionType.SKIP, "empty_vault",
+                    portfolio, [], all_signals, regime, tick_id,
+                    "Vault is empty — awaiting initial deposit.",
+                )
             return
 
         # Set oracle addresses for NAV pricing (so totalAssets() prices all holdings)
