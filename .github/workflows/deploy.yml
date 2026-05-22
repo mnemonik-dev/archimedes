@@ -47,6 +47,12 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
 
+            # Inject LLM credentials into .env (idempotent — overwrites if present)
+            sed -i '/^LLM_PROVIDER=/d; /^LLM_AUTH_TOKEN=/d; /^LLM_BASE_URL=/d' .env
+            echo "LLM_PROVIDER=${{ secrets.LLM_PROVIDER }}" >> .env
+            echo "LLM_AUTH_TOKEN=${{ secrets.LLM_AUTH_TOKEN }}" >> .env
+            echo "LLM_BASE_URL=${{ secrets.LLM_BASE_URL }}" >> .env
+
             # Rebuild and restart services (detached)
             docker compose build --no-cache
             docker compose up -d --force-recreate --remove-orphans
