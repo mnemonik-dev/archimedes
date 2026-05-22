@@ -478,7 +478,8 @@ class ChainExecutor:
             if addr and addr.lower() == token_address.lower():
                 try:
                     oracle = self.loader.oracle_for(sym)
-                    price = await oracle.functions.price().call()  # 6 decimals
+                    # PriceOracle.getPrice() returns price in 6 decimals
+                    price = await oracle.functions.getPrice().call()
                     # USDC value = amount (18 dec) * price (6 dec) / 1e18
                     return (amount * price) // (10**decimals)
                 except Exception:
