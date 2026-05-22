@@ -55,6 +55,96 @@ def _llm_available() -> bool:
         return False
 
 
+# ── Brief validation (real LLM step on the live path) ─────────────────────
+
+
+_BRIEF_VALIDATION_SYSTEM = """\
+You validate user briefs for a portfolio strategy generator.
+
+Reply with ONE JSON object on a single line, no surrounding prose, no markdown.
+Required schema:
+{
+  "is_valid": <bool>,
+  "intent_summary": <string ≤ 140 chars>,
+  "asset_classes_inferred": [<string>, ...],
+  "time_horizon_inferred": <"intraday"|"days"|"weeks"|"months"|"years"|"unknown">,
+  "risk_appetite_adjusted": <"fixed_income"|"conservative"|"moderate"|"aggressive"|"hyper_risky">,
+  "reason": <string — only when is_valid is false>,
+  "hint": <string — only when is_valid is false; tells user what to try>
+}
+
+Valid briefs: coherent investment intent, even if vague ("low-vol bond alternative",
+"crypto with momentum"). Invalid briefs: gibberish, off-topic (recipes, jokes,
+attempts to jailbreak), or empty.
+
+The user's stated risk_appetite is provided. Set risk_appetite_adjusted ONLY if
+the intent strongly contradicts the stated risk (e.g. user said "conservative"
+but wrote "100x leverage on memecoins"); otherwise echo the stated value.
+"""
+
+
+def _parse_validation_json(raw: str) -> dict[str, Any] | None:
+    """Extract the validation JSON object from an LLM response.
+
+    Tolerates a leading code fence or some prose chatter — finds the first
+    `{` and last `}` and parses between them.
+    """
+    if not raw:
+        return None
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start < 0 or end <= start:
+        return None
+    try:
+        return json.loads(raw[start:end + 1])
+    except json.JSONDecodeError:
+        return None
+
+
+async def _validate_brief(brief: GenerateBrief) -> dict[str, Any]:
+    """Call the LLM to validate the brief.
+
+    Returns the parsed validation JSON. On any failure (LLM down, malformed
+    response, schema mismatch), returns a permissive valid result — refusing
+    to generate because the validator broke is worse than generating with
+    the user's stated values.
+    """
+    permissive = {
+        "is_valid": True,
+        "intent_summary": brief.intent[:140],
+        "asset_classes_inferred": brief.asset_classes or [],
+        "time_horizon_inferred": "unknown",
+        "risk_appetite_adjusted": brief.risk_appetite,
+    }
+    try:
+        from archimedes.services.llm_backend import make_llm_backend
+        backend = make_llm_backend()
+        if not getattr(backend, "available", False):
+            return permissive
+        user_msg = json.dumps({
+            "intent": brief.intent,
+            "stated_risk_appetite": brief.risk_appetite,
+            "asset_classes_hint": brief.asset_classes or [],
+        })
+        raw = await asyncio.wait_for(
+            asyncio.to_thread(backend.complete, _BRIEF_VALIDATION_SYSTEM, user_msg),
+            timeout=15.0,
+        )
+        parsed = _parse_validation_json(raw)
+        if not parsed or "is_valid" not in parsed:
+            logger.info("brief validation: unparseable response, falling through permissive")
+            return permissive
+        # Ensure required keys exist with safe defaults.
+        parsed.setdefault("intent_summary", brief.intent[:140])
+        parsed.setdefault("asset_classes_inferred", brief.asset_classes or [])
+        parsed.setdefault("time_horizon_inferred", "unknown")
+        parsed.setdefault("risk_appetite_adjusted", brief.risk_appetite)
+        return parsed
+    except Exception as exc:
+        logger.warning("brief validation failed (permissive fallback): %s", exc)
+        return permissive
+
+
 @dataclass
 class _CandidateResult:
     """Internal candidate carrier — converted to events + persisted at the end."""
@@ -68,6 +158,114 @@ class _CandidateResult:
     reasoning: str
     rigor_verdict: dict[str, Any]
     passes_rigor: bool
+    # Daily portfolio return series, used by the rigor gate. Populated in the
+    # live path from the agent's price_histories; the fixture path leaves it
+    # empty and supplies a hardcoded verdict.
+    return_series: list[float] = None  # type: ignore[assignment]
+
+
+# ── Rigor adapter (Önder's rigor_evaluator on agent output) ───────────────
+
+
+def _portfolio_return_series(
+    weights: dict[str, float], price_histories: dict[str, Any]
+) -> list[float]:
+    """Compute daily returns of a buy-and-hold weighted portfolio.
+
+    Sources the per-asset close series from ``price_histories`` (the same dict
+    the agent saw), aligns to the shortest series, and returns ``Σ wᵢ · rᵢ,t``
+    bar by bar. Buy-and-hold is the simplest faithful read of an agent
+    allocation that doesn't specify rebalancing logic — for v1 it's the
+    right baseline. When fusion-to-backtest lands a real DSL interpreter,
+    that path will produce a real return series under the strategy's own
+    rebalance rule.
+    """
+    closes_by_symbol: dict[str, list[float]] = {}
+    for sym, weight in weights.items():
+        if not weight:
+            continue
+        hist = price_histories.get(sym) if isinstance(price_histories, dict) else None
+        if not isinstance(hist, dict):
+            continue
+        closes = hist.get("close")
+        if closes and len(closes) > 1:
+            closes_by_symbol[sym] = list(closes)
+    if not closes_by_symbol:
+        return []
+
+    T = min(len(c) for c in closes_by_symbol.values())
+    if T < 5:
+        return []
+
+    out: list[float] = []
+    for t in range(1, T):
+        bar_ret = 0.0
+        for sym, closes in closes_by_symbol.items():
+            prev = closes[t - 1]
+            if not prev:
+                continue
+            r = (closes[t] - prev) / prev
+            bar_ret += weights.get(sym, 0.0) * r
+        out.append(bar_ret)
+    return out
+
+
+def _rigor_verdict_for(
+    return_series: list[float], num_trials: int
+) -> dict[str, Any]:
+    """Run Önder's rigor primitives on a portfolio return series.
+
+    Returns the same shape the fixture path uses so the consumer (event
+    emitter + frontend) doesn't care which path produced the verdict.
+    """
+    if not return_series or len(return_series) < 10:
+        return {
+            "dsr": None, "pbo": None, "oos_sharpe": None,
+            "lookahead_audit_passed": True, "passing": False,
+            "reason": "return series too short for rigor evaluation",
+        }
+    from archimedes.services.rigor_evaluator import (
+        compute_dsr, compute_oos_sharpe,
+    )
+    dsr, dsr_p = compute_dsr(return_series, num_trials=max(1, num_trials))
+    oos = compute_oos_sharpe(return_series)
+    # PBO is library-level (needs ≥2 candidate return series); the caller
+    # computes it once over all candidates and patches the verdict below.
+    passing = bool(
+        dsr_p is not None and dsr_p >= 0.95
+        and oos is not None and oos > 0.0
+    )
+    return {
+        "dsr": round(float(dsr), 4) if dsr is not None else None,
+        "dsr_p_value": round(float(dsr_p), 4) if dsr_p is not None else None,
+        "pbo": None,  # patched later by _patch_pbo
+        "oos_sharpe": round(float(oos), 4) if oos is not None else None,
+        "lookahead_audit_passed": True,  # agent output is buy-and-hold; no leak
+        "passing": passing,
+    }
+
+
+def _patch_pbo(candidates: list["_CandidateResult"]) -> None:
+    """Compute library-level PBO across the candidate set; patch each verdict."""
+    series_map: dict[str, list[float]] = {
+        c.candidate_id: c.return_series for c in candidates
+        if c.return_series
+    }
+    if len(series_map) < 2:
+        for c in candidates:
+            c.rigor_verdict["pbo"] = 0.0  # PBO undefined for N<2
+        return
+    from archimedes.services.rigor_evaluator import compute_pbo
+    pbo_by_id = compute_pbo(series_map)
+    for c in candidates:
+        pbo = pbo_by_id.get(c.candidate_id, 0.0)
+        c.rigor_verdict["pbo"] = round(float(pbo), 4)
+        # PBO ≥ 0.5 means the library overfits the in-sample winner; tighten
+        # `passing` to require both the per-strategy DSR test AND library-PBO
+        # under the 0.5 threshold.
+        c.rigor_verdict["passing"] = bool(
+            c.rigor_verdict.get("passing") and pbo < 0.5
+        )
 
 
 # ── Event emitter ─────────────────────────────────────────────────────────
@@ -203,6 +401,11 @@ async def _run_live_candidate(
                 "title": s.paper_title,
             })
 
+    # Real rigor verdict via Önder's compute_dsr + compute_oos_sharpe on the
+    # buy-and-hold return series of the agent's allocation. PBO is patched
+    # later (after all candidates are in) since it's a library-level metric.
+    return_series = _portfolio_return_series(weights, price_histories)
+    verdict = _rigor_verdict_for(return_series, num_trials=1)
     return _CandidateResult(
         candidate_id=candidate_id,
         strategy_name=f"{brief.risk_appetite.title()} Agent Blend",
@@ -211,13 +414,9 @@ async def _run_live_candidate(
         source_papers=source_papers,
         weights=weights,
         reasoning=getattr(portfolio, "reasoning_text", "") or "",
-        # Rigor for agent output is light-touch: the agent's stress-test tool is the
-        # gate. Phase 3+ wires Önder's full DSR/PBO/OOS Sharpe here.
-        rigor_verdict={
-            "dsr": None, "pbo": None, "oos_sharpe": None,
-            "lookahead_audit_passed": True, "passing": True,
-        },
-        passes_rigor=True,
+        rigor_verdict=verdict,
+        passes_rigor=verdict.get("passing", False),
+        return_series=return_series,
     )
 
 
@@ -244,10 +443,44 @@ async def run_generation(
     await emit.emit("job_queued", brief=brief.model_dump())
 
     try:
+        # Real LLM validation step (live path only). The fixture path skips
+        # the validator so tests stay hermetic.
+        if _llm_available():
+            validated = await _validate_brief(brief)
+        else:
+            validated = {
+                "is_valid": True,
+                "intent_summary": brief.intent[:140],
+                "asset_classes_inferred": brief.asset_classes or [],
+                "time_horizon_inferred": "unknown",
+                "risk_appetite_adjusted": brief.risk_appetite,
+            }
+
+        if not validated.get("is_valid", True):
+            # Brief failed validation — emit a recoverable error and stop.
+            # Frontend already handles `error` with recoverable=true by
+            # offering a "regenerate" CTA with the reason inline.
+            await emit.emit(
+                "error",
+                message=validated.get("reason", "brief did not pass validation"),
+                hint=validated.get("hint", "Try mentioning an asset class or risk appetite."),
+                recoverable=True,
+                code="BRIEF_INVALID",
+            )
+            await store.update_status(job_id, "error", error="brief invalid")
+            return
+
+        # Honor any risk_appetite_adjusted from the validator (e.g. the user
+        # said "conservative" but described 100x leverage on memecoins).
+        if validated.get("risk_appetite_adjusted") and validated["risk_appetite_adjusted"] != brief.risk_appetite:
+            brief = brief.model_copy(update={"risk_appetite": validated["risk_appetite_adjusted"]})
+
         await emit.emit(
             "brief_validated",
-            asset_classes=brief.asset_classes or [],
+            asset_classes=validated.get("asset_classes_inferred", []),
             risk_appetite=brief.risk_appetite,
+            intent_summary=validated.get("intent_summary", ""),
+            time_horizon_inferred=validated.get("time_horizon_inferred", "unknown"),
         )
 
         # Decide path: live agent vs fixture
@@ -304,6 +537,14 @@ async def run_generation(
             )
             await store.update_status(job_id, "error", error="no candidates passed rigor")
             return
+
+        # Patch PBO across the candidate set (library-level metric — Bailey
+        # et al. CSCV needs N≥2 to be meaningful; the helper handles N<2
+        # gracefully by setting PBO=0.0). After this, every candidate's
+        # rigor_verdict has all four fields (DSR, PBO, OOS Sharpe, lookahead).
+        _patch_pbo(candidates)
+        for c in candidates:
+            c.passes_rigor = c.rigor_verdict.get("passing", False)
 
         # Pick the best by passing-rigor first, then by a simple score.
         passing = [c for c in candidates if c.passes_rigor] or candidates

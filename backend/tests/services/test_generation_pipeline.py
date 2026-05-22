@@ -83,6 +83,114 @@ async def test_pipeline_terminates_with_done_status():
     assert len(last_result["candidates"]) == 1
 
 
+def test_rigor_adapter_computes_dsr_and_oos_sharpe_on_synthetic_series():
+    """Wires Önder's rigor_evaluator on a synthetic return series.
+
+    Verifies the verdict shape matches the contract the SSE event +
+    frontend RejectedCandidates view expect — all four fields present,
+    `passing` is a bool, numeric fields are floats.
+    """
+    from archimedes.services.generation_pipeline import (
+        _portfolio_return_series, _rigor_verdict_for,
+    )
+
+    # Synthetic price histories — two assets, trending up with noise.
+    import random
+    random.seed(42)
+    n = 250
+    spy = [100.0]
+    gld = [100.0]
+    for _ in range(n - 1):
+        spy.append(spy[-1] * (1 + 0.0005 + random.gauss(0, 0.01)))
+        gld.append(gld[-1] * (1 + 0.0002 + random.gauss(0, 0.008)))
+
+    histories = {
+        "sSPY": {"close": spy},
+        "sGLD": {"close": gld},
+    }
+    weights = {"sSPY": 0.6, "sGLD": 0.4}
+
+    series = _portfolio_return_series(weights, histories)
+    assert len(series) == n - 1
+
+    verdict = _rigor_verdict_for(series, num_trials=3)
+    assert set(verdict.keys()) >= {
+        "dsr", "oos_sharpe", "lookahead_audit_passed", "passing", "pbo",
+    }
+    assert isinstance(verdict["passing"], bool)
+    assert verdict["dsr"] is not None
+    assert verdict["oos_sharpe"] is not None
+
+
+def test_rigor_adapter_handles_empty_series():
+    """Short series should produce None metrics + non-passing verdict."""
+    from archimedes.services.generation_pipeline import _rigor_verdict_for
+
+    verdict = _rigor_verdict_for([], num_trials=1)
+    assert verdict["dsr"] is None
+    assert verdict["oos_sharpe"] is None
+    assert verdict["passing"] is False
+
+
+@pytest.mark.asyncio
+async def test_pipeline_emits_cancellation_event_when_task_cancelled():
+    """CancelledError path emits a CANCELLED error event + flips status."""
+    store = _FakeStore()
+    brief = GenerateBrief(intent="cancel me mid-run", risk_appetite="moderate")
+
+    # Drive the pipeline as a real task so we can cancel it.
+    task = asyncio.create_task(run_generation(
+        job_id="job_cancel_001", brief=brief, n_candidates=1, store=store,
+    ))
+    # Let it kick off (job_queued + brief_validated emit synchronously).
+    await asyncio.sleep(0.05)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    # The cancellation handler must have logged the error event + status.
+    names = [e["event"] for e in store.events]
+    assert "error" in names
+    err = next(e for e in store.events if e["event"] == "error")
+    assert err["data"]["code"] == "CANCELLED"
+    assert err["data"]["recoverable"] is False
+    statuses = [s[0] for s in store.status]
+    assert statuses[-1] == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_brief_validation_rejects_invalid_brief(monkeypatch):
+    """When the validator says is_valid=false, emit BRIEF_INVALID and stop.
+
+    Forces the live path (so the validator runs) by mocking _llm_available;
+    fake the LLM result to flag the brief invalid; assert the pipeline
+    emits the error event and never reaches candidates_selected.
+    """
+    from archimedes.services import generation_pipeline as gp
+
+    monkeypatch.setattr(gp, "_llm_available", lambda: True)
+    async def fake_validate(brief):
+        return {
+            "is_valid": False,
+            "reason": "Brief looks like a recipe, not a strategy intent.",
+            "hint": "Try mentioning an asset class or risk appetite.",
+        }
+    monkeypatch.setattr(gp, "_validate_brief", fake_validate)
+
+    store = _FakeStore()
+    brief = GenerateBrief(intent="add flour and bake at 350F", risk_appetite="moderate")
+    await gp.run_generation(job_id="job_invalid_001", brief=brief, n_candidates=1, store=store)
+
+    names = [e["event"] for e in store.events]
+    assert "candidates_selected" not in names  # pipeline halted before agent ran
+    err = next((e for e in store.events if e["event"] == "error"), None)
+    assert err is not None
+    assert err["data"]["code"] == "BRIEF_INVALID"
+    assert err["data"]["recoverable"] is True
+    statuses = [s[0] for s in store.status]
+    assert statuses[-1] == "error"
+
+
 @pytest.mark.asyncio
 async def test_pipeline_multi_candidate_picks_best():
     store = _FakeStore()

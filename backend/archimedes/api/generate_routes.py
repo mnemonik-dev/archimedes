@@ -42,6 +42,16 @@ _TERMINAL_EVENTS = {"done", "error"}
 _POLL_INTERVAL_SECONDS = 0.4
 _STREAM_TIMEOUT_SECONDS = 300  # cap a single SSE connection at 5 min
 
+# Live registry of in-flight asyncio tasks per job. Lets cancel_job actually
+# stop the work — without this, /cancel only flips Redis status while the
+# agent keeps burning LLM tokens to completion.
+_RUNNING_TASKS: dict[str, asyncio.Task] = {}
+
+
+def _register_task(job_id: str, task: asyncio.Task) -> None:
+    _RUNNING_TASKS[job_id] = task
+    task.add_done_callback(lambda _t, jid=job_id: _RUNNING_TASKS.pop(jid, None))
+
 
 @generate_router.post("/start", response_model=GenerateStartResponse, status_code=202)
 async def start_generation(req: GenerateStartRequest) -> GenerateStartResponse:
@@ -54,7 +64,8 @@ async def start_generation(req: GenerateStartRequest) -> GenerateStartResponse:
 
     # Fire-and-forget the pipeline. The route doesn't await it; the SSE stream
     # below tails the event log written by the pipeline as it runs.
-    asyncio.create_task(_run_with_cleanup(job_id, req.brief, req.n_candidates))
+    task = asyncio.create_task(_run_with_cleanup(job_id, req.brief, req.n_candidates))
+    _register_task(job_id, task)
 
     return GenerateStartResponse(
         job_id=job_id,
@@ -140,11 +151,17 @@ def _format_sse(ev: dict) -> str:
 
 @generate_router.post("/jobs/{job_id}/cancel")
 async def cancel_job(job_id: str) -> dict[str, str]:
-    """Mark a job cancelled. Idempotent.
+    """Cancel a running job. Idempotent.
 
-    The background task itself can't currently be hard-cancelled — best-effort
-    only: the next event the pipeline tries to emit will be the ``error``
-    cancellation event (since the status flips to ``cancelled``).
+    Hard cancellation: looks up the asyncio.Task driving the job and calls
+    ``task.cancel()`` on it. The pipeline's ``except CancelledError`` branch
+    emits the synthetic error event + flips Redis status to ``cancelled``.
+
+    Caveat: if the agent is mid-``asyncio.to_thread(llm_call)``, the OS
+    thread itself isn't cancellable (Python doesn't expose that). The
+    awaiter unblocks immediately, the in-flight LLM call burns to
+    completion but its result is discarded — no events emitted after the
+    cancellation, no strategy persisted.
     """
     store = get_job_store()
     job = await store.get(job_id)
@@ -152,12 +169,24 @@ async def cancel_job(job_id: str) -> dict[str, str]:
         raise HTTPException(status_code=404, detail=f"job {job_id} not found or expired")
     if job["status"] in ("done", "error", "cancelled"):
         return {"job_id": job_id, "status": job["status"]}
+
+    # Flip status first so observers see "cancelled" even if the cancel
+    # callback hasn't fully propagated yet.
     await store.update_status(job_id, "cancelled", error="cancelled by user")
     await store.push_event(job_id, {
         "event": "error",
         "data": {"job_id": job_id, "message": "cancelled by user",
                  "recoverable": False, "code": "CANCELLED"},
     })
+
+    # Hard-cancel the task itself if we're still holding a reference.
+    task = _RUNNING_TASKS.get(job_id)
+    if task is not None and not task.done():
+        task.cancel()
+        logger.info("hard-cancelled job %s", job_id)
+    else:
+        logger.info("cancel for %s: no live task (already finished or restart)", job_id)
+
     return {"job_id": job_id, "status": "cancelled"}
 
 
