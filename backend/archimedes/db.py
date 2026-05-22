@@ -44,6 +44,11 @@ def init_db() -> None:
     where the papers table predates these model additions (i.e. our running
     docker volume).
     """
+    # Side-effect imports: ensure all ORM models register their tables with
+    # Base.metadata before create_all runs. Otherwise the kg_* tables only
+    # appear if some other code path imports archimedes.models.kg first.
+    from archimedes.models import kg  # noqa: F401
+
     Base.metadata.create_all(bind=engine)
     logger.info(f"Database tables created at {DATABASE_URL}")
 

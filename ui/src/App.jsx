@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { getAddress, disconnectWallet, reconnectWallet } from './config'
 import Layout from './components/Layout'
 import Landing from './components/Landing'
+import Explore from './components/Explore'
 import Generate from './components/Generate'
 import Portfolio from './components/Portfolio'
 import Learnings from './components/Learnings'
@@ -17,6 +18,7 @@ import './App.css'
 // top-level page until per-card trace-modal affordances are wired everywhere.
 const PAGE_TO_PATH = {
   landing:   '/',
+  explore:   '/explore',
   generate:  '/generate',
   library:   '/library',
   corpus:    '/corpus',
@@ -134,6 +136,7 @@ export default function App() {
   const renderPage = () => {
     switch (page) {
       case 'landing':      return <Landing onNavigate={navigateToPage} onConnect={() => {/* topbar handles modal */}} walletAddr={walletAddr} />
+      case 'explore':      return <Explore onNavigate={navigateToPage} />
       case 'generate':     return <Generate onNavigate={navigateToPage} />
       case 'library':      return <Strategies highlightStrategyId={highlightStrategyId} />
       case 'corpus':       return <CorpusExplorer />

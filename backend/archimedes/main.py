@@ -25,6 +25,8 @@ from archimedes.api.routes import (
     papers_router,
 )
 from archimedes.api.chat_routes import chat_router
+from archimedes.api.corpus_routes import corpus_router
+from archimedes.api.explore_routes import explore_router
 from archimedes.api.generate_routes import generate_router
 from archimedes.api.marketplace_routes import marketplace_router
 from archimedes.api.risk_routes import risk_router
@@ -123,6 +125,8 @@ app.include_router(swap_router)
 app.include_router(config_router)
 app.include_router(agent_router)
 app.include_router(chat_router)
+app.include_router(corpus_router)
+app.include_router(explore_router)
 app.include_router(generate_router)
 app.include_router(marketplace_router)
 app.include_router(risk_router)
