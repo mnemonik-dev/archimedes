@@ -1,0 +1,223 @@
+# Generation Streaming Spec
+
+> **Status:** Drafted 2026-05-22 as Phase 0 of the
+> [Spine+ v2 plan](./spine-plus-v2-plan.md). Authoritative for Phase 2
+> implementation — the Generate page's SSE protocol.
+>
+> **Lineage:** Wraps [`portfolio_agent.PortfolioAgent`](../../backend/archimedes/services/portfolio_agent.py)
+> per the decision in
+> [`portfolio-constructor-decision-tree.md`](./portfolio-constructor-decision-tree.md).
+> Iterations bounded by `MAX_AGENT_ITERATIONS=12` (Day-10 default).
+
+## Why SSE not WebSocket
+
+- Generate is **one-way** — server pushes events, client subscribes.
+- SSE is plain HTTP, survives proxies, auto-reconnects in the browser.
+- The client-side state machine (idle → streaming → done/error) is simpler
+  than a bidirectional channel.
+
+If a future feature requires bidirectional (e.g., live "stop and ask the agent
+a question mid-stream"), revisit. For Phase 2 generation, SSE.
+
+## Endpoints
+
+The Phase 2 work lands in a new
+[`backend/archimedes/api/generate_routes.py`](../../backend/archimedes/api/generate_routes.py)
+(per cross-cutting principle #2 — no new routes go into `routes.py`).
+
+### `POST /api/generate/jobs`
+
+Create a generation job. Returns immediately with `job_id`; actual work runs
+in a background task.
+
+**Request body:**
+```json
+{
+  "brief": "I want a 13-week treasury alternative with low volatility",
+  "wallet_address": "0x..." 
+}
+```
+`wallet_address` is optional (anonymous Generate is allowed pre-deploy; wallet
+is required only at the vault-creation step).
+
+**Response (201):**
+```json
+{
+  "job_id": "gen_01HXYZ...",
+  "stream_url": "/api/generate/stream/gen_01HXYZ...",
+  "resume_token": "...",
+  "ttl_seconds": 900
+}
+```
+
+### `GET /api/generate/stream/{job_id}`
+
+Server-sent events. Headers:
+
+- `Content-Type: text/event-stream`
+- `Cache-Control: no-cache`
+- `Connection: keep-alive`
+- `X-Accel-Buffering: no` (nginx/EC2 stack — disables proxy buffering)
+
+Client may send `Last-Event-ID: <event_id>` to resume from a known point.
+
+### `POST /api/generate/jobs/{job_id}/cancel`
+
+Cancel a job. Idempotent. Emits a final `error` event with `recoverable: false`
+and `message: "cancelled_by_user"` on the open stream.
+
+## Event schema
+
+Each SSE event is `id: <monotonic_int>\nevent: <name>\ndata: <json>\n\n`.
+
+`<name>` is one of:
+
+| Event | Payload | When emitted |
+|---|---|---|
+| `job_queued` | `{ job_id, brief, ts }` | Immediately after `POST /api/generate/jobs`. |
+| `brief_validated` | `{ job_id, asset_classes, risk_appetite, time_horizon, ts }` | After LLM extracts structured intent from free-text brief. |
+| `candidates_selected` | `{ job_id, candidate_count, source_arxiv_ids: [...], ts }` | After agent selects candidate papers from corpus (typically 3-5). |
+| `agent_iteration` | `{ job_id, iteration_n, max_iterations, ts }` | At the top of every `PortfolioAgent.recommend()` loop iteration. |
+| `tool_called` | `{ job_id, tool_name, args_summary, ts }` | When the agent invokes a tool (`get_asset_stats`, `get_correlation`, `stress_test`). |
+| `tool_result` | `{ job_id, tool_name, result_summary, ts }` | After the tool returns. `result_summary` is a 1-line human-readable summary, not the full payload. |
+| `candidate_drafted` | `{ job_id, candidate_id, strategy_name, weights_preview, ts }` | When the agent produces a candidate portfolio. Multiple may fire per job (per the locked decision, agent considers N internally). |
+| `candidate_evaluated` | `{ job_id, candidate_id, rigor_verdict: { dsr, pbo, oos_sharpe, lookahead_audit_passed, passes }, ts }` | After rigor gate runs on each candidate. |
+| `best_selected` | `{ job_id, best_candidate_id, considered_count, ts }` | When the agent picks the surfaced candidate from the considered set. |
+| `trace_hashed` | `{ job_id, trace_hash, ts }` | After the reasoning trace is committed to `AgentStateStore` and its keccak256 computed. |
+| `persisted` | `{ job_id, strategy_id, redirect_url, ts }` | After `StrategyRecord` insert. `redirect_url` is `/strategy/:id`. |
+| `done` | `{ job_id, strategy_id, ts }` | Terminal success. Stream closes. |
+| `error` | `{ job_id, message, recoverable: bool, code, ts }` | Terminal failure. Stream closes. |
+
+All payloads include `ts` (ISO-8601 UTC) so the client can render a true timeline.
+
+Multi-strategy: per the locked decision, the **client surfaces the single
+`best_selected` candidate**, but the full event stream including all
+`candidate_drafted` / `candidate_evaluated` events is persisted. The strategy
+passport at `/strategy/:id` exposes a "see candidates that were rejected" link
+that replays the event history.
+
+## Reconnection semantics
+
+If the client disconnects (page reload, network blip, back-button), it can
+re-subscribe:
+
+1. Client persists `currentJobId` to `localStorage` on `job_queued`.
+2. On Generate page mount, if `localStorage.currentJobId` exists and the job's
+   TTL hasn't expired, client re-opens the stream with
+   `Last-Event-ID: <last_seen_id>`.
+3. Server replays events from Redis (key: `gen:job:{job_id}:events`, list type)
+   starting after `Last-Event-ID`.
+4. If the job already finished, the stream replays the last `done` or `error`
+   event and closes.
+
+**TTL on event log:** 15 minutes after `done`/`error`. After that, the job's
+events are gone — the user can still see the resulting strategy in Library but
+can't re-watch the stream.
+
+## Job persistence model
+
+Per-job Redis keys:
+
+| Key | Type | Contents |
+|---|---|---|
+| `gen:job:{job_id}:meta` | hash | `brief`, `wallet_address`, `created_at`, `state`, `current_iteration` |
+| `gen:job:{job_id}:events` | list | Serialized SSE events in order |
+| `gen:job:{job_id}:lock` | string | Prevents double-execution if API restarts |
+
+Frontend stores `currentJobId` in `localStorage` (cleared on `done`/`error` or
+when the user explicitly clicks "Start over").
+
+## Backpressure & ordering
+
+- Agent iterations are seconds apart, not milliseconds — no batching needed.
+- Each event flushes immediately (`flush()` after every `yield`).
+- The Redis list is the source of truth for ordering. The HTTP response writer
+  pulls from the list; the agent process pushes to it.
+
+## Failure modes
+
+| Failure | Behavior |
+|---|---|
+| Agent hits `MAX_AGENT_ITERATIONS=12` without a valid candidate | Emit `error { message: "max_iterations_exceeded", recoverable: true, code: "MAX_ITER" }`. Client offers "Regenerate" CTA. |
+| LLM API unreachable | Emit `error { message: "llm_unavailable", recoverable: true, code: "LLM_DOWN" }`. Client offers "Retry in 30s" CTA. |
+| All candidates fail rigor gate | Emit `best_selected: null` followed by `error { message: "no_candidate_passed_rigor", recoverable: true, code: "RIGOR_FAIL" }`. Client redirects to `/strategy/:id` for the **best Rejected** candidate so user can see why. |
+| Brief is gibberish or out-of-scope | Brief-validation step fails; emit `error { message: "brief_invalid", recoverable: true, code: "BRIEF_INVALID", hint: "Try mentioning an asset class or risk appetite" }`. |
+| API process restarts mid-job | On restart, scan Redis for active job locks; resume jobs whose age < TTL. Lock-without-progress for > 5 min → mark errored with `code: "STALLED"`. |
+| Client disconnects + never returns | Server completes the job and writes events to Redis; on TTL expiry, GC removes them. Strategy still ends up in Library. |
+
+## Server-side architecture
+
+```
+POST /api/generate/jobs
+        │
+        ▼
+   generate_routes.create_job()
+        │
+        ├─→ create job_id (ULID)
+        ├─→ enqueue in BackgroundTasks: run_generation_job(job_id, brief)
+        └─→ return 201 with stream_url
+
+(background)
+   run_generation_job(job_id, brief)
+        │
+        ▼
+   PortfolioAgent.recommend(brief, regime, emit=push_event_to_redis)
+        │
+        ├─→ each iteration calls emit("agent_iteration", ...)
+        ├─→ each tool call emits ...
+        └─→ final result triggers emit("done", ...) + DB insert
+
+GET /api/generate/stream/{job_id}
+        │
+        ▼
+   StreamingResponse(event_generator(job_id, last_event_id))
+        │
+        └─→ tail Redis list; yield each new event; close on `done`/`error`
+```
+
+## Frontend integration sketch
+
+```jsx
+// ui/src/components/Generate.jsx (Phase 2)
+const [events, setEvents] = useState([])
+const [job, setJob] = useState(null)
+
+async function submitBrief(brief) {
+  const res = await fetch('/api/generate/jobs', { method: 'POST', body: JSON.stringify({ brief }) })
+  const { job_id, stream_url } = await res.json()
+  localStorage.setItem('currentJobId', job_id)
+  setJob({ id: job_id })
+
+  const es = new EventSource(stream_url)
+  es.addEventListener('agent_iteration', e => setEvents(prev => [...prev, JSON.parse(e.data)]))
+  es.addEventListener('best_selected', e => setEvents(prev => [...prev, JSON.parse(e.data)]))
+  es.addEventListener('done', e => {
+    const { redirect_url } = JSON.parse(e.data)
+    localStorage.removeItem('currentJobId')
+    navigate(redirect_url)
+    es.close()
+  })
+  es.addEventListener('error', e => { /* surface message, offer retry */ })
+}
+
+// On mount: if localStorage.currentJobId exists, re-subscribe.
+```
+
+## Acceptance
+
+A frontend dev (Marten / Daniel R.) can build the streaming UI from this doc
+alone — no further API design questions. A backend dev (Daniel R. / Chuan)
+can implement `generate_routes.py` and the Redis-backed event log without
+re-deriving the event schema.
+
+## Open questions
+
+1. **Event log TTL** — 15 minutes after terminal state. Long enough? Should we
+   keep all events forever for forensic value (link to `/reasoning` from a
+   strategy passport always works)?
+2. **`tool_result` payload size** — for `stress_test`, the raw result can be
+   ~10 KB. Do we include it inline (the `result_summary` field truncates) or
+   surface a `tool_result_full_url`?
+3. **Anonymous vs authenticated rate limiting** — anonymous users get N free
+   generates? Today: no rate limit. Probably fine for hackathon scope; flag
+   for v1.5.
