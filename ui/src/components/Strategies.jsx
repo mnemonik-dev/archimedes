@@ -1,7 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import EfficientFrontier from './EfficientFrontier'
-import CorrelationMatrix from './CorrelationMatrix'
-import RegimePanel from './RegimePanel'
+import CustomSelect from './CustomSelect'
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? ''
 
@@ -194,9 +192,11 @@ export function StrategyArchitect({ strategies }) {
         <div className="form-row" style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginTop: 12 }}>
           <div className="form-group">
             <label className="label">Risk profile</label>
-            <select className="chat-input" value={riskProfile} onChange={(e) => setRiskProfile(e.target.value)}>
-              {RISK_PROFILES.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
-            </select>
+            <CustomSelect
+              value={riskProfile}
+              onChange={setRiskProfile}
+              options={RISK_PROFILES.map(r => ({ value: r.id, label: r.label }))}
+            />
           </div>
           <div className="form-group">
             <label className="label">Capital (USDC)</label>
@@ -226,7 +226,8 @@ export function StrategyArchitect({ strategies }) {
         <div className="card" style={{ marginTop: 20 }}>
           {isFallback && (
             <div className="info-box warning" style={{ marginBottom: 16 }}>
-              ⚠️ Offline fallback (no <code>ANTHROPIC_API_KEY</code>) — equal-weighted,
+              <span className="i-lucide-alert-triangle" style={{width:14,height:14,marginRight:6,verticalAlign:'middle'}} />
+              Offline fallback (no <code>ANTHROPIC_API_KEY</code>) — equal-weighted,
               not model reasoning. The guardrail + trace are still real.
             </div>
           )}
@@ -288,7 +289,10 @@ export function StrategyArchitect({ strategies }) {
                 <WeightBar weight={s.weight} />
                 {s.rationale && <p className="hint" style={{ marginTop: 6 }}>{s.rationale}</p>}
                 {s.paper_citation && (
-                  <p className="caption" style={{ marginTop: 2 }}>📄 {s.paper_citation}</p>
+                  <p className="caption" style={{ marginTop: 2, display:'flex', alignItems:'center', gap:4 }}>
+                    <span className="i-lucide-file-text" style={{width:12,height:12,flexShrink:0}} />
+                    {s.paper_citation}
+                  </p>
                 )}
               </div>
             ))}

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import CustomSelect from './CustomSelect'
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? ''
 
@@ -276,10 +277,12 @@ function CatalogTab({ papers, total, page, loading, search, setSearch, categoryF
           onChange={e => { setSearch(e.target.value); setPage(1) }}
           className="catalog-search"
         />
-        <select value={categoryFilter} onChange={e => { setCategoryFilter(e.target.value); setPage(1) }} className="catalog-filter">
-          <option value="">All Categories</option>
-          {categories.map(c => <option key={c.name} value={c.name}>{c.name} ({c.count})</option>)}
-        </select>
+        <CustomSelect
+          value={categoryFilter}
+          onChange={v => { setCategoryFilter(v); setPage(1) }}
+          style={{ width: 180 }}
+          options={[{ value: '', label: 'All Categories' }, ...categories.map(c => ({ value: c.name, label: `${c.name} (${c.count})` }))]}
+        />
       </div>
 
       {loading ? <div className="corpus-loading">Loading...</div> : (

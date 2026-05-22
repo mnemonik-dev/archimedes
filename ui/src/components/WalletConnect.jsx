@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import { connectWallet, getAvailableProviders } from '../config'
 
 export default function WalletConnect({ address, onConnect, onDisconnect }) {
@@ -36,7 +37,7 @@ export default function WalletConnect({ address, onConnect, onDisconnect }) {
         Connect Wallet
       </button>
 
-      {showModal && (
+      {showModal && createPortal(
         <div className="modal-overlay" onClick={() => setShowModal(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
             <h3>Connect Wallet</h3>
@@ -51,7 +52,7 @@ export default function WalletConnect({ address, onConnect, onDisconnect }) {
               <div className="wallet-options">
                 {available.map(p => (
                   <button key={p.id} className="wallet-option" onClick={() => handleConnect(p.id)} disabled={busy}>
-                    <span className="wallet-icon">{p.icon}</span>
+                    <span className={`wallet-icon ${p.icon}`} style={{width:20,height:20}} />
                     <span>{p.name}</span>
                   </button>
                 ))}
@@ -62,7 +63,8 @@ export default function WalletConnect({ address, onConnect, onDisconnect }) {
 
             <button className="btn btn-outline" style={{ marginTop: 12, width: '100%' }} onClick={() => setShowModal(false)}>Cancel</button>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </>
   )

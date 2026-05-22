@@ -8,13 +8,13 @@ import { NEW_CONTRACTS } from '../config'
 // browse surface so users can actually inspect them.
 const NAV = [
   { group: '', items: [
-    { id: 'landing',   label: 'Home' },
-    { id: 'generate',  label: 'Generate' },
-    { id: 'library',   label: 'Library' },
-    { id: 'corpus',    label: 'Corpus' },
-    { id: 'portfolio', label: 'Portfolio' },
-    { id: 'reasoning', label: 'Reasoning' },
-    { id: 'learnings', label: 'Learnings' },
+    { id: 'landing',   label: 'Home',      icon: 'i-lucide-home' },
+    { id: 'generate',  label: 'Generate',  icon: 'i-lucide-sparkles' },
+    { id: 'library',   label: 'Library',   icon: 'i-lucide-line-chart' },
+    { id: 'corpus',    label: 'Corpus',    icon: 'i-lucide-library' },
+    { id: 'portfolio', label: 'Portfolio', icon: 'i-lucide-layout-dashboard' },
+    { id: 'reasoning', label: 'Reasoning', icon: 'i-lucide-brain' },
+    { id: 'learnings', label: 'Learnings', icon: 'i-lucide-graduation-cap' },
   ]},
 ]
 
@@ -33,6 +33,7 @@ export const PAGE_LABELS = {
 
 export default function Layout({ page, setPage, walletAddr, onConnect, onDisconnect, children }) {
   const [menuOpen, setMenuOpen] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const blockLabel = Object.keys(NEW_CONTRACTS).length ? 'Arc · Testnet live' : 'Arc · Connecting'
 
   const handleNav = (id) => {
@@ -45,7 +46,7 @@ export default function Layout({ page, setPage, walletAddr, onConnect, onDisconn
   const showWalletBanner = !walletAddr && page !== 'landing'
 
   return (
-    <div className="shell">
+    <div className={`shell${sidebarCollapsed ? ' shell-sidebar-collapsed' : ''}`}>
       {/* Mobile overlay — uses UnoCSS `fixed inset-0` + App.css `.sidebar-overlay` */}
       {menuOpen && (
         <div
@@ -84,25 +85,37 @@ export default function Layout({ page, setPage, walletAddr, onConnect, onDisconn
           </a>
         </div>
       )}
-      <aside className={`sidebar${menuOpen ? ' sidebar-open' : ''}`} style={showWalletBanner ? { paddingTop: 50 } : undefined}>
+      <aside className={`sidebar${menuOpen ? ' sidebar-open' : ''}${sidebarCollapsed ? ' sidebar-collapsed' : ''}`} style={showWalletBanner ? { paddingTop: 50 } : undefined}>
         <div className="sidebar-brand">
-          <div className="logo-mark">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-            <rect width="32" height="32" rx="4" fill="#0a0a0b"/>
-            <text x="16" y="23" text-anchor="middle" font-family="serif" font-size="22" fill="#e0a64f">Λ</text>
-          </svg>
+          <div className="sidebar-brand-main">
+            <div className="logo-mark">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+              <rect width="32" height="32" rx="4" fill="#0a0a0b"/>
+              <text x="16" y="23" text-anchor="middle" font-family="serif" font-size="22" fill="#e0a64f">Λ</text>
+            </svg>
+            </div>
+            <div className="logo-copy flex-1 min-w-0">
+              <div className="logo-text">Archimedes</div>
+              <div className="logo-sub">Portfolio Intelligence</div>
+            </div>
+            <button
+              type="button"
+              className="sidebar-collapse-btn"
+              onClick={() => setSidebarCollapsed(v => !v)}
+              aria-label={sidebarCollapsed ? 'Uncollapse sidebar' : 'Collapse sidebar'}
+              aria-expanded={!sidebarCollapsed}
+              title={sidebarCollapsed ? 'Uncollapse sidebar' : 'Collapse sidebar'}
+            >
+              <span className={sidebarCollapsed ? 'i-lucide-panel-left-open' : 'i-lucide-panel-left-close'} style={{width:18,height:18}} />
+            </button>
+            <button
+              className="sidebar-close-btn"
+              onClick={() => setMenuOpen(false)}
+              aria-label="Close menu"
+            >
+              <span className="i-lucide-x" style={{width:16,height:16}} />
+            </button>
           </div>
-          <div className="flex-1 min-w-0">
-            <div className="logo-text">Archimedes</div>
-            <div className="logo-sub">Portfolio Intelligence</div>
-          </div>
-          <button
-            className="sidebar-close-btn"
-            onClick={() => setMenuOpen(false)}
-            aria-label="Close menu"
-          >
-            ✕
-          </button>
         </div>
 
         <nav>
@@ -115,8 +128,11 @@ export default function Layout({ page, setPage, walletAddr, onConnect, onDisconn
                   type="button"
                   className={`nav-link${page === item.id || (item.id === 'portfolio' && page === 'vault-detail') ? ' active' : ''}`}
                   onClick={() => handleNav(item.id)}
+                  aria-label={item.label}
+                  title={sidebarCollapsed ? item.label : undefined}
                 >
-                  {item.label}
+                  <span className={`nav-icon ${item.icon}`} aria-hidden="true" />
+                  <span className="nav-label">{item.label}</span>
                 </button>
               ))}
             </div>
@@ -125,7 +141,7 @@ export default function Layout({ page, setPage, walletAddr, onConnect, onDisconn
 
         <div className="sidebar-footer">
           <span className="live-dot" />
-          {blockLabel}
+          <span className="sidebar-footer-label">{blockLabel}</span>
         </div>
       </aside>
 

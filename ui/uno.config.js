@@ -1,10 +1,20 @@
 import { defineConfig, presetUno, presetIcons } from 'unocss'
+import cryptoColorIcons from '@iconify-json/cryptocurrency-color/icons.json'
+import simpleIcons from '@iconify-json/simple-icons/icons.json'
+import logosIcons from '@iconify-json/logos/icons.json'
+import tokenBrandedIcons from '@iconify-json/token-branded/icons.json'
 
 export default defineConfig({
   // preflights: [],
   presets: [
     presetUno({ preflight: false }),
     presetIcons({
+      collections: {
+        'cryptocurrency-color': () => cryptoColorIcons,
+        'simple-icons': () => simpleIcons,
+        'logos': () => logosIcons,
+        'token-branded': () => tokenBrandedIcons,
+      },
       scale: 1,
       extraProperties: { display: 'inline-block', 'vertical-align': 'middle' },
     }),
@@ -47,7 +57,57 @@ export default defineConfig({
     'i-lucide-zap',
     'i-lucide-layers',
     'i-lucide-check',
+    'i-lucide-check-circle',
+    'i-lucide-circle',
+    'i-lucide-chevron-up',
+    'i-lucide-chevron-down',
+    'i-lucide-alert-triangle',
+    'i-lucide-arrow-up-down',
+    'i-lucide-droplet',
+    'i-lucide-layers',
+    'i-lucide-star',
     'i-lucide-trophy',
     'i-lucide-users',
+    'i-lucide-trending-up',
+    'i-lucide-coins',
+    'i-lucide-fuel',
+    'i-lucide-bar-chart-2',
+    'i-lucide-globe',
+    'i-lucide-flame',
+    'i-lucide-scale',
+    'i-lucide-palette',
+    'i-lucide-user',
+    'i-lucide-message-circle',
+    'i-lucide-send',
+    'i-lucide-loader',
+    'i-lucide-anchor',
+    'i-lucide-search',
+    'i-lucide-brain',
+    'i-lucide-x-circle',
+    'i-lucide-target',
+    'i-lucide-x',
+    'i-lucide-trending-down',
+    'i-lucide-vault',
+    'i-lucide-activity',
+    'i-lucide-refresh-cw',
+    'i-lucide-minus',
+    'i-lucide-home',
+    'i-lucide-compass',
+    'i-lucide-line-chart',
+    'i-lucide-layout-dashboard',
+    'i-lucide-plus-square',
+    'i-lucide-shield-alert',
+    'i-lucide-library',
+    'i-lucide-panel-left-close',
+    'i-lucide-panel-left-open',
+    // Crypto asset logos
+    'i-cryptocurrency-color-btc',
+    'i-cryptocurrency-color-usdc',
+    // Brand logos
+    'i-simple-icons-tesla',
+    'i-simple-icons-nvidia',
+    'i-simple-icons-coinbase',
+    'i-logos-metamask',
+    'i-token-branded-metamask',
   ],
 })
