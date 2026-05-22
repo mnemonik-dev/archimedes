@@ -1834,6 +1834,9 @@ async def list_traces(
         if off_chain_traces:
             traces = []
             for t in off_chain_traces:
+                # Skip empty_vault spam — only show meaningful agent decisions
+                if t.get("trigger") == "empty_vault":
+                    continue
                 traces.append(TraceResponse(
                     id=t.get("id", ""),
                     vault_address=t.get("vault_address", ""),
