@@ -17,11 +17,13 @@ const RISK_PROFILES = [
 ]
 
 function fmtPct(v) {
-  return v != null ? `${(v * 100).toFixed(1)}%` : '—'
+  // Guard against Infinity / NaN leaking from upstream stats (otherwise
+  // toFixed renders the literal strings "Infinity" / "NaN" on the page).
+  return (v != null && Number.isFinite(v)) ? `${(v * 100).toFixed(1)}%` : '—'
 }
 
 function fmt(v, d = 2) {
-  return v != null ? v.toFixed(d) : '—'
+  return (v != null && Number.isFinite(v)) ? v.toFixed(d) : '—'
 }
 
 function regimeColor(regime) {
@@ -88,7 +90,16 @@ export default function PortfolioAdvisor() {
     setError('')
     setData(null)
     apiGet(`/api/strategies/advisor?risk_profile=${selectedProfile}`)
-      .then(setData)
+      .then(d => {
+        // Backend may return 200 with an `error` body (e.g. when no
+        // strategies are available) — surface that as a user-facing error
+        // rather than rendering a half-empty card.
+        if (d && d.error) {
+          setError(d.error)
+        } else {
+          setData(d)
+        }
+      })
       .catch(e => setError(e.message || 'Failed to load advisor'))
       .finally(() => setLoading(false))
   }, [selectedProfile])
@@ -294,15 +305,28 @@ export default function PortfolioAdvisor() {
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
                 {data.stress_tests.map(s => {
                   const pnl = s.portfolio_pnl
-                  const color = pnl < -0.10 ? 'var(--negative)' : pnl < 0 ? '#f59e0b' : 'var(--positive)'
+                  const coverage = s.coverage_pct ?? 1.0
+                  const lowCoverage = coverage < 0.8
+                  const color = !Number.isFinite(pnl) ? 'var(--text-4)'
+                    : pnl < -0.10 ? 'var(--negative)'
+                    : pnl < 0 ? '#f59e0b'
+                    : 'var(--positive)'
                   return (
                     <div key={s.scenario} style={{ padding: 12, background: 'rgba(255,255,255,0.03)', borderRadius: 6, borderLeft: `3px solid ${color}` }}>
                       <div style={{ fontWeight: 600, fontSize: '0.78rem', marginBottom: 4 }}>{s.label}</div>
                       <div className="mono" style={{ fontWeight: 700, fontSize: '1.3rem', color }}>
-                        {(pnl * 100).toFixed(1)}%
+                        {Number.isFinite(pnl) ? `${(pnl * 100).toFixed(1)}%` : '—'}
                       </div>
+                      {lowCoverage && (
+                        <div style={{
+                          fontSize: '0.65rem', fontWeight: 600, color: '#f59e0b',
+                          marginTop: 2,
+                        }}>
+                          ⚠ only {(coverage * 100).toFixed(0)}% of book modeled
+                        </div>
+                      )}
                       <div className="caption" style={{ color: 'var(--text-4)', fontSize: '0.68rem', lineHeight: 1.3, marginTop: 4 }}>
-                        {s.description.slice(0, 80)}{s.description.length > 80 ? '…' : ''}
+                        {(s.description || '').slice(0, 80)}{(s.description || '').length > 80 ? '…' : ''}
                       </div>
                     </div>
                   )

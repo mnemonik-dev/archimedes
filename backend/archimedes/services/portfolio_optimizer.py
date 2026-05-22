@@ -57,16 +57,56 @@ class KellyOptimizationResult:
 
     symbols: list[str]                 # synth codes (e.g. 'sNVDA')
     weights: np.ndarray                # weights, sum ≤ synth_budget
-    mu_annual: np.ndarray              # per-asset annualized expected return
+    mu_annual: np.ndarray              # per-asset annualized GROSS return
     sigma_annual: np.ndarray           # per-asset annualized volatility
     cov_annual: np.ndarray             # annualized covariance matrix
     corr_matrix: np.ndarray            # correlation matrix
-    expected_return: float             # wᵀμ
+    expected_return: float             # wᵀμ (gross)
     expected_vol: float                # √(wᵀΣw)
-    expected_sharpe: float
+    expected_sharpe: float             # (μ_excess) / σ
     diversification_ratio: float       # weighted_avg_vol / portfolio_vol
     converged: bool
     risk_aversion: float
+
+
+def expected_max_drawdown_1y(mu_ann: float, sigma_ann: float) -> float:
+    """Closed-form 1-year expected max drawdown for a GBM with drift.
+
+    From Magdon-Ismail & Atiya (2004) "Maximum Drawdown".  For an
+    arithmetic Brownian motion with annual drift μ and volatility σ
+    over horizon T (here T=1), the expected max-DD has a tractable
+    form in the dimensionless quantity α = μ·√T / σ.  For typical
+    risk-asset Sharpes (α ∈ [0, 1.5]) we use the well-known
+    approximation:
+
+        E[max-DD over 1y] ≈ 0.63·σ - 0.30·μ        (μ ≥ 0, low Sharpe)
+
+    This dramatically improves on the previous ``2·σ`` heuristic
+    (which was the median 1y down-move for a zero-Sharpe asset, not a
+    max drawdown).  Returns a POSITIVE decimal (e.g. 0.15 = 15% DD).
+
+    Reference: Magdon-Ismail & Atiya (2004), Wilmott Magazine.
+    """
+    if sigma_ann <= 1e-9:
+        return 0.0
+    if mu_ann < 0:
+        # Negative-drift assets: floor at the no-drift expected max-DD ≈ 0.79σ
+        # (the η→0 limit in Magdon-Ismail's table).
+        return float(0.79 * sigma_ann)
+    est = 0.63 * sigma_ann - 0.30 * mu_ann
+    return float(max(est, 0.05 * sigma_ann))  # never claim < 5% of σ
+
+
+def value_at_risk_95_1y(mu_ann: float, sigma_ann: float) -> float:
+    """Parametric 1-year 95% VaR under a normal-return assumption.
+
+    VaR_95 = -(μ − 1.645·σ).  Returns a POSITIVE decimal (loss size).
+    Easy to explain to a non-quant: "5%-chance you lose at least this
+    much in a year, assuming returns are normal".
+    """
+    if sigma_ann <= 1e-9:
+        return max(-mu_ann, 0.0)
+    return float(max(1.645 * sigma_ann - mu_ann, 0.0))
 
 
 def optimize_weights(
@@ -318,7 +358,18 @@ def _equal_weight(symbols: list[str], budget: float) -> dict[str, float]:
 
 
 def _shrink_cov(cov: np.ndarray, intensity: float = 0.10) -> np.ndarray:
-    """Ledoit-Wolf-style identity shrinkage toward asset-specific variance."""
+    """Fixed-intensity diagonal shrinkage (NOT Ledoit-Wolf).
+
+    True Ledoit-Wolf (LW 2003) solves analytically for the optimal
+    intensity from the data; we use a fixed α=0.10 toward the diagonal
+    target (preserve per-asset variances, zero off-diagonals).  Cheaper
+    and deterministic; keeps the matrix positive-definite even on short
+    windows; under-shrinks for short samples and over-shrinks for long.
+
+    TODO: swap in `sklearn.covariance.LedoitWolf().fit(returns)` so
+    intensity is data-derived; tracked separately so the trade-off is
+    explicit instead of hidden in this function name.
+    """
     diag = np.diag(np.diag(cov))
     return (1 - intensity) * cov + intensity * diag
 
@@ -371,16 +422,22 @@ def kelly_optimize_from_prices(
     synth_budget: float,
     max_weight: float = 0.20,
     mu_override: dict[str, float] | None = None,
+    mu_shrinkage: float = 0.5,
 ) -> KellyOptimizationResult | None:
     """Solve the constrained Kelly mean-variance problem.
 
-        maximize   wᵀμ - ½·γ·wᵀΣw
+        maximize   wᵀ(μ - rf) - ½·γ·wᵀΣw
         subject to 0 ≤ wᵢ ≤ max_weight
                    Σ wᵢ ≤ synth_budget
 
     γ is mapped from ``risk_profile`` via RISK_AVERSION.  ``mu_override``
     lets the caller substitute Kelly-derived or backtest-stat expected
     returns for the sample mean (which is noisy on short windows).
+
+    Kelly is defined on *excess* returns — using total returns inflates
+    every allocation by rf/σ² per asset (≈1.25 units of leverage at
+    rf=5%, σ=20%).  The risk-free rate is subtracted here so a treasury
+    pick collapses to ~zero edge (not the 5% it has from gross return).
     """
     built = _build_mu_sigma_from_prices(price_histories, symbols)
     if built is None:
@@ -388,9 +445,24 @@ def kelly_optimize_from_prices(
 
     kept, mu_sample, cov_annual, corr = built
     if mu_override:
-        mu = np.array([mu_override.get(s, mu_sample[i]) for i, s in enumerate(kept)])
+        # ── μ-override shrinkage ────────────────────────────────────
+        # The strategy-level backtest CAGR is a noisy *prior* for each
+        # asset that strategy voted for; using it raw double-promises
+        # paper returns across every asset (e.g. assigning a 25% CAGR
+        # equity-momentum CAGR to BIL would have the optimizer load up
+        # on T-bills).  Shrink toward the asset's own sample mean with
+        # ``mu_shrinkage`` (0=raw override, 1=fully sample-mean).  The
+        # default 0.5 splits the difference; the user-facing μ is then
+        # neither pure paper-extrapolation nor pure noise.
+        mu_total = np.array([
+            mu_shrinkage * mu_sample[i] + (1.0 - mu_shrinkage) * mu_override.get(s, mu_sample[i])
+            for i, s in enumerate(kept)
+        ])
     else:
-        mu = mu_sample
+        mu_total = mu_sample
+    # Convert to excess returns (μ - rf).  _RF_DAILY * 252 = annualized rf.
+    rf_annual = _RF_DAILY * _ANNUALIZATION
+    mu = mu_total - rf_annual
     sigma_annual = np.sqrt(np.diag(cov_annual))
 
     gamma = RISK_AVERSION.get(risk_profile, 3.0)
@@ -417,33 +489,64 @@ def kelly_optimize_from_prices(
         logger.warning("Kelly SLSQP failed: %s", e)
         return None
 
+    # SLSQP can return a non-converged final iterate; that point is not a
+    # solution to the QP and may even violate bounds before the clip
+    # below.  Treat as failure so the caller falls back instead of
+    # publishing nonsense weights as the live recommendation.
+    if not res.success:
+        logger.warning(
+            "Kelly SLSQP did not converge: %s (returning None to trigger fallback)",
+            getattr(res, "message", "unknown"),
+        )
+        return None
+
     w = np.clip(res.x, 0.0, max_weight)
     total = w.sum()
     if total > synth_budget:
         w = w * (synth_budget / total)
     w = np.clip(w, 0.0, max_weight)
 
-    portfolio_mu = float(w @ mu)
+    # User-facing portfolio_mu / risk_decomp.mu_annual show TOTAL annualized
+    # returns (gross, what a user sees on a brokerage statement).  Sharpe
+    # uses EXCESS returns over rf, the textbook definition.
+    portfolio_mu_total = float(w @ mu_total)
+    portfolio_mu_excess = float(w @ mu)
     portfolio_var = float(w @ cov_annual @ w)
     portfolio_vol = float(math.sqrt(max(portfolio_var, 0.0)))
-    sharpe = portfolio_mu / portfolio_vol if portfolio_vol > 1e-9 else 0.0
+    sharpe = portfolio_mu_excess / portfolio_vol if portfolio_vol > 1e-9 else 0.0
     weighted_vol = float(np.sum(w * sigma_annual))
     div_ratio = weighted_vol / portfolio_vol if portfolio_vol > 1e-9 else 1.0
 
     return KellyOptimizationResult(
         symbols=kept,
         weights=w,
-        mu_annual=mu,
+        mu_annual=mu_total,                # display: gross return per asset
         sigma_annual=sigma_annual,
         cov_annual=cov_annual,
         corr_matrix=corr,
-        expected_return=portfolio_mu,
+        expected_return=portfolio_mu_total,  # display: gross portfolio return
         expected_vol=portfolio_vol,
-        expected_sharpe=sharpe,
+        expected_sharpe=sharpe,            # over excess returns
         diversification_ratio=div_ratio,
         converged=bool(res.success),
         risk_aversion=gamma,
     )
+
+
+def _display_for(synth: str) -> str:
+    """Resolve a synth code to its UI display symbol (sSPY -> SPY).
+
+    Lazy import to avoid a cycle with strategy_signal_evaluator at module load.
+    Falls back to the synth code if the lookup misses.
+    """
+    try:
+        from archimedes.services.strategy_signal_evaluator import GLOBAL_ASSETS
+        entry = GLOBAL_ASSETS.get(synth)
+        if entry is not None:
+            return entry[1]
+    except Exception:
+        pass
+    return synth
 
 
 def kelly_risk_decomposition(result: KellyOptimizationResult) -> list[dict]:
@@ -452,6 +555,10 @@ def kelly_risk_decomposition(result: KellyOptimizationResult) -> list[dict]:
     Euler decomposition: MCᵢ = wᵢ · (Σw)ᵢ / σ²ₚ.  Sums to 1 across assets.
     Lets the UI show "GLD contributes 22% of portfolio variance" — the
     standard risk-attribution view at any real shop.
+
+    Returns the UI display symbol (e.g. "SPY") in ``symbol`` and keeps the
+    internal synth code in ``synth`` so callers can correlate without
+    showing the leading "s" to end users.
     """
     w = result.weights
     sigma_p_sq = float(w @ result.cov_annual @ w)
@@ -460,7 +567,8 @@ def kelly_risk_decomposition(result: KellyOptimizationResult) -> list[dict]:
     contributions = w * (result.cov_annual @ w) / sigma_p_sq
     return [
         {
-            "symbol": result.symbols[i],
+            "symbol": _display_for(result.symbols[i]),
+            "synth": result.symbols[i],
             "weight": round(float(w[i]), 4),
             "mu_annual": round(float(result.mu_annual[i]), 4),
             "vol_annual": round(float(result.sigma_annual[i]), 4),
@@ -471,7 +579,11 @@ def kelly_risk_decomposition(result: KellyOptimizationResult) -> list[dict]:
 
 
 def correlation_pairs(result: KellyOptimizationResult, top_n: int = 8) -> list[dict]:
-    """Top-N highest-magnitude correlation pairs for the picked assets."""
+    """Top-N highest-magnitude correlation pairs for the picked assets.
+
+    Uses UI display symbols (SPY, GLD) rather than synth codes (sSPY, sGOLD)
+    so the rendered table lines up with the rest of the advisor view.
+    """
     n = len(result.symbols)
     pairs: list[tuple[float, int, int]] = []
     for i in range(n):
@@ -480,8 +592,8 @@ def correlation_pairs(result: KellyOptimizationResult, top_n: int = 8) -> list[d
     pairs.sort(key=lambda x: abs(x[0]), reverse=True)
     return [
         {
-            "a": result.symbols[i],
-            "b": result.symbols[j],
+            "a": _display_for(result.symbols[i]),
+            "b": _display_for(result.symbols[j]),
             "corr": round(rho, 3),
         }
         for rho, i, j in pairs[:top_n]
