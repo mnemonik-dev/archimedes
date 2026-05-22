@@ -224,33 +224,215 @@ export default function PortfolioAdvisor() {
             </div>
           )}
 
-          {/* Strategy detail table */}
+          {/* Agent thesis (LLM-generated) */}
+          {data.agent?.used && data.agent?.thesis && (
+            <div className="card-flat fade-up fade-up-5" style={{ padding: 20, marginBottom: 20, borderLeft: '3px solid var(--accent)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, flexWrap: 'wrap', gap: 6 }}>
+                <div className="label">Agent Thesis</div>
+                <div className="caption" style={{ color: 'var(--text-4)' }}>
+                  {data.agent.model_id}{data.agent.iterations > 1 ? ` · ${data.agent.iterations} tool-use turns` : ''} · {data.agent.num_picks} picks
+                </div>
+              </div>
+              <p className="body" style={{ margin: 0, lineHeight: 1.55 }}>{data.agent.thesis}</p>
+              {data.agent.tool_calls?.length > 0 && (
+                <details style={{ marginTop: 10 }}>
+                  <summary className="caption" style={{ cursor: 'pointer' }}>
+                    Agent investigation trace ({data.agent.tool_calls.length} tool calls)
+                  </summary>
+                  <div className="mono" style={{ fontSize: '0.72rem', marginTop: 6, color: 'var(--text-3)' }}>
+                    {data.agent.tool_calls.map((tc, i) => (
+                      <div key={i}>{i + 1}. {tc.output_summary}</div>
+                    ))}
+                  </div>
+                </details>
+              )}
+            </div>
+          )}
+
+          {/* Rigor summary — make the wedge visible */}
+          {data.rigor_summary && data.rigor_summary.total_picks > 0 && (
+            <div className="card-flat fade-up fade-up-5" style={{ padding: 20, marginBottom: 20 }}>
+              <div className="label mb-3">Selection-Bias Rigor (Tier-1 Gate)</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
+                <div>
+                  <div className="caption">Rigor Gate Passed</div>
+                  <div style={{ fontWeight: 700, fontSize: '1.2rem' }}>
+                    {data.rigor_summary.passes_rigor_gate}/{data.rigor_summary.total_picks}
+                  </div>
+                </div>
+                <div>
+                  <div className="caption">DSR p&lt;{data.rigor_summary.dsr_significant_threshold}</div>
+                  <div style={{ fontWeight: 700, fontSize: '1.2rem' }}>
+                    {data.rigor_summary.dsr_significant}/{data.rigor_summary.total_picks}
+                  </div>
+                </div>
+                <div>
+                  <div className="caption">PBO &lt; {data.rigor_summary.pbo_acceptable_threshold}</div>
+                  <div style={{ fontWeight: 700, fontSize: '1.2rem' }}>
+                    {data.rigor_summary.pbo_acceptable}/{data.rigor_summary.total_picks}
+                  </div>
+                </div>
+                <div>
+                  <div className="caption">Walk-fwd OOS &gt; 0</div>
+                  <div style={{ fontWeight: 700, fontSize: '1.2rem' }}>
+                    {data.rigor_summary.oos_positive}/{data.rigor_summary.total_picks}
+                  </div>
+                </div>
+              </div>
+              <p className="caption" style={{ marginTop: 12, color: 'var(--text-4)', lineHeight: 1.5 }}>
+                Deflated Sharpe (Bailey & López de Prado 2014) discounts multiple-testing inflation;
+                PBO (Bailey et al. 2014) estimates backtest-overfitting probability; walk-forward OOS
+                tests out-of-sample stability. Mean DSR p-value: {fmt(data.rigor_summary.avg_dsr_p_value, 3)},
+                mean PBO: {fmt(data.rigor_summary.avg_pbo_score, 3)}.
+              </p>
+            </div>
+          )}
+
+          {/* Stress test matrix */}
+          {data.stress_tests?.length > 0 && (
+            <div className="card-flat fade-up fade-up-5" style={{ padding: 20, marginBottom: 20 }}>
+              <div className="label mb-3">Stress Tests (instantaneous P&amp;L vs scenario)</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
+                {data.stress_tests.map(s => {
+                  const pnl = s.portfolio_pnl
+                  const color = pnl < -0.10 ? 'var(--negative)' : pnl < 0 ? '#f59e0b' : 'var(--positive)'
+                  return (
+                    <div key={s.scenario} style={{ padding: 12, background: 'rgba(255,255,255,0.03)', borderRadius: 6, borderLeft: `3px solid ${color}` }}>
+                      <div style={{ fontWeight: 600, fontSize: '0.78rem', marginBottom: 4 }}>{s.label}</div>
+                      <div className="mono" style={{ fontWeight: 700, fontSize: '1.3rem', color }}>
+                        {(pnl * 100).toFixed(1)}%
+                      </div>
+                      <div className="caption" style={{ color: 'var(--text-4)', fontSize: '0.68rem', lineHeight: 1.3, marginTop: 4 }}>
+                        {s.description.slice(0, 80)}{s.description.length > 80 ? '…' : ''}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Risk decomposition + correlation pairs */}
+          {(data.risk_decomposition?.length > 0 || data.correlation_pairs?.length > 0) && (
+            <div className="card-flat fade-up fade-up-5" style={{ padding: 20, marginBottom: 20, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
+              {data.risk_decomposition?.length > 0 && (
+                <div>
+                  <div className="label mb-3">Variance Decomposition</div>
+                  <table style={{ width: '100%', fontSize: '0.78rem' }}>
+                    <thead>
+                      <tr><th style={{ textAlign: 'left' }}>Asset</th><th className="text-right">Weight</th><th className="text-right">Var Contrib</th></tr>
+                    </thead>
+                    <tbody>
+                      {data.risk_decomposition
+                        .slice()
+                        .sort((a, b) => b.variance_contribution - a.variance_contribution)
+                        .slice(0, 8)
+                        .map(r => (
+                          <tr key={r.symbol}>
+                            <td className="mono" style={{ fontSize: '0.72rem' }}>{r.symbol}</td>
+                            <td className="text-right mono">{fmtPct(r.weight)}</td>
+                            <td className="text-right mono">{fmtPct(r.variance_contribution)}</td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {data.correlation_pairs?.length > 0 && (
+                <div>
+                  <div className="label mb-3">Top Correlations (1y)</div>
+                  <table style={{ width: '100%', fontSize: '0.78rem' }}>
+                    <thead>
+                      <tr><th style={{ textAlign: 'left' }}>Pair</th><th className="text-right">ρ</th></tr>
+                    </thead>
+                    <tbody>
+                      {data.correlation_pairs.map((p, i) => (
+                        <tr key={i}>
+                          <td className="mono" style={{ fontSize: '0.72rem' }}>{p.a} ⟷ {p.b}</td>
+                          <td className="text-right mono" style={{ color: Math.abs(p.corr) > 0.6 ? '#f59e0b' : 'inherit' }}>
+                            {p.corr > 0 ? '+' : ''}{p.corr.toFixed(2)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Reasoning trace anchor */}
+          {data.reasoning_trace?.trace_hash && (
+            <div className="card-flat fade-up fade-up-5" style={{ padding: 16, marginBottom: 20 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
+                <span className="label" style={{ margin: 0 }}>Reasoning Trace</span>
+                {data.reasoning_trace.anchored_on_chain ? (
+                  <span style={{
+                    fontSize: '0.68rem', fontWeight: 600, padding: '1px 6px', borderRadius: 3,
+                    background: 'rgba(16,185,129,0.12)', color: 'var(--positive)',
+                    border: '1px solid rgba(16,185,129,0.3)',
+                  }}>
+                    ✓ On-chain
+                  </span>
+                ) : (
+                  <span className="caption" style={{ color: 'var(--text-4)' }}>off-chain (anchored at vault deploy)</span>
+                )}
+              </div>
+              <div className="mono" style={{ fontSize: '0.72rem', color: 'var(--text-3)', wordBreak: 'break-all' }}>
+                hash: {data.reasoning_trace.trace_hash}
+              </div>
+              {data.reasoning_trace.anchor_tx_hash && (
+                <div className="mono" style={{ fontSize: '0.72rem', color: 'var(--text-3)', wordBreak: 'break-all', marginTop: 4 }}>
+                  tx: {data.reasoning_trace.anchor_tx_hash}
+                </div>
+              )}
+              <p className="caption" style={{ marginTop: 6, color: 'var(--text-4)', lineHeight: 1.4 }}>
+                Keccak256 of the canonical recommendation. Anyone can re-derive this hash from the
+                portfolio + market context shown above and verify it on Arc's <code>ReasoningTraceRegistry</code>.
+              </p>
+            </div>
+          )}
+
+          {/* Per-pick detail table */}
           {data.allocations?.length > 0 && (
             <div className="fade-up fade-up-5">
-              <div className="label mb-3">Strategy Breakdown</div>
+              <div className="label mb-3">Per-Pick Breakdown</div>
               <div className="table-container">
                 <table>
                   <thead>
                     <tr>
-                      <th>Strategy</th>
+                      <th>Pick</th>
                       <th className="text-right">Weight</th>
-                      <th className="text-right">Sharpe</th>
-                      <th className="text-right">CAGR</th>
-                      <th className="text-right">Kelly f*</th>
+                      <th className="text-right">DSR p</th>
+                      <th className="text-right">PBO</th>
+                      <th className="text-right">OOS Sharpe</th>
+                      <th className="text-right">Δ Sharpe vs paper</th>
                       <th>Rigor</th>
                     </tr>
                   </thead>
                   <tbody>
                     {data.allocations.map(a => (
                       <tr key={a.id}>
-                        <td style={{ maxWidth: 240 }}>
-                          <div style={{ fontWeight: 500, fontSize: '0.83rem' }}>{a.title?.slice(0, 50)}{a.title?.length > 50 ? '…' : ''}</div>
-                          <div className="caption" style={{ color: 'var(--text-4)' }}>{a.symbol}</div>
+                        <td style={{ maxWidth: 280 }}>
+                          <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>
+                            {a.symbol}
+                            {a.asset_class && (
+                              <span className="caption" style={{ marginLeft: 8, color: 'var(--text-4)' }}>
+                                [{a.asset_class}{a.exchange && a.exchange !== '?' ? ` · ${a.exchange}` : ''}]
+                              </span>
+                            )}
+                          </div>
+                          <div className="caption" style={{ color: 'var(--text-4)', fontSize: '0.7rem' }}>
+                            {a.signal_reason || a.title?.slice(0, 80) || a.paper_anchor}
+                          </div>
                         </td>
                         <td className="text-right mono">{fmtPct(a.weight)}</td>
-                        <td className="text-right mono">{fmt(a.sharpe)}</td>
-                        <td className="text-right positive mono">{fmtPct(a.cagr)}</td>
-                        <td className="text-right mono">{fmtPct(a.kelly_fraction)}</td>
+                        <td className="text-right mono">{fmt(a.dsr_p_value, 3)}</td>
+                        <td className="text-right mono">{fmt(a.pbo_score, 3)}</td>
+                        <td className="text-right mono">{fmt(a.out_of_sample_sharpe)}</td>
+                        <td className={`text-right mono ${a.paper_delta_sharpe > 0 ? 'positive' : a.paper_delta_sharpe < 0 ? 'negative' : ''}`}>
+                          {a.paper_delta_sharpe != null ? (a.paper_delta_sharpe > 0 ? '+' : '') + a.paper_delta_sharpe.toFixed(2) : '—'}
+                        </td>
                         <td>
                           {a.passes_rigor_gate ? (
                             <span style={{ color: 'var(--positive)', fontSize: '0.72rem', fontWeight: 600 }}>✓ Passed</span>
