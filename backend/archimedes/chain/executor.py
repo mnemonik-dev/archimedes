@@ -30,7 +30,11 @@ class ChainExecutor:
         self.loader = loader or get_contract_loader()
 
     async def read_portfolio(self, vault_address: str) -> Portfolio:
-        """Read a vault's current holdings from on-chain state."""
+        """Read a vault's current holdings from on-chain state.
+
+        Falls back to off-chain NAV computation if totalAssets() reverts
+        (e.g. stale oracle prices on testnet).
+        """
         vault = self.loader.vault(vault_address)
         settings = chain_client.settings
 
@@ -44,8 +48,8 @@ class ChainExecutor:
         target_tokens = target_data[0]
         target_weights = target_data[1]
 
-        # Read total assets
-        total_assets = await vault.functions.totalAssets().call()
+        # Read total assets — fall back to off-chain NAV if stale price
+        total_assets = await self._safe_total_assets(vault, token_addresses, amounts)
 
         # Build portfolio
         holdings: list[PortfolioHolding] = []
@@ -61,7 +65,7 @@ class ChainExecutor:
             decimals = await self._get_token_decimals(token_addr)
 
             # Calculate USDC value
-            value_usdc = await self._token_to_usdc(token_addr, amount, decimals)
+            value_usdc = await self._token_to_usdc(token_addr, amount, decimals, total_assets > 0)
             weight = value_usdc / total_assets if total_assets > 0 else 0.0
 
             holdings.append(
@@ -229,7 +233,14 @@ class ChainExecutor:
         try:
             total_assets = await vault.functions.totalAssets().call()
         except Exception:
-            total_assets = 0
+            # Stale price fallback — compute from holdings + raw oracle prices
+            try:
+                holdings_data = await vault.functions.getHoldings().call()
+                token_addresses = holdings_data[0]
+                amounts = holdings_data[1]
+                total_assets = await self._safe_total_assets(vault, token_addresses, amounts)
+            except Exception:
+                total_assets = 0
         try:
             total_supply = await vault.functions.totalSupply().call()
         except Exception:
@@ -468,8 +479,12 @@ class ChainExecutor:
         except Exception:
             return 18
 
-    async def _token_to_usdc(self, token_address: str, amount: int, decimals: int) -> int:
-        """Estimate USDC value of a token holding."""
+    async def _token_to_usdc(self, token_address: str, amount: int, decimals: int, use_raw_price: bool = False) -> int:
+        """Estimate USDC value of a token holding.
+        
+        If use_raw_price is True (stale oracle fallback), uses the raw price()
+        getter which doesn't check staleness.
+        """
         if token_address.lower() == chain_client.settings.usdc_address.lower():
             return amount
 
@@ -478,8 +493,11 @@ class ChainExecutor:
             if addr and addr.lower() == token_address.lower():
                 try:
                     oracle = self.loader.oracle_for(sym)
-                    # PriceOracle.getPrice() returns price in 6 decimals
-                    price = await oracle.functions.getPrice().call()
+                    if use_raw_price:
+                        # Use raw price getter (no staleness check) as fallback
+                        price = await oracle.functions.price().call()
+                    else:
+                        price = await oracle.functions.getPrice().call()
                     # USDC value = amount (18 dec) * price (6 dec) / 1e18
                     return (amount * price) // (10**decimals)
                 except Exception:
@@ -487,6 +505,38 @@ class ChainExecutor:
 
         # Fallback: return raw amount
         return amount
+
+    async def _safe_total_assets(
+        self, vault: AsyncContract, token_addresses: list, amounts: list,
+    ) -> int:
+        """Read totalAssets() with stale-price fallback.
+        
+        If totalAssets() reverts (e.g. StalePrice), compute NAV off-chain
+        using the raw price() getter that doesn't check staleness.
+        """
+        try:
+            return await vault.functions.totalAssets().call()
+        except Exception:
+            # Fallback: compute off-chain using raw prices
+            import logging
+            logging.getLogger(__name__).warning(
+                "totalAssets() reverted — computing NAV off-chain with raw prices"
+            )
+            usdc_address = chain_client.settings.usdc_address
+            nav = 0
+            for i in range(len(token_addresses)):
+                amount = amounts[i]
+                if amount == 0:
+                    continue
+                token_addr = token_addresses[i]
+                if token_addr.lower() == usdc_address.lower():
+                    nav += amount
+                else:
+                    # Use raw price() (no staleness check)
+                    decimals = await self._get_token_decimals(token_addr)
+                    value = await self._token_to_usdc(token_addr, amount, decimals, use_raw_price=True)
+                    nav += value
+            return nav
 
 
 # Singleton

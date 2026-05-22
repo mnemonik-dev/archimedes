@@ -17,8 +17,8 @@ contract PriceOracle is Ownable {
     /// @notice Timestamp of the last price update
     uint256 public lastUpdated;
 
-    /// @notice Maximum age before stale (1 hour)
-    uint256 public constant MAX_STALENESS = 1 hours;
+    /// @notice Maximum age before stale (24 hours — hackathon testnet, Circle daily limit)
+    uint256 public constant MAX_STALENESS = 24 hours;
 
     /// @notice Address allowed to push price updates (e.g. Circle wallet)
     address public updater;
