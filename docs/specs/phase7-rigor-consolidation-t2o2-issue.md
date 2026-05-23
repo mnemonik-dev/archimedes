@@ -1,6 +1,6 @@
 # Issue spec for t2o2 — Consolidate rigor implementation on `rigor_evaluator.py`
 
-> **Status:** filed as [#129](https://github.com/hackagora/archimedes-arcadia/issues/129) on 2026-05-23 · assigned to t2o2 · **open**. Implementation tracked on the GitHub issue. This file is the spec source-of-truth; PR + comments live on the issue.
+> **Status:** ✓ filed + closed as [#129](https://github.com/hackagora/archimedes-arcadia/issues/129) on 2026-05-23 — shipped on `main` (commit `e030ee4`). This file is the spec source-of-truth; PR archive lives on the issue.
 >
 > **Ready-to-file issue body.** Copy/paste into a new GitHub issue, run
 > `gh issue edit <n> --add-assignee t2o2`, and t2o2 will pick it up.

@@ -54,20 +54,20 @@ Durable implementation contracts. Spec-only items are tracked under their respec
 
 | Doc | Status | What it is |
 |---|---|---|
-| [`specs/spine-plus-v2-plan.md`](specs/spine-plus-v2-plan.md) | active — Phases 0–3 shipped; 4–7 in-flight | The master plan for the spine-plus-v2 effort (the broader follow-up to the original spine simplification). Phase 7 broken out as t2o2 issues below. |
+| [`specs/spine-plus-v2-plan.md`](specs/spine-plus-v2-plan.md) | active — Phases 0–3 shipped + Phase 6 (onboarding tour) merged; Phase 7 all shipped via t2o2; Phases 4 & 5 in-flight | The master plan for the spine-plus-v2 effort. |
 
-## Specs — t2o2 issue specs (filed as GitHub issues)
+## Specs — t2o2 issue specs (all six closed; spec files retained as the spec source-of-truth)
 
-These files are the spec source-of-truth; the agentic system (`t2o2`) executes against the live GitHub issue.
+All six issues below shipped on `main` between 2026-05-23 01:48 UTC and 2026-05-24. The spec files are kept as documentation of the intent + acceptance shape that the bot executed against.
 
 | Spec file | Status | Issue |
 |---|---|---|
-| [`specs/fusion-to-backtest-t2o2-issue.md`](specs/fusion-to-backtest-t2o2-issue.md) | ✓ closed — building blocks shipped; wiring at #133 | [#128](https://github.com/hackagora/archimedes-arcadia/issues/128) |
-| [`specs/phase7-rigor-consolidation-t2o2-issue.md`](specs/phase7-rigor-consolidation-t2o2-issue.md) | open · assigned t2o2 | [#129](https://github.com/hackagora/archimedes-arcadia/issues/129) |
-| [`specs/phase7-llm-backend-unification-t2o2-issue.md`](specs/phase7-llm-backend-unification-t2o2-issue.md) | open · assigned t2o2 | [#130](https://github.com/hackagora/archimedes-arcadia/issues/130) |
-| [`specs/phase7-portfolio-constructor-retirement-t2o2-issue.md`](specs/phase7-portfolio-constructor-retirement-t2o2-issue.md) | open · assigned t2o2 | [#131](https://github.com/hackagora/archimedes-arcadia/issues/131) |
-| [`specs/phase7-routes-py-split-t2o2-issue.md`](specs/phase7-routes-py-split-t2o2-issue.md) | open · assigned t2o2 | [#132](https://github.com/hackagora/archimedes-arcadia/issues/132) |
-| (no file — drafted inline) | open · assigned t2o2 — fusion_evaluator wiring follow-on to #128 | [#133](https://github.com/hackagora/archimedes-arcadia/issues/133) |
+| [`specs/fusion-to-backtest-t2o2-issue.md`](specs/fusion-to-backtest-t2o2-issue.md) | ✓ closed — foundation `bd6935b` + wiring `2f7f871` | [#128](https://github.com/hackagora/archimedes-arcadia/issues/128) |
+| [`specs/phase7-rigor-consolidation-t2o2-issue.md`](specs/phase7-rigor-consolidation-t2o2-issue.md) | ✓ closed — shipped `e030ee4` | [#129](https://github.com/hackagora/archimedes-arcadia/issues/129) |
+| [`specs/phase7-llm-backend-unification-t2o2-issue.md`](specs/phase7-llm-backend-unification-t2o2-issue.md) | ✓ closed — shipped `dc91b43` | [#130](https://github.com/hackagora/archimedes-arcadia/issues/130) |
+| [`specs/phase7-portfolio-constructor-retirement-t2o2-issue.md`](specs/phase7-portfolio-constructor-retirement-t2o2-issue.md) | ✓ closed — shipped `a4a09fb` | [#131](https://github.com/hackagora/archimedes-arcadia/issues/131) |
+| [`specs/phase7-routes-py-split-t2o2-issue.md`](specs/phase7-routes-py-split-t2o2-issue.md) | ✓ closed — shipped `be9260b` | [#132](https://github.com/hackagora/archimedes-arcadia/issues/132) |
+| (no file — drafted inline as fast-follow to #128) | ✓ closed — shipped `2f7f871` | [#133](https://github.com/hackagora/archimedes-arcadia/issues/133) |
 
 ## Strategy + launch + marketing
 
