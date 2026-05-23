@@ -2409,3 +2409,20 @@ button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
   .lg-grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
+
+/* --- Onboarding spotlight tour --- */
+/* Centered fallback backdrop (no anchor / element not measurable). */
+.tour-overlay {
+  background: rgba(0, 0, 0, 0.78);
+  backdrop-filter: blur(6px);
+}
+/* Glowing ring traced around the spotlighted nav element. Decorative only —
+   pointer-events:none is set inline so clicks fall through to the element. */
+.tour-ring {
+  border: 2px solid var(--accent);
+  border-radius: 8px;
+  box-shadow: 0 0 0 2px rgba(212, 168, 83, 0.25), 0 0 18px 3px rgba(212, 168, 83, 0.45);
+}
+.tour-tooltip {
+  border: 1px solid var(--glass-border);
+}
