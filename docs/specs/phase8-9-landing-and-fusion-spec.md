@@ -77,6 +77,35 @@ Landing.jsx is 343 lines today and was rewritten in Daniel R.'s UnoCSS PR (#124)
 
 If time-boxed, the bug fixes alone are sufficient to unblock the demo. The polish work is incremental.
 
+### Sub-issue — Corpus Catalog tab: cards → compact table
+
+The Catalog tab in CorpusExplorer.jsx today renders each paper as a chunky card with title + meta line + 200-char abstract preview + strategies count. With 10,000 papers that's unscannable — at 5 cards visible per screen on a laptop the user has to scroll ~2000 times to traverse the corpus.
+
+**Reference UX:** the Papers app pattern (the user's reference image): dense table with columns *Authors · Year · Title · Journal*, monospace-feeling rows, no abstract preview in the row body. Abstract + tags + identifiers live in a right-side detail panel that opens on selection.
+
+**Resolution — adopt the Strategies.jsx table pattern** (which already proves the dense-row + click-to-expand approach on this codebase):
+
+- Convert `CatalogTab` from a `paper-card` list to a `<table>` with columns:
+  - **arxiv ID** (mono, `e.g.` `2108.00275`)
+  - **Authors** (first 2 + " et al." if more)
+  - **Year** (right-aligned, mono)
+  - **Title** (truncated to ~80 chars with full title on hover)
+  - **Category** (plain-English `category_label`, raw arxiv code on hover — same affordance as today's `paper-cat` badge)
+  - **Cited by** (count of `citing_strategies`, e.g. "2 strategies" — link-styled, clickable to filter Library)
+- Click row → existing `PaperDetail` view (unchanged — keeps the full PDF + abstract + strategy provenance flow).
+- Keep the existing search + category-filter controls above the table.
+
+Precedent to copy: `ui/src/components/Strategies.jsx::StrategyTable` (lines ~528–552 after the rebase). Same table shape, same `lib-table` CSS class, same `rounded-lg border border-[var(--glass-border)]` framing. Drop-in.
+
+**Backend note:** the API at `GET /api/papers/` already returns the fields needed (`arxiv_id`, `title`, `category_label`, `primary_category`, `published`, `abstract`). No backend change required for the table redesign. The Authors field needs to be added to the response — today's list endpoint omits authors (see `papers_routes.py::list_papers`'s response shape, lines 43-53). Add `authors: json.loads(r.authors) if r.authors else []` to both the DB and file-fallback dict literals. ~2-line backend tweak.
+
+**Acceptance:**
+- [ ] Catalog tab renders rows, not cards. At 24px line-height ~40 rows visible per screen (8× density vs today).
+- [ ] Each row click opens the existing `PaperDetail` view.
+- [ ] Authors field comes back from `/api/papers/` (DB + file fallback paths both).
+- [ ] Existing search + category filter still work.
+- [ ] Page builds + no regression on Overview / Graph / Knowledge-Graph tabs.
+
 ### Sub-issue — RegimePanel duplication across pages
 
 The current market-regime indicator appears in **three** places across the spine after the #119 panel-integration merge:
@@ -184,6 +213,7 @@ And in the overlay style block:
 - [ ] **Onboarding cards are readable over animating content.** Overlay opacity ≥ 0.75, blur ≥ 6px; card body has a solid (non-transparent) background.
 - [ ] **Onboarding CTAs keep the tour open.** Clicking "Open Corpus" / "Open Generate" / etc. navigates the page AND advances the card index; the tour modal stays visible until Skip, Done, or Esc.
 - [ ] **Regime indicator appears exactly once on the spine.** Visible on Portfolio (rich `<RegimePanel />` block); absent from Generate; the bare stat-card in Portfolio's status strip is removed.
+- [ ] **Corpus Catalog tab is a dense table, not cards** — ~8× density gain (40 rows/screen vs 5 cards). Authors field populated by a small `papers_routes.py` tweak.
 - [ ] **No regressions on other spine pages** — Layout topbar wallet button still works, sidebar nav still works, onboarding tour still triggers on first visit.
 - [ ] **Frontend build passes** — `cd ui && npm run build` exits 0. (Or via docker: `docker compose up -d --build` and verify <http://localhost> serves cleanly.)
 
