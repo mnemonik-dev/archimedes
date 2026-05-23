@@ -21,7 +21,7 @@
 > - [`docs/corpus-architecture.md`](docs/corpus-architecture.md) — Day-9 reference
 >   for how the 10k q-fin corpus is built, stored, and fused into strategies
 >   (seed/intake/artifact + the fusion path)
-> - [`docs/agora_project_analysis.md`](docs/agora_project_analysis.md) — red-team synthesis
+> - [`docs/archive/agora_project_analysis.md`](docs/archive/agora_project_analysis.md) — red-team synthesis
 >   driving the Day-3 rigor-as-wedge framing
 
 ## Project
@@ -45,7 +45,7 @@ May 11–25, 2026.
   branch (retired 2026-05-18, unused). Short-lived per-owner branches
   (`dbrowneup/<name>`, `marten`, …) → PR → merge to `main`; `main` moves continuously
   (Chuan's agentic system lands + self-iterates on it), so rebase late and merge fast
-- Live testnet deploy: [`http://18.171.230.205/`](http://18.171.230.205/) (EC2,
+- Live testnet deploy: [`http://13.40.112.220/`](http://13.40.112.220/) (EC2,
   Chain ID `5042002` / `0x4cef52`, Arc testnet)
 - License: [Unlicense](https://unlicense.org) — full public-domain dedication
 
@@ -240,7 +240,7 @@ they actually shipped (Day 4):
 - **LLM:** Claude API for strategy extraction, reasoning trace generation, user-facing
   explanations
 - **Backtesting:** [backtrader](https://github.com/mementum/backtrader) for v1 per
-  [`docs/specs/backtrader-vs-vectorbt-decision-memo.md`](docs/specs/backtrader-vs-vectorbt-decision-memo.md).
+  [`docs/adr/backtrader-vs-vectorbt-decision-memo.md`](docs/adr/backtrader-vs-vectorbt-decision-memo.md).
   Supersedes `docs/design.md` § 6 ("vectorbt / custom numpy engine") on this one
   line; design.md remains the architecture spec for everything else. Migration to
   vectorbt is a v2 problem if parameter-sweep speed becomes a constraint.
@@ -254,11 +254,11 @@ they actually shipped (Day 4):
 - **Deployment:** Docker compose stack (5 services: postgres / redis / nginx / oracle /
   backend) running on an EC2 instance behind nginx. CI/CD wired via GitHub Actions per
   [`docs/infra-setup.md`](docs/infra-setup.md). Live at
-  [`http://18.171.230.205/`](http://18.171.230.205/)
+  [`http://13.40.112.220/`](http://13.40.112.220/)
 
 ## Scope — the headline commitments
 
-Refer to [`docs/mvp-scope-memo.md`](docs/mvp-scope-memo.md) for the full argument. Locked
+Refer to [`docs/archive/mvp-scope-memo.md`](docs/archive/mvp-scope-memo.md) for the full argument. Locked
 decisions (5 of them as of Day 3):
 
 1. **Primary RFB:** [RFB 04 — Adaptive Portfolio Manager](https://luma.com/7i50p2r9).
@@ -534,7 +534,7 @@ rubric score. Adding team / coordination risks:
   with three paper-grounded strategies seeded (Faber 2007 SMA200, Moreira-Muir 2017
   volatility-managed, Moskowitz-Ooi-Pedersen 2012 TSMOM) plus a buy-and-hold baseline,
   per [`analytics-engine/strategies/`](analytics-engine/strategies/). Corpus expansion
-  per [`docs/qfin-paper-corpus-seed.md`](docs/qfin-paper-corpus-seed.md) remains a
+  per [`docs/archive/qfin-paper-corpus-seed.md`](docs/archive/qfin-paper-corpus-seed.md) remains a
   weekend-blocked item.
 
 ## What this file deliberately does not cover

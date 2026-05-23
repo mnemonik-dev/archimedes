@@ -5,17 +5,28 @@
 > **Purpose:** Concrete, paste-ready prompts for slides, UI prototypes, logos, and
 > explanatory visualizations. Each prompt is self-contained so the design session has
 > the context it needs without you re-explaining the project.
-> **Status:** Day-9 revision (2026-05-20). Significant cleanup against Day-4 content
-> that had drifted out of sync with shipped reality. Current snapshot the prompts
-> reflect: live React/Vite UI at [`http://18.171.230.205/`](http://18.171.230.205/);
-> 10 Arc-testnet contracts; engine v2 (`POST /api/strategies/generate` with 3-input
-> fusion); the full rigor wedge live (DSR/PBO/Kelly/MVO, 2 Tier-1 strategies — Faber
-> 2007 + Moreira-Muir 2017 — with real 22-year SPY backtest numbers); a DB-backed
-> 10,000-paper q-fin corpus with the Corpus Explorer UI shipped; "Linus for
-> quantitative finance" as the locked product framing per
-> [`docs/user-stories.md`](user-stories.md); 265 backend tests + 16 analytics-engine
-> tests green; 5 days to submission. UI prompts work as **refinement** prompts
-> against the live UI, not greenfield.
+> **Status:** **Day-10 revision (2026-05-22).** Refreshes the Day-9 baseline against
+> the six commits that landed since (multi-asset NAV vault contract update,
+> LLM credentials wired into EC2 deploy, Citadel-grade agentic portfolio advisor,
+> stress engine, marketplace pruning, two CI/CD redeploys). Current snapshot the
+> prompts reflect: live React/Vite UI at
+> [`http://13.40.112.220/`](http://13.40.112.220/) on t3.medium EC2;
+> 10 Arc-testnet contracts (Vault.sol now multi-asset NAV — prices all holdings via
+> oracles in `totalAssets()`); engine v2 (`POST /api/strategies/generate` with
+> 3-input fusion); **agentic portfolio advisor** (`portfolio_agent.py` — LLM agent
+> loop with tool calls, picks individual stocks/bonds and anchors each to a
+> paper-grounded passport); **stress engine** (`stress_engine.py` — six canonical
+> historical/scenario shocks, backend-ready, UI-wiring open); the full rigor wedge
+> live (DSR/PBO/Kelly/MVO, 2 Tier-1 strategies — Faber 2007 + Moreira-Muir 2017 —
+> with real 22-year SPY backtest numbers); a DB-backed 10,000-paper q-fin corpus
+> with the Corpus Explorer UI shipped; "Linus for quantitative finance" as the
+> locked product framing per [`docs/user-stories.md`](user-stories.md); 302 backend
+> tests + 16 analytics-engine tests green; 3 days to submission. UI prompts work as
+> **refinement** prompts against the live UI, not greenfield.
+>
+> **Aligned with [`docs/chuan-architecture-survey.md`](chuan-architecture-survey.md)
+> (Day-10 PR #125):** the shipped-state language below reflects the same Day-10
+> commit set the survey enumerates. When the survey moves, this file moves with it.
 
 ## Quick notes on using Claude Design
 
@@ -105,7 +116,7 @@ Pro), modern sans body (Inter or Geist Sans), monospace for hashes and addresses
 
 In the linked repo: the live frontend is `ui/` (React 19 + Vite 8 + viem 2.48).
 Ignore `ui-mockups/` — that's a retired set of static-HTML prototypes from Day 1–2,
-kept only for archival reference. Live testnet deploy: http://18.171.230.205/.
+kept only for archival reference. Live testnet deploy: http://13.40.112.220/.
 Architecture diagram: `docs/architecture-diagram.html`. Curated per-asset design
 prompts: `docs/claude-design-prompts.md`. Pitch + demo context:
 `docs/demo-script-pitch-deck-outline.md`.
@@ -191,16 +202,17 @@ that looks like it could be a generic crypto logo.
 
 ---
 
-## Prompt 2 — Slide deck (full 10 slides, Day-9 framing)
+## Prompt 2 — Slide deck (full 10 slides, Day-10 inventory)
 
 **Setup notes:** Use Claude Design's **Slide deck** mode. Make sure the design system is
 set (or paste the palette/typography block inline). The deck structure mirrors
 [`demo-script-pitch-deck-outline.md`](demo-script-pitch-deck-outline.md). The
-substantive Day-9 shifts vs the Day-4 deck: the product is now framed as **"Linus for
+substantive shifts the deck must reflect: the product is framed as **"Linus for
 quantitative finance"** (a strategy-generation *instrument*, not a static menu); the
 3-input fusion engine (engine v2) is live; the rigor wedge is real with 22 years of
-SPY data; 2 Tier-1 strategies actually pass the gate. The deck should sound like the
-product, not aspire to it.
+SPY data; 2 Tier-1 strategies actually pass the gate; Day-10 additions of the
+agentic portfolio advisor + stress engine + multi-asset NAV vault land in SLIDE 4's
+inventory. The deck should sound like the product, not aspire to it.
 
 ```
 Project: Archimedes — pitch deck for the Agora Agents Hackathon (Canteen × Circle ×
@@ -250,8 +262,14 @@ LEFT — Generation + intelligence
 - 10,000 q-fin papers in a Postgres-canonical corpus with the Corpus Explorer UI
 - 5 reference strategies (Faber 2007 SMA200, Moreira-Muir 2017 vol-managed,
   Moskowitz-Ooi-Pedersen 2012 TSMOM, George-Hwang 2004 52-week high, buy-and-hold)
-  + a Fixed Income tier for capital-preservation
+  + a capital-preservation T-bill baseline
 - 22 years of real SPY backtest data — no placeholder numbers anywhere
+- Agentic portfolio advisor: an LLM agent loop (tool-calling, up to 12 iterations)
+  that picks individual stocks/bonds from a global market scan and anchors every
+  pick to a paper-grounded strategy passport
+- Stress engine: six canonical historical/scenario shocks (1987 crash, 2008 GFC,
+  2020 COVID, 2022 rate-shock, stagflation, deleveraging) — backend ready, UI
+  surface incoming
 
 RIGHT — Rigor + on-chain
 - Selection-bias gate live: Deflated Sharpe (Bailey & López de Prado 2014) +
@@ -260,13 +278,15 @@ RIGHT — Rigor + on-chain
   the failures are visible, not hidden
 - 10 Arc-testnet contracts deployed: Vault, VaultFactory, SyntheticVault,
   SyntheticFactory, SyntheticToken, AMMPool, AMMRouter, AssetRegistry,
-  PriceOracle, ReasoningTraceRegistry
-- Multi-wallet UX (MetaMask / Coinbase / generic). 265 backend tests + 16
+  PriceOracle, ReasoningTraceRegistry. **Vault.sol is now multi-asset NAV** —
+  `totalAssets()` prices every holding via the oracle, so the share price is
+  honest under mixed-asset allocations
+- Multi-wallet UX (MetaMask / Coinbase / generic). 302 backend tests + 16
   analytics-engine tests green.
 
 SLIDE 5 — DEMO
 Full-bleed slide: the word "DEMO" in large serif type, brand accent, with the live
-URL below in monospace: "http://18.171.230.205" (or the locked domain once announced).
+URL below in monospace: "http://13.40.112.220" (or the locked domain once announced).
 This slide is the demo timer — minimum 90 seconds of live click-through, ending on
 a strategy passport showing the DSR p-value + PBO + OOS Sharpe + the source-paper
 citations.
@@ -359,7 +379,7 @@ preserve the layout — those visual structures are load-bearing for the pitch.
 
 **Setup notes:** Use Claude Design's **Prototype** mode with **High fidelity** selected.
 This is a refinement prompt against the live UI at
-[`http://18.171.230.205/`](http://18.171.230.205/), targeting the proposed
+[`http://13.40.112.220/`](http://13.40.112.220/), targeting the proposed
 simplification in [`docs/ui-simplification-proposal.md`](ui-simplification-proposal.md).
 **The Day-4 risk-tier-cards onboarding flow is retired** — the product is now
 generator-first: users describe what they want, fusion produces a candidate strategy,
@@ -369,7 +389,7 @@ the rigor gate admits or rejects, and the user inspects + deposits. Risk toleran
 ```
 Project: Archimedes — frontend visual refinement toward a simplified page tree.
 
-Live reference URL (please fetch + study before generating): http://18.171.230.205/
+Live reference URL (please fetch + study before generating): http://13.40.112.220/
 This is the shipped UI — React 19 + Vite 8 + viem 2.48 + plain CSS (no Tailwind,
 no Next.js). Wallet connect (MetaMask / Coinbase / generic), Marketplace, Trade,
 Vaults, Intelligence (Corpus Explorer + Risk Analysis) all live.
@@ -431,12 +451,24 @@ Layout:
   risk profile (computed, not chosen)
 - Performance chart (large) — portfolio equity curve with SPY benchmark line
 - Two-column body:
-  LEFT: "Holdings" — table of vault tokens with weight, value, last rebalance
+  LEFT: "Holdings" — table of vault tokens with weight, value, last rebalance.
+  Each row is an actual asset priced live via the multi-asset NAV vault oracle —
+  no synthetic-only fiction.
   RIGHT: "Active strategies" — cards of the strategies in your portfolio with
-  one-line status and a link to each strategy's detail page (Prompt 4)
+  one-line status and a link to each strategy's detail page (Prompt 4). Cards
+  driven by the agentic advisor surface a small "agent picked" pill +
+  paper-citation chip so the LLM's pick is wrong-able on the record.
+- Stress-scenario strip (below the body): a horizontal row of six cards, one per
+  canonical shock (1987 / 2008 GFC / 2020 COVID / 2022 rate-shock / stagflation /
+  deleveraging). Each card shows the modeled portfolio drawdown in this scenario,
+  monospace, with a click-through to a per-scenario asset-class breakdown. Backed
+  by stress_engine.py (Σᵢ wᵢ · shock_class(i, scenario)). This panel is the
+  rigor-gated answer to "what happens if conditions break."
 - Bottom: "Agent activity feed" — chronological list of agent decisions
-  (rebalances, risk-off rotations, position adjustments), each with timestamp,
-  one-line summary, and "View reasoning trace" link (opens Prompt 5's modal)
+  (rebalances, risk-off rotations, position adjustments, advisor recommendations),
+  each with timestamp, one-line summary, and "View reasoning trace" link (opens
+  Prompt 5's modal). Advisor-loop entries show iteration count + tool-call count
+  to make the multi-turn deliberation visible.
 - Sidebar: deposit / withdraw / rebalance buttons + a small "Risk profile
   comparison" card (the band visualization currently on the standalone Risk
   page — consolidated here)
@@ -483,7 +515,7 @@ data; placeholder values are fine.
 
 ---
 
-## Prompt 4 — Strategy passport / detail page (Day-9 refresh, real numbers)
+## Prompt 4 — Strategy passport / detail page (Day-10 refresh, real numbers + multi-asset NAV vault execution)
 
 **Setup notes:** Single screen. Use **Prototype / High fidelity**. This is the most
 important content surface in the entire product — judges will land here when they
@@ -549,6 +581,9 @@ Provenance section (the on-chain layer):
 - "View on Arc Explorer" link (opens https://explorer.testnet.arc.network/tx/...)
 - "Verify trace" button — when clicked, animates a recomputation of the hash from
   the published off-chain trace and shows a green-checkmark "Verified" badge
+- Execution surface: "Deploys into a non-custodial multi-asset NAV vault on Arc
+  (Vault.sol prices each holding via the oracle in `totalAssets()` — share price
+  reflects the live mark of every asset, not just a synthetic stand-in)."
 
 Source-papers section:
 - 3-4 small cards, each with: arXiv ID (monospace), title (truncated), authors,
@@ -994,13 +1029,21 @@ showing "we know our own UX, here's how we'd polish it post-hackathon."
 ## Workflow recap
 
 1. **Set up a design system** in Claude Design with the palette/typography above.
-2. **Run Prompt 1** (logo) first — pick a logo, lock it before doing slides/UI. (Status
-   as of Day 4: not yet started. Smallest-scope test of Claude Design for the team.)
-3. **Run Prompt 2** (slide deck) — generate, iterate, export. Make sure the bullets
-   match what the team has actually shipped per the Day-4 revision above.
+2. **Run Prompt 1** (logo) first — pick a logo, lock it before doing slides/UI.
+   Smallest-scope test of whether the design system is steering correctly before
+   you commit deck/UI iteration to it.
+3. **Run Prompt 2** (slide deck) — generate, iterate, export. The Day-10 SLIDE 4
+   inventory (agentic advisor + stress engine + multi-asset NAV vault alongside
+   fusion + rigor + 10 contracts) is the substantive shift from the older Day-9
+   framing; verify every bullet matches what
+   [`docs/chuan-architecture-survey.md`](chuan-architecture-survey.md) describes
+   as shipped before exporting.
 4. **Run Prompts 3, 4, 5** (UI screens) — give Claude Design the live URL
-   (`http://18.171.230.205/`) as starting reference. These prompts are now **refinement**
-   prompts against the shipped React UI, not greenfield.
+   (`http://13.40.112.220/`) as starting reference. These prompts are
+   **refinement** prompts against the shipped React UI, not greenfield. Screen 3
+   (My Portfolio) now includes a stress-scenario strip and agentic-advisor signals
+   — both Day-10 additions where the backend exists but the UI surface is still
+   open.
 5. **Run Prompts 6–12** (explainer set) when you want explanatory visualizations for
    the deck, README, Discord pin, or social-share assets. They're independent of each
    other — pick the one(s) the moment calls for.

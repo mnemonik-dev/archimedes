@@ -6,6 +6,15 @@
 > document, retained for architecture lineage. The **canonical product spine** — and
 > the retirement of the "connect wallet → pick a risk profile" flow — is
 > [`user-stories.md`](user-stories.md). Read that first for what the product *is*.
+>
+> 📌 **Day-10 update (2026-05-22).** Component-level shipped state for everything
+> described below is in [`chuan-architecture-survey.md`](chuan-architecture-survey.md);
+> the corpus deep-dive supersedes § 4 on the strategy engine for what's actually
+> live ([`corpus-architecture.md`](corpus-architecture.md)). The four selection-bias
+> primitives in § 4.2 are live and have 2 Tier-1 strategies passing today. Sections
+> 4.3 (Portfolio Agent) and 4.4 (Reasoning Trace) describe the *direction*; the
+> shipped state has gone past — see the agentic advisor (`portfolio_agent.py`,
+> 850 lines) and the live trace publisher / Registry contract for what's running.
 
 Agora Agents Hackathon | Canteen x Circle x Arc | May 11–25, 2026
 

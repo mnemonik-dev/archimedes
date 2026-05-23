@@ -259,7 +259,7 @@ small enough to commit, fast enough to seed, and rich enough to retrieve.
 - [`backend/archimedes/services/corpus_service.py`](../backend/archimedes/services/corpus_service.py) — the seed + intake implementation
 - [`backend/archimedes/services/strategy_fusion.py`](../backend/archimedes/services/strategy_fusion.py) — `load_corpus()` + fusion prompt build
 - [`backend/archimedes/models/corpus_store.py`](../backend/archimedes/models/corpus_store.py) — `PaperRecord` + `CorpusMetaRecord` schemas
-- [`docs/qfin-paper-corpus-seed.md`](qfin-paper-corpus-seed.md) — the original
+- [`docs/qfin-paper-corpus-seed.md`](archive/qfin-paper-corpus-seed.md) — the original
   seed-curation spec (largely historical now that #97 expanded to 10k via bulk ingest)
 - [`docs/specs/selection-bias-corrections-spec.md`](specs/selection-bias-corrections-spec.md) — what the rigor gate enforces
 - [`docs/architectural-principles.md`](architectural-principles.md) — the four
