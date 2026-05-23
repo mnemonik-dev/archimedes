@@ -27,9 +27,6 @@ from archimedes.services.strategy_signal_evaluator import (
     synth_display,
 )
 from archimedes.services.stress_engine import SCENARIOS, stress_one
-from archimedes.services.portfolio_optimizer import (
-    _build_mu_sigma_from_prices,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -539,9 +536,13 @@ MAX_AGENT_ITERATIONS = 12
 
 def _agent_tools() -> list[dict]:
     """JSON-schema tool definitions surfaced to Claude."""
+    # Anchor IDs MUST be substrings of the actual strategy file paths,
+    # otherwise routes._find_strategy_for_anchor falls through to
+    # strategies[0] and the paper attribution becomes meaningless.
     valid_anchors = (
-        "faber_2007_sma200, moreira_muir_2017, moskowitz_2012_tsmom, "
-        "george_hwang_2004, capital_preservation, buy_hold"
+        "faber_2007_sma200, moreira_muir_2017_volatility, "
+        "moskowitz_ooi_pedersen_2012_tsmom, george_hwang_2004_52w, "
+        "capital_preservation_tbill, pipeline_buy_hold"
     )
     return [
         {

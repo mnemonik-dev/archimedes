@@ -300,15 +300,38 @@ class StressResult:
     label: str
     description: str
     portfolio_pnl: float                  # decimal (e.g. -0.235 = -23.5%)
-    per_asset_pnl: list[dict]             # [{symbol, weight, asset_class, shock_pct, contribution}]
+    per_asset_pnl: list[dict]             # [{symbol, weight, asset_class, shock_pct, contribution, covered}]
     portfolio_value_after: float          # 1.0 → 1+pnl (synth side; USDC unchanged)
+    coverage_pct: float = 1.0             # fraction of synth weight actually covered by the scenario
+    uncovered_symbols: list[str] = None   # symbols whose asset_class wasn't in the scenario dict
 
 
-def _shock_for(asset_class: str, symbol: str, scenario_def: dict) -> float:
-    """Look up the per-class shock; FX uses a per-pair override."""
+import logging
+_logger = logging.getLogger(__name__)
+
+
+def _shock_for(asset_class: str, symbol: str, scenario_def: dict) -> tuple[float, bool]:
+    """Look up the per-class shock; FX uses a per-pair override.
+
+    Returns (shock, was_covered).  Missing asset_class → (0.0, False).
+    A silent 0% loss on an uncovered class is exactly the demo-day
+    failure mode this engine is supposed to prevent, so callers should
+    track coverage.
+    """
     if asset_class == "fx":
-        return float(scenario_def.get("fx_per_pair", {}).get(symbol, 0.0))
-    return float(scenario_def.get("shocks", {}).get(asset_class, 0.0))
+        fx_shocks = scenario_def.get("fx_per_pair", {})
+        if symbol in fx_shocks:
+            return float(fx_shocks[symbol]), True
+        _logger.warning("stress: FX pair %r not in %r scenario", symbol, scenario_def.get("label"))
+        return 0.0, False
+    shocks = scenario_def.get("shocks", {})
+    if asset_class in shocks:
+        return float(shocks[asset_class]), True
+    _logger.warning(
+        "stress: asset_class %r (%s) not in %r scenario — defaulting to 0%% shock",
+        asset_class, symbol, scenario_def.get("label"),
+    )
+    return 0.0, False
 
 
 def _resolve_asset_class(symbol: str) -> str | None:
@@ -322,13 +345,16 @@ def _resolve_asset_class(symbol: str) -> str | None:
 def stress_one(
     allocations: list[dict],
     scenario_id: str,
-    usdc_weight: float = 0.0,
+    usdc_weight: float = 0.0,  # noqa: ARG001 — accepted for API symmetry; USDC is unshocked
 ) -> StressResult:
     """Apply a single scenario to a portfolio.
 
     ``allocations`` is the advisor-output list of {symbol, weight, asset_class}
-    dicts.  ``usdc_weight`` is the cash floor (unshocked).  Returns the
-    portfolio P&L plus per-asset contributions.
+    dicts.  ``usdc_weight`` is accepted for API symmetry but unused — USDC is
+    a settlement asset and never shocked.  Returns the portfolio P&L plus
+    per-asset contributions and a coverage_pct field so the caller can warn
+    the user when a non-trivial fraction of their book wasn't covered by
+    the scenario (e.g. yfinance-failed path with asset_class='unknown').
     """
     scenario_def = SCENARIOS.get(scenario_id)
     if scenario_def is None:
@@ -336,25 +362,37 @@ def stress_one(
 
     per_asset: list[dict] = []
     portfolio_pnl = 0.0
+    covered_weight = 0.0
+    total_weight = 0.0
+    uncovered_symbols: list[str] = []
     for a in allocations:
         sym = a["symbol"]
         ac = a.get("asset_class") or _resolve_asset_class(sym) or "unknown"
+        # If the upstream tagged the row 'unknown', try one more resolution
+        # before falling through to a zero-shock silent result.
+        if ac == "unknown":
+            resolved = _resolve_asset_class(sym)
+            if resolved:
+                ac = resolved
         w = float(a.get("weight") or 0.0)
-        shock = _shock_for(ac, sym, scenario_def)
+        shock, covered = _shock_for(ac, sym, scenario_def)
         contribution = w * shock
         portfolio_pnl += contribution
+        total_weight += w
+        if covered:
+            covered_weight += w
+        else:
+            uncovered_symbols.append(sym)
         per_asset.append({
             "symbol": sym,
             "asset_class": ac,
             "weight": round(w, 4),
             "shock_pct": round(shock, 4),
             "contribution_pct": round(contribution, 4),
+            "covered": covered,
         })
 
-    # USDC is unshocked (settles 1:1)
-    # portfolio_pnl is over the full allocation; we already weighted by w.
-    # If weights don't sum to (1 - usdc), the math still works — usdc just
-    # sits inert at 0.
+    coverage_pct = (covered_weight / total_weight) if total_weight > 1e-9 else 1.0
     return StressResult(
         scenario=scenario_id,
         label=scenario_def["label"],
@@ -362,10 +400,15 @@ def stress_one(
         portfolio_pnl=round(portfolio_pnl, 4),
         per_asset_pnl=per_asset,
         portfolio_value_after=round(1.0 + portfolio_pnl, 4),
+        coverage_pct=round(coverage_pct, 4),
+        uncovered_symbols=uncovered_symbols,
     )
 
 
-def stress_all(allocations: list[dict], usdc_weight: float = 0.0) -> list[StressResult]:
+def stress_all(
+    allocations: list[dict],
+    usdc_weight: float = 0.0,  # noqa: ARG001 — propagated to stress_one
+) -> list[StressResult]:
     """Run every scenario; return sorted by P&L (worst first)."""
     results = [stress_one(allocations, sid, usdc_weight) for sid in SCENARIOS]
     results.sort(key=lambda r: r.portfolio_pnl)

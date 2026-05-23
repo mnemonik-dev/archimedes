@@ -761,7 +761,6 @@ async def get_portfolio_advisor(
     async def _build_and_anchor_trace(
         allocations_for_trace: list[dict],
         thesis_for_trace: str,
-        agent_obj,
     ) -> dict:
         """Build a ReasoningTrace from the recommendation, compute the
         keccak256 hash, and best-effort anchor it on-chain via
@@ -817,7 +816,11 @@ async def get_portfolio_advisor(
                 confidence=float(regime_confidence or 0.0),
                 expected_outcome="Portfolio constructed; pending user vault deployment",
                 trades_executed=[],
-                strategies_referenced=list({
+                # sorted() — set iteration order is non-deterministic across
+                # Python processes, which would produce a different trace_hash
+                # for identical inputs and silently break the on-chain
+                # verifiability promise.
+                strategies_referenced=sorted({
                     a.get("paper_anchor") for a in allocations_for_trace if a.get("paper_anchor")
                 }),
             )
@@ -893,8 +896,11 @@ async def get_portfolio_advisor(
         n = len(active_rows)
         if n == 0:
             return {
-                "total_picks": 0, "passes_rigor_gate": 0, "dsr_significant": 0,
-                "pbo_acceptable": 0, "oos_positive": 0,
+                "total_picks": 0, "passes_rigor_gate": 0,
+                "dsr_significant": 0, "dsr_significant_threshold": 0.05,
+                "pbo_acceptable": 0, "pbo_acceptable_threshold": 0.50,
+                "oos_positive": 0,
+                "avg_dsr_p_value": None, "avg_pbo_score": None,
             }
         passes = sum(1 for r in active_rows if r.get("passes_rigor_gate"))
         dsr_sig = sum(
@@ -927,15 +933,52 @@ async def get_portfolio_advisor(
 
     # ── Agent path: convert AgentPicks into `scored` rows ──────────
     if agent_portfolio and agent_portfolio.picks:
+        # Loose-match map: common abbreviations the LLM may emit → canonical
+        # substrings of strategy_code_path.  Without this, "tsmom" alone
+        # won't match "moskowitz_ooi_pedersen_2012_tsmom.py" via in-check
+        # because the LLM tends to drop author names.
+        _ANCHOR_ALIASES = {
+            "tsmom":        "tsmom",
+            "moskowitz":    "moskowitz",
+            "moreira":      "moreira_muir",
+            "vol_managed":  "moreira_muir",
+            "vol-managed":  "moreira_muir",
+            "faber":        "faber_2007_sma200",
+            "sma200":       "sma200",
+            "george":       "george_hwang",
+            "hwang":        "george_hwang",
+            "52w":          "52w",
+            "52_week":      "52w",
+            "52-week":      "52w",
+            "capital_preservation": "capital_preservation",
+            "tbill":        "capital_preservation",
+            "t_bill":       "capital_preservation",
+            "buy_hold":     "buy_hold",
+            "buy-hold":     "buy_hold",
+            "buy_and_hold": "buy_hold",
+        }
+
         def _find_strategy_for_anchor(anchor: str):
-            anchor_l = (anchor or "").lower()
+            anchor_l = (anchor or "").lower().strip()
             if not anchor_l:
                 return strategies[0] if strategies else None
+            # Try direct substring against path / title / id first.
             for st in strategies:
-                if (anchor_l in (st.strategy_code_path or "").lower()
-                        or anchor_l in (st.paper_title or "").lower()
-                        or anchor_l in st.id.lower()):
+                hay = (
+                    (st.strategy_code_path or "").lower()
+                    + " " + (st.paper_title or "").lower()
+                    + " " + st.id.lower()
+                )
+                if anchor_l in hay:
                     return st
+            # Fall back to alias resolution — let "tsmom"/"moskowitz_2012_tsmom"
+            # still resolve to moskowitz_ooi_pedersen even though it's not
+            # a substring of the filename.
+            for alias, canonical in _ANCHOR_ALIASES.items():
+                if alias in anchor_l:
+                    for st in strategies:
+                        if canonical in (st.strategy_code_path or "").lower():
+                            return st
             return strategies[0] if strategies else None
 
         for pick in agent_portfolio.picks:
@@ -1104,14 +1147,21 @@ async def get_portfolio_advisor(
         allocations.sort(key=lambda x: -x["weight"])
         total_w = sum(a["weight"] for a in allocations)
         if opt is not None:
+            from archimedes.services.portfolio_optimizer import (
+                expected_max_drawdown_1y, value_at_risk_95_1y,
+            )
             exp_sharpe = opt.expected_sharpe
             exp_cagr = opt.expected_return
-            # Approx max-dd from portfolio vol (rough proxy: 2σ event)
-            exp_max_dd = 2.0 * opt.expected_vol
+            # Closed-form 1y expected max-DD (Magdon-Ismail & Atiya 2004);
+            # supersedes the previous "2σ" heuristic which materially
+            # under-stated drawdown risk for low-Sharpe portfolios.
+            exp_max_dd = expected_max_drawdown_1y(opt.expected_return, opt.expected_vol)
+            exp_var_95 = value_at_risk_95_1y(opt.expected_return, opt.expected_vol)
         else:
             exp_sharpe = sum(a["sharpe"] * a["weight"] for a in allocations) / max(total_w, 1e-9)
             exp_cagr = sum(a["cagr"] * a["weight"] for a in allocations) / max(total_w, 1e-9)
             exp_max_dd = sum(a["max_drawdown"] * a["weight"] for a in allocations) / max(total_w, 1e-9)
+            exp_var_95 = None
 
         regime_narratives_agent = {
             "risk_on": "Markets are calm (low VIX, price above MA). Full synth exposure recommended.",
@@ -1132,6 +1182,8 @@ async def get_portfolio_advisor(
                 "sharpe": round(exp_sharpe, 4),
                 "cagr": round(exp_cagr, 4),
                 "max_drawdown": round(exp_max_dd, 4),
+                "max_drawdown_method": "magdon_ismail_2004" if opt else "weighted_strategy_avg",
+                "var_95_1y": round(exp_var_95, 4) if (opt and exp_var_95 is not None) else None,
                 "vol_ann": round(opt.expected_vol, 4) if opt else None,
                 "diversification_ratio": round(opt.diversification_ratio, 4) if opt else None,
                 "risk_aversion_gamma": round(opt.risk_aversion, 2) if opt else None,
@@ -1145,6 +1197,8 @@ async def get_portfolio_advisor(
                     "scenario": r.scenario, "label": r.label,
                     "description": r.description, "portfolio_pnl": r.portfolio_pnl,
                     "portfolio_value_after": r.portfolio_value_after,
+                    "coverage_pct": r.coverage_pct,
+                    "uncovered_symbols": r.uncovered_symbols or [],
                     "per_asset_pnl": r.per_asset_pnl,
                 }
                 for r in _run_stress(allocations, usdc_floor)
@@ -1171,7 +1225,7 @@ async def get_portfolio_advisor(
                 ],
             },
             "reasoning_trace": await _build_and_anchor_trace(
-                allocations, agent_portfolio.thesis, agent_portfolio,
+                allocations, agent_portfolio.thesis,
             ),
         }
 
@@ -1224,10 +1278,14 @@ async def get_portfolio_advisor(
             elif k in ("deflated_sharpe_ratio", "out_of_sample_sharpe",
                        "sharpe_ci_lower", "sharpe_ci_upper", "n_obs_daily",
                        "num_trials_in_selection",
-                       "paper_delta_sharpe", "paper_delta_cagr"):
-                row[k] = max(existing, new)        # higher is better
-            elif k == "paper_delta_max_dd":
-                row[k] = min(existing, new)        # smaller (less negative) is better
+                       "paper_delta_sharpe", "paper_delta_cagr",
+                       "paper_delta_max_dd"):
+                # paper_delta_max_dd = real_max_dd - claimed_max_dd.
+                # Both are negative numbers (drawdowns); a HIGHER (less negative)
+                # delta means the strategy under-delivered LESS than the paper
+                # claimed — i.e. closer to (or better than) the paper. So max()
+                # is correct for all of these.
+                row[k] = max(existing, new)
         # Take the highest-conviction Kelly (most confident strategy wins),
         # with a small bonus for multi-strategy agreement.
         row["kelly_fraction"] = max(row["kelly_fraction"], sc["kelly_fraction"])
@@ -1317,13 +1375,18 @@ async def get_portfolio_advisor(
     allocations.sort(key=lambda x: -x["weight"])
     total_w = sum(a["weight"] for a in allocations)
     if opt_rb is not None:
+        from archimedes.services.portfolio_optimizer import (
+            expected_max_drawdown_1y as _emdd, value_at_risk_95_1y as _var95,
+        )
         exp_sharpe = opt_rb.expected_sharpe
         exp_cagr = opt_rb.expected_return
-        exp_max_dd = 2.0 * opt_rb.expected_vol
+        exp_max_dd = _emdd(opt_rb.expected_return, opt_rb.expected_vol)
+        exp_var_95_rb = _var95(opt_rb.expected_return, opt_rb.expected_vol)
     else:
         exp_sharpe = sum(a["sharpe"] * a["weight"] for a in allocations) / max(total_w, 1e-9)
         exp_cagr = sum(a["cagr"] * a["weight"] for a in allocations) / max(total_w, 1e-9)
         exp_max_dd = sum(a["max_drawdown"] * a["weight"] for a in allocations) / max(total_w, 1e-9)
+        exp_var_95_rb = None
 
     # Regime narrative
     regime_narratives = {
@@ -1345,6 +1408,8 @@ async def get_portfolio_advisor(
             "sharpe": round(exp_sharpe, 4),
             "cagr": round(exp_cagr, 4),
             "max_drawdown": round(exp_max_dd, 4),
+            "max_drawdown_method": "magdon_ismail_2004" if opt_rb else "weighted_strategy_avg",
+            "var_95_1y": round(exp_var_95_rb, 4) if (opt_rb and exp_var_95_rb is not None) else None,
             "vol_ann": round(opt_rb.expected_vol, 4) if opt_rb else None,
             "diversification_ratio": round(opt_rb.diversification_ratio, 4) if opt_rb else None,
             "risk_aversion_gamma": round(opt_rb.risk_aversion, 2) if opt_rb else None,
@@ -1358,6 +1423,8 @@ async def get_portfolio_advisor(
                 "scenario": r.scenario, "label": r.label,
                 "description": r.description, "portfolio_pnl": r.portfolio_pnl,
                 "portfolio_value_after": r.portfolio_value_after,
+                "coverage_pct": r.coverage_pct,
+                "uncovered_symbols": r.uncovered_symbols or [],
                 "per_asset_pnl": r.per_asset_pnl,
             }
             for r in _run_stress(allocations, usdc_floor)
@@ -1373,11 +1440,12 @@ async def get_portfolio_advisor(
             "model_id": None,
             "served_model": None,
             "num_picks": 0,
+            "iterations": 0,
+            "tool_calls": [],
         },
         "reasoning_trace": await _build_and_anchor_trace(
             allocations,
             f"Rule-based covariance-aware Kelly MVO for {regime_value} regime, {risk_profile} profile",
-            None,
         ),
     }
 
@@ -1426,6 +1494,8 @@ async def run_stress_test(payload: dict):
                 "scenario": r.scenario, "label": r.label,
                 "description": r.description, "portfolio_pnl": r.portfolio_pnl,
                 "portfolio_value_after": r.portfolio_value_after,
+                "coverage_pct": r.coverage_pct,
+                "uncovered_symbols": r.uncovered_symbols or [],
                 "per_asset_pnl": r.per_asset_pnl,
             }
             for r in results
