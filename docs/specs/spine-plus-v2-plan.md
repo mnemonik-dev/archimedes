@@ -1,16 +1,10 @@
 # Archimedes Spine+ v2 — Phase Plan
 
-> **Status:** Drafted 2026-05-22 by Dan + Claude session at end of context window
-> ahead of compaction. Reflects the strip-to-spine commit (`d4dd465`),
-> [`docs/chuan-architecture-survey.md`](chuan-architecture-survey.md) Day-10
-> updates, and the post-strip product walkthrough.
+> **Status:** Drafted 2026-05-22; refreshed 2026-05-23 with phase-completion audit.
 >
-> **Phases 0-3 are ready to execute.** Phases 4-6 are scoped but **pending
-> alignment with Marten (vault contracts) and Chuan (chain/agent integration)**
-> before kickoff.
+> **As of 2026-05-23:** Phases 0, 1, 2, 3a, 3b, 6, 7 are ✅ LANDED. Phase 3c is 🟡 SKELETON (production KB body deferred). Phases 4 + 5 are still ⏸ pending Marten/Chuan alignment. Phases 8 + 9 are specced separately in [`phase8-9-landing-and-fusion-spec.md`](phase8-9-landing-and-fusion-spec.md) and scheduled for the next implementation block.
 >
-> **Branch:** `dbrowneup/spine-plus-v2`, branched off latest `main` with
-> `d4dd465` (strip-to-spine) rebased on top as the starting state.
+> **Branch:** `dbrowneup/spine-plus-v2` (PR #135 open), branched off `main` and rebased forward as `main` moves.
 >
 > **How to read:** each phase has (1) problem statement, (2) scope with concrete
 > files, (3) acceptance criteria (machine-checkable where possible), (4)
@@ -63,7 +57,7 @@ These apply to every phase. Violating one of these is a review-blocker.
 
 # Phase 0 — Architectural Specs
 
-**Status:** READY TO EXECUTE
+**Status:** ✅ LANDED — `5fc2eb9` (6 specs under `docs/specs/`)
 **Branch:** `dbrowneup/spine-plus-v2`
 **PR shape:** single docs PR landing 6 new files under `docs/specs/`
 
@@ -254,13 +248,13 @@ session.
 
 # Phase 1 — Junk extermination + UX fixes
 
-**Status:** LANDED — `4e28761` (cherry-pick) + follow-up commit landing
-deferred items (#2 Reasoning restructure + Library export move + `?highlight=`
-deep-link, #3 Learnings onNavigate, #4 ownership reframe). **#1 MetaMask
-filter:** resolved in the earlier wallet-bug fix (`ensureArcChain` requests
-Arc only, never `wallet_requestPermissions`); awaiting one manual MetaMask
-popup verification on the deploy. Reopen only if the popup still surfaces
-multiple chains.
+**Status:** ✅ LANDED — `f21ac8d` (cherry-pick) + `00d8f09` (follow-up landing
+deferred items: Reasoning restructure + Library export move + `?highlight=`
+deep-link + Learnings onNavigate + ownership-comment reframe).
+**Residual carve-outs (cosmetic, non-blocking):**
+- `<span>off-chain only</span>` label at [`Portfolio.jsx:240`](../../ui/src/components/Portfolio.jsx) — Phase 1 acceptance grep (`"(off-chain only)"` with parens) passes, but the label itself still hides the failure reason. Roll into Phase 8 polish.
+- MetaMask popup verification still pending on the deploy. Reopen only if the
+  popup surfaces multiple chains in practice.
 
 **Dependencies:** None (parallelizable with Phase 0)
 **PR shape:** small, focused, no behavior changes beyond mock-data removal + wallet network filter
@@ -334,7 +328,7 @@ fine for the backend cleanup.
 
 # Phase 2 — Streaming Generate on `portfolio_agent.py`
 
-**Status:** READY TO EXECUTE (after Phase 0 spec 0.5 lands)
+**Status:** ✅ LANDED — `28dd93a` (initial) + `7b1c1e3` (follow-ups: hard cancel, rigor wiring, brief validation)
 **Dependencies:** Phase 0.5 (`generation-streaming-spec.md`); Phase 0.4 (`portfolio-constructor-decision-tree.md`)
 **PR shape:** larger; includes backend SSE endpoint + frontend stream UI + multi-strategy mechanic
 
@@ -435,7 +429,7 @@ behavior under iteration limits).
 
 # Phase 3 — Real Explore + Corpus depth + KB integration
 
-**Status:** READY TO EXECUTE (after Phase 0 specs 0.3 and 0.6 land)
+**Status:** ✅ 3a + 3b LANDED — `6735481`. 🟡 3c skeleton landed in same commit; **production KB pipeline body deferred** pending Dan's Linus-side iteration to stabilize. Category-label enrichment re-applied post-rebase at `b45b2aa`.
 **Dependencies:** Phase 0.3 (`page-roles-spec`), Phase 0.6 (`kb-integration-spec`)
 **PR shape:** the largest single phase; could split into 3a (Explore), 3b (Corpus polish), 3c (KB integration)
 
@@ -766,7 +760,9 @@ Until this happens, we don't actually know if the rebalance path executes.
 
 # Phase 6 — Onboarding tour (MetaMask-style cards)
 
-**Status:** PENDING ALIGNMENT — low-priority but high-leverage for demo
+**Status:** ✅ LANDED — PR #134 (`60d1ee5`), merged to `main` via `e2ee2a5`.
+6-card MetaMask-style tour with localStorage gate + `?` topbar re-launch.
+Phase 8 spec covers two follow-ups (transparency fix on card background, remove the in-card navigation buttons that escape the tour).
 **Dependencies:** Phase 1 (junk clean so cards don't reference dead surfaces)
 
 ## Problem (high-level)
@@ -868,8 +864,10 @@ Phase 6 questions:
 
 # Phase 7 — Consolidation & dedup via t2o2
 
-**Status:** SPEC-READY — 4 judge-grade issues drafted in `docs/specs/`.
-Dan files to GitHub + assigns t2o2; humans review the resulting PRs.
+**Status:** ✅ LANDED — all 6 issues closed (#128, #129, #130, #131, #132, #133).
+PR #136 (merge `2a5f319`) closed remaining gaps on #128/#130/#133:
+honest fusion rigor + real bar-by-bar equity curve, LLM-backend guard test,
+fusion rigor verdict persistence + `rejected` status.
 
 **Why this phase exists:** [`docs/chuan-architecture-survey.md`](../chuan-architecture-survey.md)
 identifies 14 gap clusters in `backend/archimedes/`. Of those, gaps #1, #2,
@@ -950,25 +948,27 @@ Update this table at phase close. No prospective estimates.
 | 3c — KB integration (skeleton) | 2026-05-22 | 2026-05-22 | ~1.5 | part of `50edb28`; production body deferred |
 | Phase 2 follow-ups | 2026-05-22 | 2026-05-22 | ~2 | `7b1c1e3` — cancel/rigor/brief-validation |
 | Phase 7 specs drafted | 2026-05-22 | 2026-05-22 | ~1 | 4 issue specs in `docs/specs/`; #128 filed |
-| 4 — Vault (PENDING) | | | | needs Marten alignment |
+| 6 — Onboarding | 2026-05-22 | 2026-05-22 | ~1.5 | `60d1ee5` · PR #134 (6-card tour + localStorage + ? re-launch) |
+| 7 — Dedup via t2o2 | 2026-05-22 | 2026-05-23 | ~0.5 (humans) + bot | All 6 issues closed; PR #136 closed follow-up gaps |
+| 8 — Landing + UX polish (PENDING) | | | | Spec at [`phase8-9-landing-and-fusion-spec.md`](phase8-9-landing-and-fusion-spec.md) |
+| 9 — Fusion UI surface (PENDING) | | | | Spec at [`phase8-9-landing-and-fusion-spec.md`](phase8-9-landing-and-fusion-spec.md) |
+| 4 — Vault (PENDING) | | | | needs Marten + Chuan alignment |
 | 5 — Real trade (PENDING) | | | | needs Chuan alignment |
-| 6 — Onboarding (PENDING) | | | | Dan can do solo |
-| 7 — Dedup via t2o2 (PENDING) | | | | Dan files; t2o2 executes |
 
 ---
 
-# Suggested kickoff sequence (post-compaction, 2026-05-23+)
+# Suggested kickoff sequence (refreshed 2026-05-23)
 
 When the next session resumes:
 
 1. Read this doc + [`docs/chuan-architecture-survey.md`](../chuan-architecture-survey.md) for context.
-2. Confirm branch hygiene: are we on `dbrowneup/spine-plus-v2`? Rebase onto latest `origin/main` if Chuan has moved it.
-3. **Phase 0-3 + Phase 2 follow-ups are LANDED** (7 commits on the branch). Branch tip is the last commit of the day. `pytest -q` → 307 passed.
-4. **Issue #128 (fusion-to-backtest DSL)** filed + assigned to t2o2 on 2026-05-22. Check PR draft status.
-5. **Phase 7 next**: file the 4 drafted issue specs (`docs/specs/phase7-*-t2o2-issue.md`) as GitHub issues + assign t2o2. Order them as suggested in the Phase 7 section above (7.2 → 7.3 → 7.4 → 7.5; 7.1 = #128 is already in flight).
-6. **Phase 6 (onboarding)** — Dan can solo if there's time.
-7. **Phase 4 + 5** — wait for Marten / Chuan standup alignment.
-8. KB pipeline production wiring waits on Dan's Linus-side iteration to settle.
+2. Confirm branch hygiene: are we on `dbrowneup/spine-plus-v2`? Rebase onto latest `origin/main` (moves continuously).
+3. **Phases 0, 1, 2, 3a, 3b, 6, 7 are LANDED.** Phase 3c is skeleton-only (KB body deferred). `pytest -q` should be green.
+4. **Next: Phases 8 + 9** per [`phase8-9-landing-and-fusion-spec.md`](phase8-9-landing-and-fusion-spec.md):
+   - Phase 8 first — mechanical (~30 min of edits): Landing CTA fixes + wallet button + RegimePanel dedup + Onboarding card opacity + Corpus Catalog cards→table + design polish.
+   - Phase 9 second — Fusion engine UI surface as a third Generate mode toggle.
+5. **Phase 4 + 5** — still pending Marten / Chuan alignment on open questions. If implementation proceeds without alignment, flag risk in PR description so they can course-correct on review.
+6. **KB pipeline production wiring** still waits on Dan's Linus-side iteration to settle.
 
 ---
 
