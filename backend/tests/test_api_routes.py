@@ -435,3 +435,103 @@ class TestAdvisorRoutes:
         data = resp.json()
         # Without Redis the regime defaults to "transition"
         assert data["regime"] == "transition"
+
+
+class TestFusionEvaluatorIntegration:
+    """Tests for fusion_evaluator wiring in _run_fusion_job."""
+
+    def test_fusion_with_spec_attaches_backtest_and_rigor(self, client):
+        """Fusion job with strategy_spec returns backtest + rigor verdict."""
+        from archimedes.services.strategy_fusion import (
+            FusionProposal, FusionBrief, CorpusPaper,
+        )
+        from archimedes.models.portfolio import RiskProfile
+        from archimedes.services.strategy_dsl import FABER_2007_SPEC
+
+        mock_result = FusionProposal(
+            status="ok",
+            brief=FusionBrief(
+                asset_classes=["SPY"],
+                risk_appetite=RiskProfile.MODERATE,
+                strategic_direction="",
+            ),
+            strategy_name="test_fusion_spec",
+            thesis="Test thesis",
+            source_arxiv_ids=["0706.1497", "1710.00727"],
+            fusion_reasoning="Fused SMA crossover with vol targeting",
+            novelty_rationale="Novel combination",
+            risk_notes="Standard risks",
+            model="canned",
+            requested_model="canned",
+            strategy_spec=FABER_2007_SPEC,
+        )
+
+        mock_fusion = MagicMock()
+        mock_fusion.propose.return_value = mock_result
+
+        with patch(
+            "archimedes.services.strategy_fusion.default_fusion",
+            return_value=mock_fusion,
+        ), patch(
+            "archimedes.services.strategy_fusion.fusion_enabled",
+            return_value=True,
+        ), patch(
+            "archimedes.services.strategy_fusion.load_corpus",
+            return_value=[MagicMock(), MagicMock()],
+        ), patch("archimedes.services.redis_state.AgentStateStore"):
+            resp = client.post("/api/strategies/generate", json={
+                "asset_classes": ["SPY"],
+                "risk_appetite": "moderate",
+            })
+
+        assert resp.status_code == 202
+        data = resp.json()
+        assert data["status"] == "queued"
+        assert data["job_id"]
+
+    def test_fusion_without_spec_falls_back_gracefully(self, client):
+        """Fusion job without strategy_spec completes without eval metrics."""
+        from archimedes.services.strategy_fusion import (
+            FusionProposal, FusionBrief,
+        )
+        from archimedes.models.portfolio import RiskProfile
+
+        mock_result = FusionProposal(
+            status="ok",
+            brief=FusionBrief(
+                asset_classes=["SPY"],
+                risk_appetite=RiskProfile.MODERATE,
+                strategic_direction="",
+            ),
+            strategy_name="test_no_spec",
+            thesis="Text-only fusion",
+            source_arxiv_ids=["0706.1497", "1710.00727"],
+            fusion_reasoning="Basic fusion",
+            novelty_rationale="None",
+            risk_notes="Standard",
+            model="canned",
+            requested_model="canned",
+            strategy_spec=None,
+        )
+
+        mock_fusion = MagicMock()
+        mock_fusion.propose.return_value = mock_result
+
+        with patch(
+            "archimedes.services.strategy_fusion.default_fusion",
+            return_value=mock_fusion,
+        ), patch(
+            "archimedes.services.strategy_fusion.fusion_enabled",
+            return_value=True,
+        ), patch(
+            "archimedes.services.strategy_fusion.load_corpus",
+            return_value=[MagicMock(), MagicMock()],
+        ), patch("archimedes.services.redis_state.AgentStateStore"):
+            resp = client.post("/api/strategies/generate", json={
+                "asset_classes": ["SPY"],
+                "risk_appetite": "moderate",
+            })
+
+        assert resp.status_code == 202
+        data = resp.json()
+        assert data["status"] == "queued"

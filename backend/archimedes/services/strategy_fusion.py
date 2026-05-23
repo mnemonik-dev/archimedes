@@ -404,8 +404,26 @@ Output STRICT JSON ONLY (no prose, no markdown fences), exactly this schema:
 they combine>",
   "novelty_rationale": "<why this specific combination is not already in the \
 literature>",
-  "risk_notes": "<key risks + the pre-backtest / selection-bias caveat>"
-}"""
+  "risk_notes": "<key risks + the pre-backtest / selection-bias caveat>",
+  "strategy_spec": {
+    "name": "<same as strategy_name>",
+    "asset_universe": ["SPY"],
+    "rebalance_frequency": "monthly",
+    "entry": {"gt": ["close", "sma_200"]},
+    "exit": {"lt": ["close", "sma_200"]},
+    "position_sizing": {"type": "full_invested_when_in_market"},
+    "source_arxiv_ids": ["<from source_arxiv_ids above>"],
+    "look_ahead_safe": true,
+    "indicators": ["sma_200"]
+  }
+}
+
+The strategy_spec field is REQUIRED. It is a machine-readable strategy definition \
+using the Archimedes DSL (closed-enum vocabulary). Valid rebalance_frequency values: \
+daily, weekly, monthly. Valid indicators: sma_N, ema_N, rsi_N, momentum_N (replace \
+N with an integer period). Entry/exit conditions use comparison ops (gt, lt, gte, lte) \
+or logic ops (and, or, not). Position sizing types: full_invested_when_in_market, \
+equal_weight, volatility_target (needs annual_pct). look_ahead_safe MUST be true."""
 
 
 def _build_user_prompt(brief: FusionBrief, candidates: list[CorpusPaper]) -> str:
