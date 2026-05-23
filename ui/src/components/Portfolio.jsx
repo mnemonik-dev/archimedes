@@ -9,11 +9,6 @@ import StressScenarioPanel from './StressScenarioPanel'
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? ''
 
-// Portfolio page — consolidates the old Dashboard + Vaults + Risk + agent
-// activity into the single "what do I own and what is the agent doing"
-// surface per docs/user-stories.md §④ Monitor. Wallet-gated — without a
-// connected wallet we show the connect prompt rather than fake data.
-
 function timeAgo(iso) {
   const d = typeof iso === 'string' ? new Date(iso) : new Date(iso * 1000)
   const secs = Math.floor((Date.now() - d.getTime()) / 1000)
@@ -30,12 +25,14 @@ function shortAddr(a) {
 
 export default function Portfolio({ walletAddr, onSelectVault, onSelectTrace }) {
   const [userVaults, setUserVaults] = useState([])
+  const [allVaults, setAllVaults] = useState([])
   const [agentStatus, setAgentStatus] = useState(null)
   const [recentTraces, setRecentTraces] = useState([])
   const [tracesLoading, setTracesLoading] = useState(false)
   const [vaultsLoading, setVaultsLoading] = useState(false)
   const [advisorOpen, setAdvisorOpen] = useState(false)
 
+  // Load user's own vaults (wallet-gated, from on-chain)
   const loadVaults = useCallback(async () => {
     const factoryAddr = NEW_CONTRACTS.vaultFactory
     if (!factoryAddr || !walletAddr) { setUserVaults([]); return }
@@ -62,6 +59,17 @@ export default function Portfolio({ walletAddr, onSelectVault, onSelectTrace }) 
     }
   }, [walletAddr])
 
+  // Load ALL vaults from backend API (not wallet-gated)
+  const loadAllVaults = useCallback(async () => {
+    try {
+      const r = await fetch(`${API_BASE}/api/vaults/`)
+      if (r.ok) {
+        const data = await r.json()
+        setAllVaults(data.vaults || [])
+      }
+    } catch {}
+  }, [])
+
   const loadAgentAndRegime = useCallback(async () => {
     try {
       const r = await fetch(`${API_BASE}/api/agent/status`)
@@ -83,49 +91,42 @@ export default function Portfolio({ walletAddr, onSelectVault, onSelectTrace }) 
   }, [])
 
   useEffect(() => { loadVaults() }, [loadVaults])
-  useEffect(() => { loadAgentAndRegime(); loadTraces() }, [loadAgentAndRegime, loadTraces])
+  useEffect(() => { loadAllVaults(); loadAgentAndRegime(); loadTraces() }, [loadAllVaults, loadAgentAndRegime, loadTraces])
   useEffect(() => {
-    const t = setInterval(() => { loadAgentAndRegime(); loadTraces() }, 30_000)
+    const t = setInterval(() => { loadAllVaults(); loadAgentAndRegime(); loadTraces() }, 30_000)
     return () => clearInterval(t)
-  }, [loadAgentAndRegime, loadTraces])
+  }, [loadAllVaults, loadAgentAndRegime, loadTraces])
 
   const totalAum = userVaults.reduce((s, v) => s + v.aum, 0)
+  const allAum = allVaults.reduce((s, v) => s + (v.aum_usdc || 0), 0)
 
   return (
     <div>
       <div className="max-w-[720px] mb-6">
         <h2 className="serif text-[2rem] mb-2.5">Portfolio</h2>
         <p className="body">
-          What you own, how the agent is managing it, and what it's been doing recently.
-          Every rebalance has a reasoning trace anchored on Arc — click into any decision
-          to inspect what the agent saw and why it acted.
+          Browse vaults, monitor the agent, and inspect every rebalance decision.
+          Every action has a reasoning trace anchored on Arc — click to inspect.
         </p>
       </div>
 
-      {!walletAddr && (
-        <div className="info-box warning mb-6">
-          Connect your wallet (top right) to load your vault positions. Agent activity
-          and the live regime classification are visible without a wallet.
-        </div>
-      )}
-
-      {/* Regime sidebar — top of portfolio page */}
+      {/* Regime sidebar */}
       <RegimePanel />
 
       {/* Status strip — agent state is Redis-backed (regardless of wallet); regime
           lives in the RegimePanel block above to avoid duplication. */}
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         <div className="card-flat p-4">
-          <div className="label mb-2">Your Vaults</div>
-          <div className="text-[1.8rem] font-bold">{walletAddr ? userVaults.length : '—'}</div>
+          <div className="label mb-2">Vaults</div>
+          <div className="text-[1.8rem] font-bold">{allVaults.length}</div>
           <div className="caption mt-1.5">
-            {walletAddr ? `${userVaults.filter(v => v.tier === 1).length} Tier 1 · ${userVaults.filter(v => v.tier === 2).length} Tier 2` : 'connect wallet'}
+            {allVaults.filter(v => v.tier === 1).length} Tier 1 · {allVaults.filter(v => v.tier === 2).length} Tier 2
           </div>
         </div>
         <div className="card-flat p-4">
           <div className="label mb-2">Total AUM</div>
           <div className="text-[1.8rem] font-bold">
-            {walletAddr ? `$${totalAum.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
+            ${allAum.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </div>
           <div className="caption positive mt-1.5">Arc Testnet</div>
         </div>
@@ -141,35 +142,65 @@ export default function Portfolio({ walletAddr, onSelectVault, onSelectTrace }) 
         </div>
       </div>
 
-      {/* User vaults */}
-      {walletAddr && (
+      {/* Browse all vaults */}
+      <div className="mb-7">
+        <div className="label mb-3">Archimedes Vaults</div>
+        {allVaults.length === 0 && (
+          <div className="card" style={{ padding: 18 }}>
+            <p className="body">No vaults deployed yet.</p>
+          </div>
+        )}
+        {allVaults.length > 0 && (
+          <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
+            {allVaults.map(v => (
+              <div key={v.address} className="card vault-card-clickable" onClick={() => onSelectVault?.(v.address)}>
+                <div className="flex justify-between items-center mb-2">
+                  <span className="font-semibold text-sm" style={{ color: 'var(--text-1)' }}>
+                    {v.name || `Vault ${shortAddr(v.address)}`}
+                  </span>
+                  <span className={`tag ${v.tier === 1 ? 'tag-accent' : 'tag-muted'}`}>
+                    {v.tier === 1 ? '🏆 Verified' : '👥 Community'}
+                  </span>
+                </div>
+                <div className="flex items-baseline gap-2 mt-3 mb-1">
+                  <span className="text-[1.4rem] font-bold">
+                    ${(v.aum_usdc || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                  <span className="caption">AUM</span>
+                </div>
+                <div className="caption flex gap-3 text-[var(--text-3)] mt-1">
+                  <code>{shortAddr(v.address)}</code>
+                  {v.is_agent_assisted && <span style={{ color: 'var(--accent)' }}>AI-managed</span>}
+                </div>
+                {v.management_fee_pct != null && (
+                  <div className="caption text-[var(--text-4)] mt-1">
+                    {v.management_fee_pct}% mgmt · {v.performance_fee_pct}% perf
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* User's own vaults (wallet-gated) */}
+      {walletAddr && userVaults.length > 0 && (
         <div className="mb-7">
           <div className="label mb-3">Your Vault Positions</div>
           {vaultsLoading && <div className="caption">Loading vaults…</div>}
-          {!vaultsLoading && userVaults.length === 0 && (
-            <div className="card" style={{ padding: 18 }}>
-              <p className="body mb-2">You don't own any vaults yet.</p>
-              <p className="caption">
-                Go to <a href="/generate" style={{ color: 'var(--accent)' }}>Generate</a> to design a
-                strategy, then deploy it into a non-custodial vault from the result card.
-              </p>
-            </div>
-          )}
-          {userVaults.length > 0 && (
-            <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
-              {userVaults.map(v => (
-                <div key={v.address} className="card vault-card-clickable" onClick={() => onSelectVault?.(v.address)}>
-                  <div className="flex justify-between mb-2">
-                    <code style={{ fontSize: '0.8rem' }}>{shortAddr(v.address)}</code>
-                    <span className={`tag ${v.tier === 1 ? 'tag-accent' : 'tag-muted'}`}>T{v.tier}</span>
-                  </div>
-                  {v.name && <div className="caption" style={{ marginBottom: 4 }}>{v.name}</div>}
-                  <div className="text-[1.2rem] font-bold">${v.aum.toFixed(2)}</div>
-                  <div className="caption">AUM</div>
+          <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
+            {userVaults.map(v => (
+              <div key={v.address} className="card vault-card-clickable" onClick={() => onSelectVault?.(v.address)}>
+                <div className="flex justify-between mb-2">
+                  <code style={{ fontSize: '0.8rem' }}>{shortAddr(v.address)}</code>
+                  <span className={`tag ${v.tier === 1 ? 'tag-accent' : 'tag-muted'}`}>T{v.tier}</span>
                 </div>
-              ))}
-            </div>
-          )}
+                {v.name && <div className="caption" style={{ marginBottom: 4 }}>{v.name}</div>}
+                <div className="text-[1.2rem] font-bold">${v.aum.toFixed(2)}</div>
+                <div className="caption">AUM</div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
