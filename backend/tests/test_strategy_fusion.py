@@ -1,7 +1,7 @@
 """Tests for the flagged multi-paper strategy-fusion module.
 
 No network: the Anthropic client is never constructed — every test injects
-either a mock `LLMBackend` or the deterministic `CannedBackend`. The corpus
+either a mock `LLMBackend` or the deterministic `FusionCannedBackend`. The corpus
 is a self-contained in-test fixture written to a tmp manifest (no dependency
 on Stream-A's data/corpus/manifest.jsonl).
 
@@ -24,7 +24,7 @@ import pytest
 from archimedes.models.portfolio import RiskProfile
 from archimedes.services.strategy_fusion import (
     MIN_PAPERS,
-    CannedBackend,
+    FusionCannedBackend,
     FusionBrief,
     StrategyFusion,
     fusion_enabled,
@@ -359,7 +359,7 @@ def test_model_fusing_under_two_valid_papers_declines(monkeypatch, corpus):
 
 def test_canned_fallback_is_labelled_not_model_reasoning(monkeypatch, corpus):
     monkeypatch.setenv("ARCHIMEDES_FUSION_ENABLED", "1")
-    svc = StrategyFusion(backend=CannedBackend(), corpus=corpus)
+    svc = StrategyFusion(backend=FusionCannedBackend(), corpus=corpus)
     proposal = svc.propose(
         FusionBrief(asset_classes=["equities", "rates"], max_papers=3)
     )

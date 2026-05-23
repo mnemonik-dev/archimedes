@@ -11,10 +11,11 @@ Boundary vs. Chuan's `IAgentOrchestrator`: that is the autonomous
 "maintain the portfolio" loop. This is the interactive "design me a portfolio"
 request. They share `LocalStrategyProvider` and (later) the weight guardrail.
 
-LLM-backend seam: `LLMBackend` is a Protocol. `ClaudeBackend` is the hackathon
-default (hosted). `CannedBackend` keeps the feature demoable and testable with
-no API key. A local Ollama backend is the post-hackathon / schedule-permitting
-flex — `submodules/KnowledgeBase/papers_analysis/summarize.py` shows the swap.
+LLM-backend seam: `LLMBackend` Protocol + `make_llm_backend()` factory live in
+`archimedes.services.llm_backend`. `ArchitectCannedBackend` keeps the feature
+demoable and testable with no API key. A local Ollama backend is the
+post-hackathon / schedule-permitting flex —
+`submodules/KnowledgeBase/papers_analysis/summarize.py` shows the swap.
 
 References:
 - `docs/specs/component-interfaces-spec.md` — Dan owns the strategy lane
@@ -26,14 +27,13 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Protocol
 
 from archimedes.models.portfolio import RISK_PROFILE_PARAMS, RiskProfile
 from archimedes.models.strategy import Strategy
+from archimedes.services.llm_backend import LLMBackend, make_llm_backend
 from archimedes.services.strategy_provider import (
     LocalStrategyProvider,
     default_provider,
@@ -41,57 +41,11 @@ from archimedes.services.strategy_provider import (
 
 logger = logging.getLogger(__name__)
 
-# Match the model string already used by chat_service.py so the team has one
-# Claude version to reason about. Override per-call via the backend constructor;
-# Opus (`claude-opus-4-7`) is the upgrade lever for the flagship reasoning moment.
-DEFAULT_MODEL = os.getenv("LLM_MODEL", os.getenv("ANTHROPIC_DEFAULT_MODEL", "claude-sonnet-4-20250514"))
-MAX_TOKENS = 4096
+
+# ── Architect-specific canned fallback ───────────────────────────
 
 
-# ── LLM backend seam ────────────────────────────────────────────
-
-
-class LLMBackend(Protocol):
-    """Minimal text-completion seam. Claude now; Ollama-swappable later."""
-
-    @property
-    def model_id(self) -> str:
-        """Identifier recorded for provenance (passport / trace)."""
-        ...
-
-    def complete(self, system: str, user: str) -> str:
-        """Return the model's raw text response to a single user turn."""
-        ...
-
-
-class ClaudeBackend:
-    """Anthropic-SDK backend. Delegates to the provider-agnostic factory.
-
-    Supports direct Claude (LLM_API_KEY) or a GLM-compatible endpoint
-    (LLM_AUTH_TOKEN + LLM_BASE_URL). Falls back to ANTHROPIC_* env vars
-    for back-compat.
-    """
-
-    def __init__(self, model: str = DEFAULT_MODEL, api_key: str | None = None) -> None:
-        from archimedes.services.llm_backend import AnthropicBackend, make_llm_backend
-        if api_key:
-            self._inner: object = AnthropicBackend(model=model, api_key=api_key)
-        else:
-            self._inner = make_llm_backend()
-
-    @property
-    def model_id(self) -> str:
-        return getattr(self._inner, "model_id", DEFAULT_MODEL)
-
-    @property
-    def available(self) -> bool:
-        return getattr(self._inner, "available", False)
-
-    def complete(self, system: str, user: str) -> str:
-        return self._inner.complete(system, user)  # type: ignore[union-attr]
-
-
-class CannedBackend:
+class ArchitectCannedBackend:
     """Deterministic offline fallback — equal-weights the candidates.
 
     Keeps the endpoint demoable with no API key and gives the parser a stable
@@ -101,6 +55,11 @@ class CannedBackend:
     """
 
     model_id = "canned-fallback"
+    served_model = "canned-fallback"
+
+    @property
+    def available(self) -> bool:
+        return False
 
     def complete(self, system: str, user: str) -> str:  # noqa: ARG002
         ids = re.findall(r'"strategy_id"\s*:\s*"([0-9a-f]+)"', user)
@@ -395,15 +354,14 @@ def default_backend() -> LLMBackend:
 
     Delegates to the provider-agnostic ``llm_backend.make_llm_backend()`` factory.
     """
-    from archimedes.services.llm_backend import make_llm_backend
     backend = make_llm_backend()
-    if getattr(backend, "available", False):
+    if backend.available:
         return backend  # type: ignore[return-value]
     logger.warning(
         "No LLM credentials (LLM_* or ANTHROPIC_* env vars) "
         "— strategy architect using canned fallback"
     )
-    return CannedBackend()
+    return ArchitectCannedBackend()
 
 
 def default_architect() -> StrategyArchitect:

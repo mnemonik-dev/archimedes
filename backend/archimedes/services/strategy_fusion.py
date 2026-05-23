@@ -40,17 +40,13 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
 
 from archimedes.models.portfolio import RISK_PROFILE_PARAMS, RiskProfile
+from archimedes.services.llm_backend import LLMBackend, make_llm_backend
 from archimedes.services.strategy_architect import extract_json
 
 logger = logging.getLogger(__name__)
-
-# Mirror the architect's configured default; `response.model` is what is
-# actually recorded for provenance (see module docstring / spec).
-DEFAULT_MODEL = os.getenv("LLM_MODEL", os.getenv("ANTHROPIC_DEFAULT_MODEL", "claude-sonnet-4-20250514"))
-MAX_TOKENS = 4096
 
 # Hard floor: a fusion of one paper is just extraction (the architect's job).
 MIN_PAPERS = 2
@@ -90,77 +86,24 @@ _ASSET_SYNONYMS: dict[str, tuple[str, ...]] = {
 }
 
 
-# ── LLM backend seam (mirrors the architect's Protocol) ─────────
+# ── Fusion-specific canned fallback ──────────────────────────────
 
 
-class LLMBackend(Protocol):
-    """Minimal text-completion seam. Identical shape to the architect's.
-
-    `served_model` is the fusion-specific addition: the model that actually
-    answered (`response.model`), distinct from the configured `model_id`.
-    """
-
-    @property
-    def model_id(self) -> str:
-        """The configured/requested model string (reproducibility)."""
-        ...
-
-    @property
-    def served_model(self) -> str:
-        """The model that actually served the last call (provenance)."""
-        ...
-
-    def complete(self, system: str, user: str) -> str:
-        """Return the model's raw text response to a single user turn."""
-        ...
-
-
-class ClaudeBackend:
-    """Hosted Claude via the Anthropic SDK, GLM-routed in this deployment.
-
-    Delegates to the provider-agnostic ``llm_backend`` factory. Kept as a
-    thin wrapper so existing consumers don't break.
-    """
-
-    def __init__(self, model: str = DEFAULT_MODEL, api_key: str | None = None) -> None:
-        from archimedes.services.llm_backend import (
-            AnthropicBackend,
-            AnthropicCompatibleBackend,
-            CannedBackend as LLMCanned,
-            make_llm_backend,
-        )
-        if api_key:
-            self._inner: object = AnthropicBackend(model=model, api_key=api_key)
-        else:
-            self._inner = make_llm_backend()
-
-    @property
-    def model_id(self) -> str:
-        return getattr(self._inner, "model_id", DEFAULT_MODEL)
-
-    @property
-    def served_model(self) -> str:
-        return getattr(self._inner, "served_model", DEFAULT_MODEL)
-
-    @property
-    def available(self) -> bool:
-        return getattr(self._inner, "available", False)
-
-    def complete(self, system: str, user: str) -> str:
-        return self._inner.complete(system, user)  # type: ignore[union-attr]
-
-
-class CannedBackend:
+class FusionCannedBackend:
     """Deterministic offline fallback. Explicitly NOT model reasoning.
 
-    Mirrors the architect's `CannedBackend`: keeps the path demoable with no
-    API key and gives the parser a stable fixture in tests. The text is
-    emphatic that this is a non-novel placeholder so it can never masquerade
-    as a real cross-paper synthesis in a provenance record.
+    Keeps the path demoable with no API key and gives the parser a stable
+    fixture in tests. The text is emphatic that this is a non-novel
+    placeholder so it can never masquerade as a real cross-paper synthesis
+    in a provenance record.
     """
 
     model_id = "canned-fusion-fallback"
     served_model = "canned-fusion-fallback"
+
+    @property
+    def available(self) -> bool:
+        return False
 
     def complete(self, system: str, user: str) -> str:  # noqa: ARG002
         ids = re.findall(r'"arxiv_id"\s*:\s*"([^"]+)"', user)
@@ -641,7 +584,6 @@ def default_backend() -> LLMBackend:
 
     Delegates to the provider-agnostic ``llm_backend.make_llm_backend()`` factory.
     """
-    from archimedes.services.llm_backend import CannedBackend as LLMCanned, make_llm_backend
     backend = make_llm_backend()
     if backend.available:
         return backend  # type: ignore[return-value]
@@ -649,7 +591,7 @@ def default_backend() -> LLMBackend:
         "No LLM credentials (LLM_* or ANTHROPIC_* env vars) "
         "— strategy fusion using canned fallback"
     )
-    return CannedBackend()
+    return FusionCannedBackend()
 
 
 def default_fusion() -> StrategyFusion:

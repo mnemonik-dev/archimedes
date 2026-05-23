@@ -37,8 +37,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
+from archimedes.services.llm_backend import LLMBackend
 from archimedes.services.strategy_architect import (
-    LLMBackend,
     default_backend,
     extract_json,
 )
