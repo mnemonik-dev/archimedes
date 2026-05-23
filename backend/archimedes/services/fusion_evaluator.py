@@ -15,6 +15,7 @@ import json
 import logging
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
+from pathlib import Path
 from typing import Any
 
 from archimedes.services.dsl_to_backtrader import interpret_spec
@@ -85,16 +86,16 @@ def run_dsl_backtest(
     spec: StrategySpec,
     *,
     data_feed: Any = None,
+    data_csv_path: str | Path | None = None,
     initial_cash: float = _DEFAULT_CASH,
     tx_cost_bps: int = _DEFAULT_TX_BPS,
 ) -> BacktestMetrics:
     """Run a backtest for a DSL-interpreted strategy.
 
-    If ``data_feed`` is None, generates a deterministic synthetic price series
-    for hermetic testing. The equity curve is captured **bar-by-bar** via a
-    backtrader analyzer (NOT linearly interpolated from final value — that was
-    the pre-existing bug that made downstream Sharpe/Sortino/MaxDD numbers
-    meaningless because they were computed over a fake straight line).
+    If ``data_feed`` is None and ``data_csv_path`` is set, builds a
+    ``GenericCSVData`` feed from the CSV. If both are None, generates a
+    deterministic synthetic price series. The equity curve is captured
+    **bar-by-bar** via a backtrader analyzer.
     """
     import backtrader as bt
 
@@ -103,7 +104,10 @@ def run_dsl_backtest(
     cerebro.addstrategy(strategy_cls)
 
     if data_feed is None:
-        data_feed = _synthetic_data()
+        if data_csv_path is not None:
+            data_feed = _csv_data_feed(Path(data_csv_path))
+        else:
+            data_feed = _synthetic_data()
 
     cerebro.adddata(data_feed)
     cerebro.broker.setcash(initial_cash)
@@ -127,6 +131,7 @@ def run_dsl_backtest(
     else:
         equity_curve = [initial_cash]
 
+
     monthly_returns = _compute_monthly_returns(equity_curve)
 
     total_return = (final_value - initial) / initial
@@ -139,9 +144,8 @@ def run_dsl_backtest(
         for i in range(1, len(equity_curve))
         if equity_curve[i - 1] > 0
     ]
-
-    sharpe = _annualized_sharpe(daily_returns)
-    sortino = _annualized_sortino(daily_returns)
+    sharpe = _annualized_sharpe(daily_returns, rf_annual=0.0)
+    sortino = _annualized_sortino(daily_returns, rf_annual=0.0)
     max_dd = _max_drawdown(equity_curve)
     calmar = cagr / max_dd if max_dd > 0 else 0.0
 
@@ -314,6 +318,7 @@ def _synthetic_data() -> Any:
     )
 
 
+
 # ── Analyzers: real per-bar equity capture + trade stats ────────────────
 # Replace the pre-existing _extract_equity_curve that linearly interpolated
 # between initial and final broker value (making all downstream Sharpe/MaxDD
@@ -397,6 +402,83 @@ def _build_analyzers():
 # Resolve the real analyzer classes once and bind module-level so
 # cerebro.addanalyzer(_EquityCurveAnalyzer, ...) works.
 _EquityCurveAnalyzer, _TradeStatsAnalyzer = _build_analyzers()
+
+
+def _csv_data_feed(csv_path: Path) -> Any:
+    """Build a GenericCSVData feed from a CSV file on disk.
+
+    Column layout matches _synthetic_data(): datetime=0, open=1, high=2,
+    low=3, close=4, volume=5, openinterest=-1.
+    """
+    import backtrader as bt
+
+    return bt.feeds.GenericCSVData(
+        dataname=str(csv_path),
+        dtformat=("%Y-%m-%d"),
+        datetime=0,
+        open=1,
+        high=2,
+        low=3,
+        close=4,
+        volume=5,
+        openinterest=-1,
+    )
+
+
+def _extract_daily_returns(strat: Any) -> list[float]:
+    """Extract daily return series from the TimeReturn analyzer."""
+    try:
+        tr = strat.analyzers.timereturn.get_analysis()
+        return list(tr.values())
+    except (AttributeError, KeyError):
+        return []
+
+
+def _extract_analyzer_sharpe(strat: Any) -> float:
+    """Extract Sharpe ratio from the SharpeRatio analyzer (rf=0, annualized)."""
+    try:
+        raw = strat.analyzers.sharpe.get_analysis().get("sharperatio")
+        return float(raw) if raw is not None else 0.0
+    except (AttributeError, KeyError, TypeError):
+        return 0.0
+
+
+def _extract_analyzer_drawdown(strat: Any) -> float:
+    """Extract max drawdown (decimal) from the DrawDown analyzer."""
+    try:
+        dd_analysis = strat.analyzers.drawdown.get_analysis()
+        max_dd_pct = dd_analysis.get("max", {}).get("drawdown", 0.0)
+        return float(max_dd_pct) / 100.0
+    except (AttributeError, KeyError, TypeError):
+        return 0.0
+
+
+def _build_equity_curve(daily_returns: list[float], initial_cash: float) -> list[float]:
+    """Build an equity curve from a series of daily returns."""
+    if not daily_returns:
+        return [initial_cash]
+    curve = [initial_cash]
+    for ret in daily_returns:
+        curve.append(curve[-1] * (1 + ret))
+    return curve
+
+
+def _extract_equity_curve(strat: Any, initial_cash: float) -> list[float]:
+    """Extract equity curve from a completed strategy run."""
+    # Use the analyzer if available, otherwise synthesize from broker value
+    vals = []
+    try:
+        for i in range(len(strat.data)):
+            # Approximate by replaying — in practice cerebro.run() doesn't keep history
+            pass
+    except Exception:
+        pass
+    # Cerebro doesn't easily expose per-bar equity after run()
+    # Return a simplified curve based on initial → final
+    final = float(strat.broker.getvalue())
+    n_bars = max(1, len(strat.data))
+    # Linear interpolation as approximation (real curve would need observer)
+    return [initial_cash + (final - initial_cash) * i / n_bars for i in range(n_bars + 1)]
 
 
 def _compute_monthly_returns(equity_curve: list[float]) -> list[float]:

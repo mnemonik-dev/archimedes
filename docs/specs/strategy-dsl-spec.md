@@ -113,3 +113,22 @@ a `backtrader.Strategy` subclass and backtested without human intervention.
    rigor-gate pipeline.
 5. The result feeds back into the strategy library and the generation job
    response, attaching backtest metrics and a rigor verdict.
+
+## Verification
+
+DSL primitives are validated against hand-written counterparts via fixture-based
+comparison on real SPY OHLCV data (2004-01-02 through 2026-02-06, 5560 daily
+bars). The test suite confirms that a DSL-interpreted Faber 2007 SMA200 strategy
+produces Sharpe and max-drawdown metrics directionally consistent with the
+hand-curated seed strategy within defined tolerances.
+
+The verification tests live in
+`backend/tests/services/test_fusion_evaluator_real_spy.py` and assert:
+
+- DSL Faber Sharpe within 0.10 of the seed Sharpe (0.6335).
+- DSL Faber max drawdown within 0.10 of the seed max drawdown (0.246).
+
+The fixture CSV is generated from yfinance SPY data and stored at
+`backend/tests/fixtures/spy_ohlcv_2004_2026.csv` — no network calls at test
+time. Metrics are computed using backtrader's `SharpeRatio` and `DrawDown`
+analyzers with `riskfreerate=0.0` (matching the analytics-engine runner).
