@@ -214,6 +214,34 @@ SPY data; 2 Tier-1 strategies actually pass the gate; Day-10 additions of the
 agentic portfolio advisor + stress engine + multi-asset NAV vault land in SLIDE 4's
 inventory. The deck should sound like the product, not aspire to it.
 
+**Source materials (paste these alongside the prompt below — Claude Design can fetch
+or you can drop the contents inline):**
+
+- [`docs/demo-script-pitch-deck-outline.md`](demo-script-pitch-deck-outline.md) —
+  the master deck/script (Dan's canonical voice + slide order)
+- [`docs/pitch-talking-points-rigor-track.md`](pitch-talking-points-rigor-track.md) —
+  **Önder's rigor / agent / on-chain-provenance handout (closes issue #127).** Four
+  credibility moves with verbatim lines for the rigor slides, the
+  "96-other-submissions" discriminator table for SLIDE 6, an explicit don't-say list,
+  the Archimedes-as-empiricist closer for SLIDE 10. The handout is the authoritative
+  voice for the wedge slides (SLIDE 4 rigor row, SLIDE 6, SLIDE 7 agentic
+  sophistication, SLIDE 9 honest framing).
+- [`docs/portfolio-advisor-demo-cues.md`](portfolio-advisor-demo-cues.md) — Önder's
+  60-second verbatim cue card for the SLIDE 5 demo moment (two paths: agent-live
+  vs rule-based-only, Q&A scripts, failure backups). The slide is just the timer; the
+  cue card is what you say while it's on screen.
+
+**Where each source lands in the deck (per Önder's handout structure):**
+
+| Slide | Primary source | What the handout adds |
+|---|---|---|
+| SLIDE 4 (right column "Rigor + on-chain") | handout § "Four credibility moves" | Verbatim "Every Tier-1 strategy clears four statistical bars..." line for the rigor bullets |
+| SLIDE 6 (the wedge — 4-column comparison) | handout § "96-other-submissions comparison" | More concrete discriminator: "Sharpe ratio from one backtest" vs "DSR + PBO + walk-forward OOS + look-ahead audit"; the comparison rows are sharper than the current generic-category framing |
+| SLIDE 7 (Agentic Sophistication) | handout § "The four credibility moves" #2 | Specific tool names — `get_asset_stats`, `get_correlation`, `stress_test_portfolio` — and the "up to 12 tool-use turns" detail. **The demo moment to engineer per the handout's closing note: the agent's tool-use trace where it says "I checked the correlation, saw it was too high, dropped the pick"** |
+| SLIDE 9 (Honest framing) | handout § "The honest-frame slide" | Adds the **RIA-posture-is-roadmap** line that's missing from our current bullets; reinforces the existing testnet/no-alpha/AI-can-be-wrong points with the handout's exact phrasing |
+| SLIDE 10 (closer tagline) | handout § "The closer" | The "Archimedes the mathematician was its empiricist — π by exhaustion, levers, proofs. Archimedes the product is an AI citizen who participates in the modern agora with proofs" framing |
+| (Setup notes for the presenter) | handout § "Don't-say list" | Pre-emptive guard: avoid "Our model" / "Beats the market" / "Fully autonomous" / "Production-ready" / "Better than [X]" in deck copy AND in the live narration |
+
 ```
 Project: Archimedes — pitch deck for the Agora Agents Hackathon (Canteen × Circle ×
 Arc), submission deadline May 25, 2026. 3-minute pitch + live demo + Q&A.
