@@ -3,6 +3,8 @@ import {
   publicClient,
   VAULT_ABI, VAULT_FACTORY_ABI, NEW_CONTRACTS,
 } from '../config'
+import PortfolioAdvisor from './PortfolioAdvisor'
+import RegimePanel from './RegimePanel'
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? ''
 
@@ -32,6 +34,7 @@ export default function Portfolio({ walletAddr, onSelectVault, onSelectTrace }) 
   const [recentTraces, setRecentTraces] = useState([])
   const [tracesLoading, setTracesLoading] = useState(false)
   const [vaultsLoading, setVaultsLoading] = useState(false)
+  const [advisorOpen, setAdvisorOpen] = useState(false)
 
   const loadVaults = useCallback(async () => {
     const factoryAddr = NEW_CONTRACTS.vaultFactory
@@ -109,6 +112,9 @@ export default function Portfolio({ walletAddr, onSelectVault, onSelectTrace }) 
         </div>
       )}
 
+      {/* Regime sidebar — top of portfolio page */}
+      <RegimePanel />
+
       {/* Status strip — agent + regime are real (Redis-backed) regardless of wallet */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         <div className="card-flat p-4">
@@ -177,6 +183,20 @@ export default function Portfolio({ walletAddr, onSelectVault, onSelectTrace }) 
           )}
         </div>
       )}
+
+      {/* Allocation Advisor — collapsible section */}
+      <div className="mb-7">
+        <button
+          type="button"
+          className="flex items-center gap-2 w-full text-left mb-3"
+          onClick={() => setAdvisorOpen(v => !v)}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+        >
+          <span className={`i-lucide-chevron-${advisorOpen ? 'down' : 'right'} w-4 h-4 text-[var(--text-4)]`} />
+          <span className="label" style={{ margin: 0 }}>Allocation Advisor</span>
+        </button>
+        {advisorOpen && <PortfolioAdvisor />}
+      </div>
 
       {/* Agent activity feed — real traces from /api/traces */}
       <div>

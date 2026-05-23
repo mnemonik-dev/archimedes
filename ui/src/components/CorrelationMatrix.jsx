@@ -21,7 +21,7 @@ async function apiGet(path) {
  * NOTE: Returns are simulated from summary statistics since raw daily series
  * are not stored in backtest_fixtures.json.
  */
-export default function CorrelationMatrix() {
+export default function CorrelationMatrix({ selectedStrategyId = null }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -121,10 +121,13 @@ export default function CorrelationMatrix() {
             </tr>
           </thead>
           <tbody>
-            {matrix.map((row, i) => (
-              <tr key={i}>
+            {matrix.map((row, i) => {
+              const isSelectedRow = selectedStrategyId != null && labels[i]?.id === selectedStrategyId
+              return (
+              <tr key={i} style={isSelectedRow ? { background: 'rgba(99,102,241,0.08)' } : undefined}>
                 <td style={{
-                  padding: '4px 8px', color: 'var(--text-2)', fontWeight: 500,
+                  padding: '4px 8px', color: isSelectedRow ? 'var(--accent)' : 'var(--text-2)',
+                  fontWeight: isSelectedRow ? 700 : 500,
                   borderBottom: '1px solid var(--glass-border)', whiteSpace: 'nowrap',
                   fontSize: '0.68rem',
                 }}>
@@ -133,20 +136,25 @@ export default function CorrelationMatrix() {
                     <span style={{ marginLeft: 4, color: 'var(--positive)', fontSize: '0.65rem' }}>T1</span>
                   )}
                 </td>
-                {row.map((val, j) => (
+                {row.map((val, j) => {
+                  const isSelectedCol = selectedStrategyId != null && labels[j]?.id === selectedStrategyId
+                  return (
                   <td key={j} style={{
                     padding: '4px 6px', textAlign: 'center',
                     background: i === j ? 'rgba(255,255,255,0.06)' : cellColor(val),
                     borderBottom: '1px solid var(--glass-border)',
+                    borderRight: isSelectedCol ? '2px solid var(--accent)' : undefined,
                     color: i === j ? 'var(--text-4)' : textColor(val),
-                    fontWeight: i === j ? 400 : 600,
+                    fontWeight: i === j ? 400 : (isSelectedRow || isSelectedCol) ? 700 : 600,
                     minWidth: 44,
                   }}>
                     {i === j ? '—' : val.toFixed(2)}
                   </td>
-                ))}
+                  )
+                })}
               </tr>
-            ))}
+              )
+            })}
           </tbody>
         </table>
       </div>

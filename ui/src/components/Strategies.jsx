@@ -358,6 +358,9 @@ function StrategyRow({ s }) {
     s.paper_year && `(${s.paper_year})`,
   ].filter(Boolean).join(' ')
 
+  const sharpeCI = s.sharpe_ci_95 != null ? s.sharpe_ci_95 : null
+  const driftFlag = s.drift_detected === true
+
   return (
     <>
       <tr className="lib-row cursor-pointer" onClick={() => setOpen(o => !o)}>
@@ -366,10 +369,42 @@ function StrategyRow({ s }) {
           {s.paper_title}
         </td>
         <td className="caption">{paperCite || (s.paper_year ? `(${s.paper_year})` : '—')}</td>
-        <td><span className={`tag ${statusTag(s.status)}`} style={{ textTransform: 'capitalize' }}>{s.status}</span></td>
-        <td className="mono" style={{ textAlign: 'right' }}>{fmt(s.sharpe_ratio)}</td>
+        <td>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className={`tag ${statusTag(s.status)}`} style={{ textTransform: 'capitalize' }}>{s.status}</span>
+            {s.passes_rigor_gate === true && (
+              <span className="i-lucide-check w-3.5 h-3.5 text-[var(--positive)]" title="Passes rigor gate" />
+            )}
+            {s.passes_rigor_gate === false && (
+              <span className="i-lucide-x w-3.5 h-3.5 text-[var(--text-4)]" title="Does not pass rigor gate" />
+            )}
+            {driftFlag && (
+              <span className="i-lucide-alert-triangle w-3.5 h-3.5 text-[#f59e0b]" title="Drift detected" />
+            )}
+          </div>
+        </td>
+        <td className="mono" style={{ textAlign: 'right' }}>
+          {fmt(s.sharpe_ratio)}
+          {sharpeCI && (
+            <div style={{ fontSize: '0.68rem', color: 'var(--text-4)' }}>
+              [{fmt(sharpeCI[0])}, {fmt(sharpeCI[1])}]
+            </div>
+          )}
+          {s.dsr_p_value != null && (
+            <div style={{ fontSize: '0.68rem', color: 'var(--text-4)' }}>
+              (DSR p={s.dsr_p_value.toFixed(2)})
+            </div>
+          )}
+        </td>
         <td className="mono positive" style={{ textAlign: 'right' }}>{fmtPct(s.cagr)}</td>
-        <td className="mono negative" style={{ textAlign: 'right' }}>{s.max_drawdown != null ? `−${fmtPct(s.max_drawdown)}` : '—'}</td>
+        <td className="mono negative" style={{ textAlign: 'right' }}>
+          {s.max_drawdown != null ? `−${fmtPct(s.max_drawdown)}` : '—'}
+          {s.pbo_score != null && (
+            <div style={{ fontSize: '0.68rem', color: s.pbo_score > 0.5 ? 'var(--negative)' : 'var(--text-4)' }}>
+              (PBO {s.pbo_score.toFixed(2)})
+            </div>
+          )}
+        </td>
         <td className="mono" style={{ textAlign: 'right', color: 'var(--positive)' }}>{fmtUsd(endValue)}</td>
         <td className="caption" style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{years != null ? `${years.toFixed(1)} yrs` : '—'}</td>
       </tr>
@@ -487,6 +522,10 @@ function coerceGenerated(row) {
     backtest_start: null,
     backtest_end: null,
     is_backtest_placeholder: true,
+    passes_rigor_gate: null,
+    dsr_p_value: null,
+    sharpe_ci_95: null,
+    drift_detected: null,
   }
 }
 

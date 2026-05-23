@@ -1,8 +1,12 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
+import { createPortal } from 'react-dom'
 import {
   publicClient,
   TRACE_REGISTRY_ABI, NEW_CONTRACTS,
 } from '../config'
+import EfficientFrontier from './EfficientFrontier'
+import CorrelationMatrix from './CorrelationMatrix'
+import RigorExplainer from './RigorExplainer'
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? ''
 
@@ -91,9 +95,10 @@ function StrategyReasoningCard({ strategy, isSelected, onClick }) {
 // ─── Strategy Detail View ────────────────────────────────────
 
 function StrategyDetailView({ strategy, traces }) {
-  if (!strategy) return null
-
   const [exporting, setExporting] = useState(false)
+  const [rigorModalOpen, setRigorModalOpen] = useState(false)
+
+  if (!strategy) return null
 
   const handleExport = (format) => {
     setExporting(true)
@@ -206,6 +211,97 @@ function StrategyDetailView({ strategy, traces }) {
         </div>
       </div>
 
+      {/* Rigor Metrics with help affordance */}
+      {(strategy.deflated_sharpe_ratio != null || strategy.pbo_score != null || strategy.out_of_sample_sharpe != null) && (
+        <div style={{ marginBottom: 20 }}>
+          <div className="label mb-2 flex items-center gap-2">
+            Rigor Gate
+            <button
+              type="button"
+              onClick={() => setRigorModalOpen(true)}
+              style={{
+                width: 18, height: 18, borderRadius: '50%',
+                border: '1px solid var(--glass-border)', background: 'rgba(255,255,255,0.04)',
+                color: 'var(--text-4)', fontSize: '0.68rem', fontWeight: 700,
+                cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                lineHeight: 1,
+              }}
+              aria-label="What is the rigor gate?"
+            >
+              ?
+            </button>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+            <div className="card-flat" style={{ padding: 12 }}>
+              <div className="caption flex items-center gap-1">
+                DSR p-value
+                <button
+                  type="button"
+                  onClick={() => setRigorModalOpen(true)}
+                  style={{
+                    width: 14, height: 14, borderRadius: '50%',
+                    border: '1px solid var(--glass-border)', background: 'transparent',
+                    color: 'var(--text-4)', fontSize: '0.58rem', fontWeight: 700,
+                    cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    lineHeight: 1, padding: 0,
+                  }}
+                  aria-label="Explain DSR"
+                >
+                  ?
+                </button>
+              </div>
+              <div style={{ fontSize: '1.2rem', fontWeight: 700 }}>
+                {strategy.deflated_sharpe_ratio != null ? strategy.deflated_sharpe_ratio.toFixed(3) : '—'}
+              </div>
+            </div>
+            <div className="card-flat" style={{ padding: 12 }}>
+              <div className="caption flex items-center gap-1">
+                PBO
+                <button
+                  type="button"
+                  onClick={() => setRigorModalOpen(true)}
+                  style={{
+                    width: 14, height: 14, borderRadius: '50%',
+                    border: '1px solid var(--glass-border)', background: 'transparent',
+                    color: 'var(--text-4)', fontSize: '0.58rem', fontWeight: 700,
+                    cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    lineHeight: 1, padding: 0,
+                  }}
+                  aria-label="Explain PBO"
+                >
+                  ?
+                </button>
+              </div>
+              <div style={{ fontSize: '1.2rem', fontWeight: 700, color: (strategy.pbo_score ?? 0) > 0.5 ? 'var(--negative)' : 'var(--positive)' }}>
+                {strategy.pbo_score != null ? (strategy.pbo_score * 100).toFixed(1) + '%' : '—'}
+              </div>
+            </div>
+            <div className="card-flat" style={{ padding: 12 }}>
+              <div className="caption flex items-center gap-1">
+                OOS Sharpe
+                <button
+                  type="button"
+                  onClick={() => setRigorModalOpen(true)}
+                  style={{
+                    width: 14, height: 14, borderRadius: '50%',
+                    border: '1px solid var(--glass-border)', background: 'transparent',
+                    color: 'var(--text-4)', fontSize: '0.58rem', fontWeight: 700,
+                    cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    lineHeight: 1, padding: 0,
+                  }}
+                  aria-label="Explain walk-forward OOS"
+                >
+                  ?
+                </button>
+              </div>
+              <div style={{ fontSize: '1.2rem', fontWeight: 700 }}>
+                {strategy.out_of_sample_sharpe != null ? strategy.out_of_sample_sharpe.toFixed(2) : '—'}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Paper-Claim Delta */}
       {strategy.paper_claimed_sharpe && strategy.sharpe_ratio && (
         <div style={{ marginBottom: 20 }}>
@@ -283,6 +379,40 @@ function StrategyDetailView({ strategy, traces }) {
           </a>
         </div>
       </div>
+
+      {/* Efficient Frontier + Correlation Matrix — side-by-side on md+, stacked on small */}
+      <div style={{ marginTop: 24 }} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <EfficientFrontier />
+        <CorrelationMatrix selectedStrategyId={strategy.id} />
+      </div>
+
+      {/* Rigor Explainer modal (portal-rendered) */}
+      {rigorModalOpen && createPortal(
+        <div
+          className="modal-overlay"
+          onClick={() => setRigorModalOpen(false)}
+          style={{ zIndex: 1000 }}
+        >
+          <div
+            className="modal"
+            onClick={e => e.stopPropagation()}
+            style={{ maxWidth: 820, maxHeight: '85vh', overflowY: 'auto', width: '90vw' }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+              <button
+                type="button"
+                onClick={() => setRigorModalOpen(false)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-4)' }}
+                aria-label="Close"
+              >
+                <span className="i-lucide-x" style={{ width: 20, height: 20 }} />
+              </button>
+            </div>
+            <RigorExplainer />
+          </div>
+        </div>,
+        document.body,
+      )}
     </div>
   )
 }

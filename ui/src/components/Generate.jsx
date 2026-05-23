@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { StrategyArchitect } from './Strategies'
+import RegimePanel from './RegimePanel'
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? ''
 
@@ -39,6 +40,11 @@ export default function Generate() {
         <p className="body text-[var(--text-3)]">
           No wallet required to generate. Wallet is only needed to deposit into a vault.
         </p>
+      </div>
+
+      {/* Compact regime strip */}
+      <div className="mb-4 fade-up fade-up-2" style={{ fontSize: '0.88rem' }}>
+        <RegimePanel />
       </div>
 
       {loading && <div className="caption">Loading strategy library…</div>}
