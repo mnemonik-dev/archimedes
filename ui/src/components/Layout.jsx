@@ -9,6 +9,7 @@ import { NEW_CONTRACTS } from '../config'
 const NAV = [
   { group: '', items: [
     { id: 'landing',   label: 'Home',      icon: 'i-lucide-home' },
+    { id: 'explore',   label: 'Explore',   icon: 'i-lucide-compass' },
     { id: 'generate',  label: 'Generate',  icon: 'i-lucide-sparkles' },
     { id: 'library',   label: 'Library',   icon: 'i-lucide-line-chart' },
     { id: 'corpus',    label: 'Corpus',    icon: 'i-lucide-library' },
@@ -20,6 +21,7 @@ const NAV = [
 
 export const PAGE_LABELS = {
   landing: 'Home',
+  explore: 'Explore',
   generate: 'Generate',
   library: 'Library',
   corpus: 'Corpus',

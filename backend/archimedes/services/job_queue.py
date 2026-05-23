@@ -19,7 +19,9 @@ logger = logging.getLogger(__name__)
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 KEY_PREFIX = "archimedes:job:"
+EVENT_LOG_SUFFIX = ":events"
 JOB_TTL = 3600  # 1 hour
+EVENT_LOG_TTL = 900  # 15 minutes after terminal state — spec 0.5 § Reconnection
 
 
 class JobStore:
@@ -101,7 +103,94 @@ class JobStore:
         await r.hset(key, mapping=updates)
         logger.info("job: %s → %s", job_id, status)
 
+    # ── Event log (for streaming jobs) ────────────────────────────────────
+
+    async def push_event(self, job_id: str, event_payload: dict[str, Any]) -> int:
+        """Append an event to the job's event log and return its monotonic ID.
+
+        Events are stored as JSON strings in a Redis list keyed
+        ``archimedes:job:{id}:events``. The returned ID is the 1-based list
+        index used as the SSE ``id:`` header — the client sends it back as
+        ``Last-Event-ID`` to resume from a known point.
+        """
+        r = await self._get_redis()
+        key = f"{KEY_PREFIX}{job_id}{EVENT_LOG_SUFFIX}"
+        new_length = await r.rpush(key, json.dumps(event_payload, default=str))
+        await r.expire(key, EVENT_LOG_TTL)
+        return new_length
+
+    async def list_events(self, job_id: str, *, after_id: int = 0) -> list[dict[str, Any]]:
+        """Return events with ID > ``after_id`` in order.
+
+        The returned dicts each have ``id`` (the monotonic event ID) plus
+        whatever keys ``push_event`` was given.
+        """
+        r = await self._get_redis()
+        key = f"{KEY_PREFIX}{job_id}{EVENT_LOG_SUFFIX}"
+        if after_id < 0:
+            after_id = 0
+        raw = await r.lrange(key, after_id, -1)
+        out: list[dict[str, Any]] = []
+        for i, blob in enumerate(raw, start=after_id + 1):
+            try:
+                payload = json.loads(blob)
+            except (TypeError, ValueError):
+                continue
+            payload["id"] = i
+            out.append(payload)
+        return out
+
+    async def event_count(self, job_id: str) -> int:
+        """Length of the event log."""
+        r = await self._get_redis()
+        key = f"{KEY_PREFIX}{job_id}{EVENT_LOG_SUFFIX}"
+        return await r.llen(key)
+
+    async def list_recent_jobs(self, *, limit: int = 20) -> list[dict[str, Any]]:
+        """Scan recent jobs for the GenerationStatus UI.
+
+        SCAN-based; bounded by ``limit`` so the call stays cheap. Sorted by
+        ``updated_at`` desc.
+        """
+        r = await self._get_redis()
+        pattern = f"{KEY_PREFIX}*"
+        keys: list[str] = []
+        async for key in r.scan_iter(match=pattern, count=200):
+            if key.endswith(EVENT_LOG_SUFFIX):
+                continue
+            keys.append(key)
+            if len(keys) >= limit * 4:
+                break
+        jobs: list[dict[str, Any]] = []
+        for key in keys:
+            raw = await r.hgetall(key)
+            if not raw:
+                continue
+            jobs.append({
+                "id": raw.get("id", key.removeprefix(KEY_PREFIX)),
+                "type": raw.get("type", ""),
+                "status": raw.get("status", "unknown"),
+                "payload": json.loads(raw["payload"]) if raw.get("payload") else {},
+                "result": json.loads(raw["result"]) if raw.get("result") else None,
+                "error": raw.get("error", ""),
+                "created_at": raw.get("created_at", ""),
+                "updated_at": raw.get("updated_at", ""),
+            })
+        jobs.sort(key=lambda j: j.get("updated_at", ""), reverse=True)
+        return jobs[:limit]
+
     async def close(self) -> None:
         if self._redis:
             await self._redis.aclose()
             self._redis = None
+
+
+_default_store: JobStore | None = None
+
+
+def get_job_store() -> JobStore:
+    """Singleton accessor used by routes + the pipeline."""
+    global _default_store
+    if _default_store is None:
+        _default_store = JobStore()
+    return _default_store

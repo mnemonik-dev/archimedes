@@ -1,5 +1,9 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import CustomSelect from './CustomSelect'
+import EfficientFrontier from './EfficientFrontier'
+import CorrelationMatrix from './CorrelationMatrix'
+import RigorExplainer from './RigorExplainer'
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? ''
 
@@ -28,6 +32,37 @@ const RISK_PROFILES = [
 ]
 
 const STATUS_ORDER = ['live', 'validated', 'candidate', 'retired']
+
+function downloadStrategy(strategy, format) {
+  let content, filename, type
+  if (format === 'json') {
+    content = JSON.stringify(strategy, null, 2)
+    filename = `strategy-${(strategy.id || 'unknown').slice(0, 8)}.json`
+    type = 'application/json'
+  } else {
+    const rows = [
+      ['Field', 'Value'],
+      ['Title', strategy.paper_title],
+      ['Authors', strategy.paper_authors?.join(', ')],
+      ['Year', strategy.paper_year],
+      ['Status', strategy.status],
+      ['Sharpe', strategy.sharpe_ratio],
+      ['CAGR', strategy.cagr],
+      ['Max Drawdown', strategy.max_drawdown],
+      ['Methodology', strategy.methodology_summary],
+      ['Assets', strategy.asset_universe?.join(', ')],
+      ['Methodology Hash', strategy.methodology_hash],
+    ]
+    content = rows.map(r => r.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\n')
+    filename = `strategy-${(strategy.id || 'unknown').slice(0, 8)}.csv`
+    type = 'text/csv'
+  }
+  const blob = new Blob([content], { type })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url; a.download = filename; a.click()
+  URL.revokeObjectURL(url)
+}
 
 function statusTag(status) {
   if (status === 'live') return 'tag-positive'
@@ -347,8 +382,9 @@ export function StrategyArchitect({ strategies }) {
 // + rigor metrics). One row per strategy; no visual hierarchy by status (the
 // STATUS column does that job).
 
-function StrategyRow({ s }) {
-  const [open, setOpen] = useState(false)
+function StrategyRow({ s, isHighlighted, onOpenRigorExplainer }) {
+  const [open, setOpen] = useState(isHighlighted)
+  const rowRef = useRef(null)
   const years = periodInYears(s.backtest_start, s.backtest_end)
   const endValue = projectedEndValue(1000, s.cagr, years)
   const startStr = (s.backtest_start || '').slice(0, 10)
@@ -361,9 +397,20 @@ function StrategyRow({ s }) {
   const sharpeCI = s.sharpe_ci_95 != null ? s.sharpe_ci_95 : null
   const driftFlag = s.drift_detected === true
 
+  useEffect(() => {
+    if (isHighlighted && rowRef.current) {
+      rowRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+  }, [isHighlighted])
+
+  const rowStyle = {
+    cursor: 'pointer',
+    ...(isHighlighted ? { background: 'rgba(255,209,102,0.10)', outline: '1px solid var(--accent)' } : {}),
+  }
+
   return (
     <>
-      <tr className="lib-row cursor-pointer" onClick={() => setOpen(o => !o)}>
+      <tr ref={rowRef} className="lib-row cursor-pointer" onClick={() => setOpen(o => !o)} style={rowStyle}>
         <td className="font-semibold">
           <span className={`${open ? 'i-lucide-chevron-down' : 'i-lucide-chevron-right'} w-3 h-3 mr-1.5 text-[var(--text-4)] flex-shrink-0 inline-block`} />
           {s.paper_title}
@@ -436,7 +483,20 @@ function StrategyRow({ s }) {
                 )}
               </div>
               <div>
-                <div className="label mb-2">Rigor metrics</div>
+                <div className="label mb-2 flex items-center gap-2">
+                  Rigor metrics
+                  {onOpenRigorExplainer && (
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); onOpenRigorExplainer() }}
+                      className="rigor-help-btn"
+                      aria-label="What is the rigor gate?"
+                      title="What is the rigor gate?"
+                    >
+                      ?
+                    </button>
+                  )}
+                </div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
                   <div><div className="caption">DSR</div><div className="mono" style={{ fontWeight: 700 }}>{fmt(s.deflated_sharpe_ratio)}</div></div>
                   <div><div className="caption">PBO</div><div className="mono" style={{ fontWeight: 700 }}>{fmtPct(s.pbo_score)}</div></div>
@@ -459,6 +519,22 @@ function StrategyRow({ s }) {
                 )}
               </div>
             </div>
+            <div style={{ marginTop: 14, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button
+                className="btn btn-outline btn-sm"
+                onClick={(e) => { e.stopPropagation(); downloadStrategy(s, 'json') }}
+                title="Download this strategy as JSON"
+              >
+                Export JSON
+              </button>
+              <button
+                className="btn btn-outline btn-sm"
+                onClick={(e) => { e.stopPropagation(); downloadStrategy(s, 'csv') }}
+                title="Download this strategy as CSV"
+              >
+                Export CSV
+              </button>
+            </div>
           </td>
         </tr>
       )}
@@ -466,7 +542,7 @@ function StrategyRow({ s }) {
   )
 }
 
-function StrategyTable({ strategies, emptyState }) {
+function StrategyTable({ strategies, emptyState, highlightStrategyId, onOpenRigorExplainer }) {
   if (!strategies.length) return emptyState
   return (
     <div className="overflow-x-auto rounded-lg border border-[var(--glass-border)]">
@@ -484,7 +560,14 @@ function StrategyTable({ strategies, emptyState }) {
           </tr>
         </thead>
         <tbody>
-          {strategies.map(s => <StrategyRow key={s.id} s={s} />)}
+          {strategies.map(s => (
+            <StrategyRow
+              key={s.id}
+              s={s}
+              isHighlighted={highlightStrategyId && s.id === highlightStrategyId}
+              onOpenRigorExplainer={onOpenRigorExplainer}
+            />
+          ))}
         </tbody>
       </table>
     </div>
@@ -529,7 +612,7 @@ function coerceGenerated(row) {
   }
 }
 
-export default function Strategies() {
+export default function Strategies({ highlightStrategyId }) {
   const [examples, setExamples] = useState([])
   const [generated, setGenerated] = useState([])
   const [loading, setLoading] = useState(true)
@@ -537,6 +620,19 @@ export default function Strategies() {
   // 'generated' is the first-class tab per product feedback — pushes user
   // toward Generate when empty.
   const [activeTab, setActiveTab] = useState('generated')
+  // Page-level rigor explainer modal, opened from any row expansion's "?"
+  // affordance. Single modal instance per page keeps state simple.
+  const [rigorModalOpen, setRigorModalOpen] = useState(false)
+  const openRigorExplainer = useCallback(() => setRigorModalOpen(true), [])
+
+  // If we arrived via ?highlight=<id> and the strategy is only in Examples,
+  // auto-switch to the Examples tab so the scrollIntoView lands a real row.
+  useEffect(() => {
+    if (!highlightStrategyId) return
+    const inGenerated = generated.some(s => s.id === highlightStrategyId)
+    const inExamples = examples.some(s => s.id === highlightStrategyId)
+    if (!inGenerated && inExamples) setActiveTab('examples')
+  }, [highlightStrategyId, generated, examples])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -600,6 +696,8 @@ export default function Strategies() {
         <>
           <StrategyTable
             strategies={generated}
+            highlightStrategyId={highlightStrategyId}
+            onOpenRigorExplainer={openRigorExplainer}
             emptyState={
               <div className="card" style={{ padding: 22 }}>
                 <div className="label mb-2">No generated strategies yet</div>
@@ -633,6 +731,8 @@ export default function Strategies() {
           {!loading && (
             <StrategyTable
               strategies={examples}
+              highlightStrategyId={highlightStrategyId}
+              onOpenRigorExplainer={openRigorExplainer}
               emptyState={<p className="caption">No example strategies loaded.</p>}
             />
           )}
@@ -644,6 +744,41 @@ export default function Strategies() {
           * Estimated metrics — sourced from paper claims with McLean-Pontiff post-publication decay
           applied. Replaced by real BacktestResult once the analytics engine runs.
         </div>
+      )}
+
+      {/* Page-level analytics panels — moved from Reasoning per page-roles-spec.
+          CorrelationMatrix highlights the deep-linked row when present. */}
+      <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-4">
+        <EfficientFrontier />
+        <CorrelationMatrix selectedStrategyId={highlightStrategyId || null} />
+      </div>
+
+      {/* Rigor Explainer modal (portal-rendered, page-level) */}
+      {rigorModalOpen && createPortal(
+        <div
+          className="modal-overlay"
+          onClick={() => setRigorModalOpen(false)}
+          style={{ zIndex: 1000 }}
+        >
+          <div
+            className="modal"
+            onClick={e => e.stopPropagation()}
+            style={{ maxWidth: 820, maxHeight: '85vh', overflowY: 'auto', width: '90vw' }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+              <button
+                type="button"
+                onClick={() => setRigorModalOpen(false)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-4)' }}
+                aria-label="Close"
+              >
+                <span className="i-lucide-x" style={{ width: 20, height: 20 }} />
+              </button>
+            </div>
+            <RigorExplainer />
+          </div>
+        </div>,
+        document.body,
       )}
     </div>
   )

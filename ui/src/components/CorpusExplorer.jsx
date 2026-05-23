@@ -294,7 +294,14 @@ function CatalogTab({ papers, total, page, loading, search, setSearch, categoryF
                 <div className="paper-title">{p.title || p.arxiv_id}</div>
                 <div className="paper-meta">
                   <span className="paper-id">{p.arxiv_id}</span>
-                  {p.primary_category && <span className="paper-cat">{p.primary_category}</span>}
+                  {p.primary_category && (
+                    <span
+                      className="paper-cat"
+                      title={p.category_label ? `${p.primary_category} — ${p.category_label}` : p.primary_category}
+                    >
+                      {p.category_label || p.primary_category}
+                    </span>
+                  )}
                   {p.published && <span className="paper-year">{p.published?.slice(0, 4)}</span>}
                   {p.cluster_id && <span className="paper-cluster">Cluster: {p.cluster_id}</span>}
                 </div>
@@ -375,7 +382,14 @@ function PaperDetail({ paper, onBack }) {
 
         <div className="paper-detail-meta flex flex-wrap gap-2 mb-3.5">
           <span className="tag tag-muted mono">arxiv:{paper.arxiv_id}</span>
-          {paper.primary_category && <span className="tag tag-muted">{paper.primary_category}</span>}
+          {paper.primary_category && (
+            <span
+              className="tag tag-muted"
+              title={paper.category_label ? `${paper.primary_category} — ${paper.category_label}` : paper.primary_category}
+            >
+              {paper.category_label || paper.primary_category}
+            </span>
+          )}
           {paper.published && <span className="tag tag-muted">{(paper.published || '').slice(0, 10)}</span>}
           {paper.topic_label && <span className="tag tag-accent">Topic: {paper.topic_label}</span>}
         </div>

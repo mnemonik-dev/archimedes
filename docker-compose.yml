@@ -127,6 +127,38 @@ services:
       redis:
         condition: service_healthy
 
+  # ---------- KB pipeline runner (Phase 3c skeleton) ----------
+  # Polls the corpus + artifact volume and re-runs the SPECTER2 / HDBSCAN /
+  # BERTopic / REBEL / SciSpacy pipeline when the trigger conditions hit
+  # (≥KB_NEW_PAPER_THRESHOLD papers OR ≥KB_MAX_DAYS_SINCE_LAST days).
+  #
+  # The pipeline body itself is gated behind KB_PIPELINE_ENABLED — leave
+  # unset until the dedicated image with the ~6 GB of model weights ships;
+  # the runner simply logs "needs_rerun=False" between ticks meanwhile.
+  # See docs/specs/kb-integration-spec.md.
+  kb-runner:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: ["python", "-m", "archimedes.services.kb_runner"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://archimedes:archimedes-hackathon-2026@postgres:5432/archimedes}
+      KB_ARTIFACT_DIR: /srv/corpus-artifact
+      KB_CORPUS_DIR: /srv/corpus-text
+      KB_RUNNER_INTERVAL_SECONDS: ${KB_RUNNER_INTERVAL_SECONDS:-21600}
+      KB_NEW_PAPER_THRESHOLD: ${KB_NEW_PAPER_THRESHOLD:-100}
+      KB_MAX_DAYS_SINCE_LAST: ${KB_MAX_DAYS_SINCE_LAST:-7}
+      KB_PIPELINE_ENABLED: ${KB_PIPELINE_ENABLED:-}
+    env_file:
+      - .env
+    volumes:
+      - ./data/corpus:/srv/corpus-text:ro
+      - archimedes-corpus-artifact:/srv/corpus-artifact:rw
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 volumes:
   pgdata:
   archimedes-corpus-artifact:
