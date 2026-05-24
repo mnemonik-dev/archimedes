@@ -319,12 +319,12 @@ Four workflows run on every PR and every push to `main`:
 
 | Workflow | Trigger | What it does |
 | --- | --- | --- |
-| `quality-gate.yml` | PR → main | Runs `pytest -m "not integration"` (unit suite, no DB/Redis), `ruff check` + `ruff format --check`, `npm run lint` in `ui/`. All three are hard blocks. Agent PRs (`t2o2`) also get a coverage check (≥ 60%). |
-| `complexity-gate.yml` | PR → main (Python/JS/TS files only) | Per-function cyclomatic complexity, nesting depth, and recursion analysis via lizard + Python AST. Compares each function against the `main` baseline and posts a table comment on the PR. **CC ≥ 16 blocks merge.** Runs inside a distroless container image pulled from GHCR. |
-| `deploy.yml` | push → main | Rebuilds and redeploys the EC2 stack, AND pushes the CI container image (`archimedes-complexity-gate`) to GHCR so the complexity gate always uses a fresh image. |
-| `release-tag.yml` | push → main | Creates a semver annotated tag for every merged PR. Bump rules (read from PR title or body): `!version-release` → major (1.0.0), `!minor` → minor (0.1.0), anything else → patch (0.0.1). Direct pushes with no associated PR are skipped silently. |
+| `quality-gate.yml` | PR → main | Hard block: `pytest -m "not integration"` (unit suite, no DB/Redis). Informational: `ruff check` + `ruff format --check` and `npm run lint` in `ui/` — both run with `continue-on-error` and their pass/fail counts are posted as a PR comment table (marker `<!-- quality-gate-v1 -->`). Agent PRs (`t2o2`) also get a coverage gate (≥ 60%). |
+| `complexity-gate.yml` | PR → main (Python/JS/TS files only) | Aggregate cyclomatic-complexity, nesting depth, recursion, and orphan analysis via lizard + Python AST. Compares the changed-file set against the `main` baseline and posts a table comment on the PR (marker `<!-- complexity-gate-v1 -->`). **Informational only — never blocks merge.** Runs on the GitHub runner with `pip install lizard`; the bundled distroless Dockerfile at `.github/docker/complexity-gate/Dockerfile` is available for local use but not pulled by CI. |
+| `deploy.yml` | push → main | Rebuilds and redeploys the EC2 stack. |
+| `release-tag.yml` | push → main | Creates a semver annotated tag for every merged PR via the GitHub API (no `git push`). Bump rules (read from PR title or body): `!version-release` → major (1.0.0), `!minor` → minor (0.1.0), anything else → patch (0.0.1). Direct pushes with no associated PR are skipped silently. |
 
-**Complexity gate thresholds (for reference):** ✅ CC 1–5 simple · ⚠️ 6–10 moderate · 🟠 11–15 complex · 🔴 16+ blocks merge. Nesting depth ≥ 3 and recursive functions are flagged but do not block.
+**Complexity gate visual thresholds (informational only — none block merge):** ✅ CC 1–5 simple · ⚠️ 6–10 moderate · 🟠 11–15 complex · 🔴 16+. Δ CC > +1.0 vs main is flagged ⚠️. Nesting depth ≥ 3 and recursive functions are flagged in the table.
 
 **Release tag markers:**
 ```
@@ -332,8 +332,6 @@ PR title: "Rework strategy fusion engine !minor"     → v0.1.0
 PR title: "Launch-ready rebalancer !version-release" → v1.0.0
 PR title: "Fix corpus manifest path"                 → v0.0.1
 ```
-
-The CI image (`ghcr.io/<org>/archimedes-complexity-gate:latest`) is distroless Python 3.11 + lizard. It is rebuilt on every push to `main` by `deploy.yml`. The first PR after a fresh repo setup will fail to pull it — merge any change to `main` first to seed the image.
 
 ### Smoke-test before deploy
 
