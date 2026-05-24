@@ -472,6 +472,10 @@ Two lineages compose into one pillar. The **Linus 5-layer model** (DEC-0052) giv
 
 **Why the A.1/A.2 split matters operationally.** The Live Execution Agent's cost-benefit sub-agent reads A.2 (real vault state from chain) as the ground truth for "what is my current weight"; it then reasons in A.1 about "should I rebalance." If the agent's KV-cached A.1 state drifts from A.2 (because of stale context or hallucination), the cost-benefit gate catches it because A.2 is sourced from `vault.totalAssets()` and `vault.balanceOf(...)` calls each tick, not from LLM memory. This is Xia's "Hierarchy of Truth" applied to our vault state: chain reads override agent narrative when they conflict.
 
+**Layer C as compounding substrate (T-PE.8 wires the v1).** Linus DEC-0029 specifies Layer C as the cross-session episodic memory that makes a research-intelligence substrate *compound over time*. The Linus-Maestro audit (`submodules/Linus/docs/audits/2026-05-22-reveal-prep/strategy-engine-linus-flavor.md`, Proposal A) identifies this as Archimedes' biggest strategic gap as of 2026-05-23: *"on-chain provenance is being applied to a non-compounding asset."* T-PE.8 closes the gap by persisting every fusion proposal + architect proposal + rigor verdict + user reject as a content-hashed, retrievable row in `strategy_proposals`. The on-chain `ReasoningTraceRegistry` is the externalization of Layer C — the off-chain episodic store is the substrate, the on-chain anchor is the tamper-evident receipt. Reframes the pitch from *"4-strategy verified library"* (static) to *"verified-knowledge substrate that compounds and every increment is provenance-anchored"* (generative).
+
+**K=1 + externalized rigor gate as a deliberate architectural choice.** Multi-Worker fan-out (K parallel candidate generations + critique Worker) is the right pattern when Workers are compute-constrained (local Ollama, free inference). For hosted-LLM budget-constrained Workers (Anthropic, GLM via z.ai, Bedrock), the cost surface inverts: K=1 generation + a strong externalized gate (DSR/PBO/walk-forward OOS/look-ahead audit + the named protocols in § 3.6) is the strictly better pattern. The Linus-Maestro audit validates this explicitly (`strategy-engine-linus-flavor.md` § Retrospective #3): *"the cost surface of the Worker determines whether K-parallel-fanout is the right pattern. Map it deliberately, not by analogy from the host-of-origin's economics."* Our spine-plus-v2 mechanic ("agent runs N candidates internally, surfaces single best, rejects browsable") applies the K=N pattern at the human-facing boundary — externalized critique visible to the user, not at the dispatch boundary. M.4 deck refresh ships this as a dedicated architecture slide.
+
 ### 3.5 Corpus seeding strategy
 
 One-time manual rebuild via `python -m archimedes.scripts.run_kb_pipeline --rebuild --seed-config corpus_seed_v2.yaml`. No scheduled auto-refresh in v1.
@@ -1760,6 +1764,87 @@ Intelligence lane. Dan reviews adapter design + results writeup. Big spec — au
 T3.7 (so the benchmark scores include the named protocols enforcing)
 ```
 
+### T3.9 — paper-qa semantic-retrieval wrapping behind the fusion candidate seam (MUST-SHIP)
+
+```
+APIN - Intelligence - Wire paper-qa (Apache 2.0, st-embeddings) as a defense-in-depth ranker behind strategy_fusion._select_candidates()
+
+## TLDR
+Today's "research-grounded" claim is grounded in abstracts + synonym-mapped keyword filters
+(per the Linus-Maestro audit doc and Dan's own bidirectional comparison). Wrapping paper-qa
+behind the existing fusion-candidate seam upgrades the claim to paper-bodies + sentence-
+embedding retrieval WITHOUT waiting on T3.2's full SPECTER2 + HDBSCAN + REBEL pipeline.
+Linus already integrated paper-qa as src/linus/knowledge/paperqa.py — same Apache 2.0,
+st-embeddings (no API key required), single-tool integration pattern. We lift the wrapper,
+not the substrate. **MUST-SHIP per Dan's call** — this is a wedge claim, not a safety net.
+
+## Summary
+Adds `backend/archimedes/services/paper_rag.py` that wraps paper-qa's `Docs` class
+against the served Postgres corpus (paper bodies streamed from the PDF cache when
+available, falls back to abstract+title). Wires into `strategy_fusion._select_candidates()`
+as an additional ranker behind the existing direction-keyword filter — defense-in-depth
+(keyword + semantic) beats either alone. Anti-hallucination preserved post-parse: any
+arxiv_id paper-qa returns that isn't in the candidate set is dropped, mirroring the
+existing fusion discipline. Exposes a `/health` line `paper_rag: live|degraded|disabled`
+so silent failure is impossible.
+
+## Scope
+Files to ADD:
+- `backend/archimedes/services/paper_rag.py` (the wrapper)
+- `backend/tests/services/test_paper_rag.py` (unit + integration tests with mocked Docs)
+
+Files to MODIFY:
+- `backend/archimedes/services/strategy_fusion.py` — `_select_candidates()` chains paper_rag
+  rank behind the existing keyword filter. Gate behind `FUSION_SEMANTIC_RETRIEVAL=true` env
+  var (default ON in production; OFF in tests for determinism).
+- `backend/archimedes/api/routes.py` (or `health_routes.py`) — surface `paper_rag` health
+  in the `/health` response.
+- `backend/requirements.txt` — add `paper-qa` (Apache 2.0).
+- `.env.example` — add `FUSION_SEMANTIC_RETRIEVAL=true` (production default).
+
+Files to NOT TOUCH:
+- contracts/
+- ui/
+- submodules/Linus/ (we're lifting the pattern, not the code)
+- T3.2 / T3.3 specs (this is COMPLEMENTARY, not a replacement)
+
+## Acceptance
+- [ ] `pytest -q backend/tests/services/test_paper_rag.py` → all pass
+- [ ] `pytest -q backend/tests/services/test_strategy_fusion.py` → all pass (existing tests + new "semantic retrieval upgrades keyword-only ranker" test)
+- [ ] `curl -s http://localhost:8000/health | jq .paper_rag` → "live" (or "disabled" if env off)
+- [ ] Manual fusion run with a brief that has NO direct keyword overlap with paper titles ("regime-shift defense for late-cycle equity overweight") returns a candidate set with ≥ 1 paper that the keyword-only ranker would not have surfaced — captured in a docs/runbooks/paper-rag-validation.md artifact (paper ids before/after, semantic-relevance score).
+- [ ] Fusion candidate set still respects max_papers ∈ [2, 6] hard floor + ceiling.
+- [ ] Anti-hallucination preserved: feeding paper-qa a non-existent arxiv_id is dropped at parse, NOT echoed into the user-facing strategy.
+
+## Verify
+docker compose up -d --build backend
+pytest -q backend/tests/services/test_paper_rag.py
+curl -s http://localhost:8000/health | jq .paper_rag
+# Manual: hit /api/strategies/generate with the regime-shift brief; record paper ids returned
+
+## Anti-goals
+- DO NOT replace the keyword filter — paper-qa runs BEHIND it (keyword first, semantic rerank second).
+- DO NOT require an API key. paper-qa with st-embeddings runs fully local; no Anthropic / OpenAI dependency for retrieval.
+- DO NOT enable on hot paths without the env-var gate.
+- DO NOT make paper-qa a blocking dependency for fusion — keyword fallback must still work if paper-qa is degraded.
+- DO NOT touch T3.2's pipeline scope. paper-qa is complementary semantic retrieval at the candidate-selection layer; T3.2 produces the SPECTER2 + HDBSCAN clusters + REBEL/SciSpacy KG that power the Corpus Graph / KG UI tabs.
+
+## Precedent
+- `submodules/Linus/src/linus/knowledge/paperqa.py` — reference integration pattern
+- `backend/archimedes/services/strategy_fusion.py` — the existing seam this wires behind
+- `backend/archimedes/services/llm_backend.py` — pattern for the live | degraded | disabled health shape
+
+## Lane note
+Intelligence lane. Dan reviews integration shape; Önder backs retrieval-quality validation.
+Big spec — audit subagent REQUIRED per § 2.6 before filing because paper-qa integration
+needs careful mapping to our existing corpus access pattern (Postgres papers table + PDF
+cache + manifest.jsonl).
+
+## Depends on
+none — independent of T3.2 by design. Can ship in parallel with the GPU pipeline. If T3.2
+slips, T3.9 still ships the "semantic retrieval" claim on its own.
+```
+
 ---
 
 ## 6.5 Track E — Strategy Passport unification + bear-strategy architecture (T-PE.x)
@@ -2284,6 +2369,108 @@ REQUIRED per § 2.6.
 T-PE.5 (regime_tag schema), T-PE.6 (always-both generation gives the agent strategies to mix)
 ```
 
+### T-PE.8 — Strategy episodic memory: persist rigor-fail + user-reject proposals (MUST-SHIP; makes "library compounds" claim demonstrable)
+
+```
+APIN - Intelligence - Add strategy_proposals episodic table; persist every fusion/architect output with its rigor verdict; expose via /api/strategies/proposals
+
+## TLDR
+The Linus-Maestro audit doc identifies our biggest strategic gap: the strategy library is
+5 hand-curated files; each user request starts from zero; **nothing compounds.** Our
+on-chain provenance is being applied to a non-compounding asset. T-PE.8 closes the gap
+with the SMALLEST WIRE that makes the "compounding substrate" claim demonstrable: every
+fusion/architect proposal — including rigor-fails and user-rejects — gets persisted to
+an episodic table, content-hashed, retrievable by `/api/strategies/proposals?since=<ts>`.
+The full Layer-C SQLite memory module (Linus DEC-0029) is a v2 build; this is the v1
+proof-of-substrate.
+
+## Summary
+Adds a `strategy_proposals` table to Postgres (separate from `strategies` — proposals are
+ephemeral candidates, strategies are admitted artifacts). Every fusion + architect
+generation writes a row with: generation_id, proposal_id, parent_proposal_id (nullable;
+threads multi-iteration generations), verdict (rigor_pass | rigor_fail | user_rejected |
+pending), content_hash (keccak256 of canonical JSON), payload (the full proposal),
+trust_level (CANDIDATE | VALIDATED | RETIRED). Exposes `GET /api/strategies/proposals`
+with filtering by verdict + since + agent. Surfaces "considered alternatives" on the
+StrategyPassport so users see the rejected siblings of their accepted strategy.
+
+## Scope
+Files to ADD:
+- `backend/archimedes/models/strategy_proposal.py` — ORM
+- `backend/archimedes/services/strategy_memory.py` — write path (called from fusion +
+  architect + rigor gate + portfolio agent)
+- `backend/archimedes/api/proposals_routes.py` — dedicated router
+- `backend/archimedes/api/proposals_schemas.py` — Pydantic schemas
+- `backend/tests/services/test_strategy_memory.py`
+
+Files to MODIFY:
+- `backend/archimedes/db.py` — idempotent CREATE TABLE for strategy_proposals (matching
+  existing patch pattern for papers.cluster_id)
+- `backend/archimedes/services/strategy_fusion.py` — emit a proposal record on every
+  candidate set generation
+- `backend/archimedes/services/strategy_architect.py` — same
+- `backend/archimedes/api/selection_bias_routes.py` — write the rigor verdict back to
+  the proposal record
+- `backend/archimedes/main.py` — include proposals_router
+- `ui/src/components/StrategyPassport.jsx` — render "Considered alternatives" panel
+  showing rigor-fail + user-rejected siblings (read-only; no actions)
+
+Files to NOT TOUCH:
+- contracts/ — episodic memory is OFF-CHAIN; only the admitted strategy gets the
+  on-chain anchor (T-PE.1)
+- The unified strategy store (T-PE.3) — proposals are SEPARATE from admitted strategies
+- Track A vault execution path
+
+## Acceptance
+- [ ] `psql -c "\d strategy_proposals"` shows the table with columns: id (uuid PK), generation_id (uuid), proposal_id (uuid), parent_proposal_id (uuid nullable), verdict (enum), content_hash (varchar 66), payload (jsonb), trust_level (enum), agent (varchar), regime_tag (enum nullable), created_at, updated_at
+- [ ] `curl -s http://localhost:8000/api/strategies/proposals?limit=10 | jq '.proposals | length'` → ≥ 1 after running a fusion generation
+- [ ] `curl -s http://localhost:8000/api/strategies/proposals?verdict=rigor_fail&limit=10 | jq '.proposals | length'` → ≥ 1 after a known-failing brief is run (e.g., "high Sharpe long-only TSLA single-name strategy" should fail PBO)
+- [ ] StrategyPassport renders "Considered alternatives (N)" panel listing sibling proposals from the same generation_id, with verdict + reason
+- [ ] keccak256 content_hash recomputable on any row: `python -c "import json; from archimedes.chain.trace_publisher import keccak256_canonical_json; ..."` matches the stored hash
+- [ ] `pytest -q backend/tests/services/test_strategy_memory.py` → all pass
+- [ ] Existing tests still pass: `pytest -q backend/tests/services/test_strategy_fusion.py backend/tests/services/test_strategy_architect.py backend/tests/test_selection_bias_routes.py`
+
+## Verify
+docker compose up -d --build backend
+psql ${DATABASE_URL} -c "\d strategy_proposals"
+curl -X POST http://localhost:8000/api/strategies/generate -d '{"brief":{"intent":"trend with low DD","risk_appetite":"moderate"}}' -H "Content-Type: application/json"
+sleep 5
+curl -s http://localhost:8000/api/strategies/proposals?limit=20 | jq '.proposals[] | {proposal_id, verdict, agent, content_hash}'
+
+## Anti-goals
+- DO NOT collapse proposals into the strategies table — they have different lifecycles.
+  strategies are admitted artifacts (Tier 1 / Community); proposals are the substrate
+  that EVERY generation contributes to, regardless of admission.
+- DO NOT delete or prune proposal rows — they are the audit trail. Add archival
+  policy as v2.
+- DO NOT publish proposals to the on-chain registry — only admitted strategies (per
+  T-PE.1) get the on-chain anchor. Proposals are off-chain episodic memory.
+- DO NOT use SHA-256 for content_hash — keccak256, matching the on-chain hash convention.
+- DO NOT expose user-PII in the payload jsonb — wallet addresses are fine (public);
+  email + display_name from T2.7 profile must NOT leak in.
+- DO NOT block fusion / architect generation if the memory write fails — log + continue.
+  Episodic memory is best-effort; the generation must not fail because the audit table
+  is unavailable.
+
+## Precedent
+- `backend/archimedes/models/strategy_store.py` — ORM pattern
+- `backend/archimedes/api/chat_routes.py` — clean 145-line dedicated router
+- `backend/archimedes/services/redis_state.py` — recent-traces shape (proposals are the
+  Postgres-persistent companion to the Redis ephemeral version)
+- Linus DEC-0029 — the Layer C SQLite schema that the long-form v2 build will adopt
+  (submodules/Linus/docs/decisions/DEC-0029-*.md); this v1 wire keeps the SAME shape
+  but uses Postgres so we can lift directly later
+
+## Lane note
+Cross-lane (backend + UI). Dan reviews backend; Daniel R reviews UI. Big spec — audit
+subagent REQUIRED per § 2.6. **Reframes the pitch from "static library of 4 strategies"
+to "verified-knowledge substrate that compounds, every increment provenance-anchored."
+M.4 deck refresh must reflect this.**
+
+## Depends on
+T-PE.3 (unified strategy store provides the rigor verdict shape we mirror)
+```
+
 ---
 
 First-class. Same rigor as the statistical pipeline. Zero-trust posture, secrets out of `.env`, IAM-scoped resource access, HTTPS everywhere, security headers + CORS + rate limits, dependency scanning, user-data minimization.
@@ -2528,18 +2715,34 @@ TS.1 (needs 443 server block to exist)
 | **M.11** | **arc-canteen telemetry backfill** — `update-product` calls for last 5 days' worth of merges (Phase 4–9, KB integration, 10-contract deploy, Phase 8/9 UI ship); `update-traction` calls for any user/judge conversations; ongoing for every meaningful ship Sat → Sun | Dan + Claude | Sat AM + ongoing |
 | **M.12** | **StockBench benchmark result baked into demo video v2 + deck** — after T3.8 lands, capture the Sortino + return + drawdown numbers from `docs/benchmarks/stockbench-results.md`; insert into the deck as a comparison-bar slide; record video v2 with the number spoken aloud ("Archimedes scored X Sortino on StockBench, ranking #N against 14 published baselines"). Hard dependency for demo video v2. | Dan + Claude | Sun afternoon (after T3.8) |
 
-**Documents to align in M.4 (each gets refreshed to the canonical pitch frame in Section 3.1 — including the Xia 2026 opening, the StockBench empirical claim, the locked RFB alignment narrative, the virality-readiness architecture beat, the agent-user interaction model from § 3.3.1, and the four named protocols from § 3.6):**
+**Documents to align in M.4 (each gets refreshed to the canonical pitch frame in Section 3.1 — including the Xia 2026 opening, the StockBench empirical claim, the locked RFB alignment narrative, the virality-readiness architecture beat, the agent-user interaction model from § 3.3.1, the four named protocols from § 3.6, the K=1 + externalized rigor architecture choice, and the compounding-substrate framing):**
 
-- `docs/demo-script-pitch-deck-outline.md` — refresh deck outline. **Slide 1 leads with Xia et al. 2026 numbers** (2/19, 1/19, 0/19, 15/19, 0/19) → cuts to "Archimedes is the answer." RFB 04 alignment statement on slide 2. StockBench Sortino comparison chart on the empirical-proof slide.
+- `docs/demo-script-pitch-deck-outline.md` — refresh deck outline. **Slide 1 leads with Xia et al. 2026 numbers** (2/19, 1/19, 0/19, 15/19, 0/19) → cuts to "Archimedes is the answer." RFB 04 alignment statement on slide 2. StockBench Sortino comparison chart on the empirical-proof slide. **Dedicated architecture slide: "K=1 generation + externalized rigor gate — the right pattern for hosted-LLM budget economics."** Frame as a deliberate choice (validated by the Linus-Maestro audit, 2026-05-23) — the user sees winner + considered-rejects, externalized critique applied at the human-facing boundary. **Dedicated substrate slide: "The library compounds — every fusion proposal + every rigor verdict + every user-reject is content-hashed, off-chain persisted, and visible on the StrategyPassport's Considered Alternatives panel. Static library → growing substrate."** (T-PE.8 ships the wire.)
 - `docs/specs/claude-design-prompts.md` (if exists; create if not, using Appendix C)
 - `docs/competitor-landscape.md` (add rosetta-alpha as the most credible competitor; refresh framing; explicitly position Archimedes against the 19-study primary subset Xia audits)
-- `docs/judging-rubric-assessment.md` (refresh Day-12 score with TS + T3.6 ALB-CloudFront + T3.7 named protocols + T3.8 StockBench rank)
+- `docs/judging-rubric-assessment.md` (refresh Day-12 score with TS + T3.6 ALB-CloudFront + T3.7 named protocols + T3.8 StockBench rank + T3.9 paper-qa semantic-retrieval + T-PE.8 episodic memory)
 - `docs/anti-features.md` (add security non-claims + BYOK posture + we-don't-promise-returns posture + "all LLM agents underperform passive baseline in downturns per StockBench — we don't pretend otherwise")
-- `README.md` — top fold updated; quick-start updated to `https://archimedes-arc.app`; explicit "Built for [RFB 04 Adaptive Portfolio Manager](https://luma.com/7i50p2r9) with adjacent fit to RFB 02 + RFB 06" badge or statement near the title; org references updated to `a-apin`; **add Xia et al. 2026 + Chen et al. 2026 + Trading-R1 + TradingAgents to a "Cited literature" section** with arxiv links
-- `ARC-OSS-SHOWCASE.md` — add TS pillar as forkable primitives; add T3.6 scalability architecture as a forkable primitive; add T3.7 named-protocols implementation as a forkable primitive ("Outcome Embargo, Time-Aware Retrieval, Hierarchy of Truth, Source Tracking, V_check — every Xia 2026 protocol, in production code")
-- `CLAUDE.md` (this repo's project context) — verify the team table + the canonical pitch frame match Section 3.1; update HTTPS domain reference; verify RFB 04 + RFB 02 + RFB 06 alignment is named in the Scope section; add Xia + StockBench to the architectural primitives section
+- `README.md` — top fold updated; quick-start updated to `https://archimedes-arc.app`; explicit "Built for [RFB 04 Adaptive Portfolio Manager](https://luma.com/7i50p2r9) with adjacent fit to RFB 02 + RFB 06" badge or statement near the title; **org references updated to `a-apin` (grep-and-replace every `hackagora` reference — `a-apin` is the canonical org going forward)**; **add Xia et al. 2026 + Chen et al. 2026 + Trading-R1 + TradingAgents to a "Cited literature" section** with arxiv links; add the cross-project lineage paragraph ("three repos, one lineage: Linus + Archimedes + KnowledgeBase debut together — the Linus orient at submodules/Linus/docs/audits/2026-05-22-reveal-prep/archimedes-orient.md is the canonical sibling-perspective read"). Cite Linus-Maestro audit explicitly as validation of the externally-verifiable-hashes design choice (lesson #2 — "shifting provenance enforcement from runtime types to externally-verifiable hashes is a strict upgrade").
+- `ARC-OSS-SHOWCASE.md` — add TS pillar as forkable primitives; add T3.6 scalability architecture as a forkable primitive; add T3.7 named-protocols implementation as a forkable primitive ("Outcome Embargo, Time-Aware Retrieval, Hierarchy of Truth, Source Tracking, V_check — every Xia 2026 protocol, in production code"); add T3.9 paper-qa wrapping as a forkable primitive (Linus + Archimedes cross-project semantic-retrieval bridge); add T-PE.8 strategy_proposals table as a forkable primitive (Linus DEC-0029 Layer-C shape, Postgres-realized).
+- `CLAUDE.md` (this repo's project context) — **grep `hackagora` and replace with `a-apin` (canonical org)**; verify the team table + the canonical pitch frame match Section 3.1; update HTTPS domain reference; verify RFB 04 + RFB 02 + RFB 06 alignment is named in the Scope section; add Xia + StockBench to the architectural primitives section; add the K=1 + externalized rigor architectural commitment as a 5th architectural primitive
 - `docs/benchmarks/stockbench-results.md` — committed by T3.8; referenced from README + deck
 - `docs/specs/xia-2026-protocols.md` — committed by T3.7; referenced from ARC-OSS-SHOWCASE
+
+**M.4 grep-and-replace truth-up (do this in one pass across the whole tree, NOT just the listed docs above):**
+
+```bash
+# `a-apin` is the canonical org name going forward. Any remaining `hackagora`
+# references in docs or code are stale (org was renamed; git remote already points
+# at a-apin). Sweep + replace, EXCEPT inside docs/archive/ (preserve historical truth).
+rg -l 'hackagora' --glob '!docs/archive/' --glob '!submodules/**'
+# Review the hit list, then:
+rg -l 'hackagora' --glob '!docs/archive/' --glob '!submodules/**' \
+  | xargs sed -i.bak 's|hackagora|a-apin|g' && find . -name '*.bak' -delete
+# Spot-check: `archimedes-arcadia.com` urls, github org links, Discord references
+# (the Discord SERVER is still "Archimedes Arcadia" — that's a brand, not an org;
+# only `github.com/hackagora` / `hackagora/archimedes-arcadia` / similar code-org
+# references need the swap).
+```
 
 **RFB-alignment language for the README (drop-in):**
 
@@ -2572,12 +2775,23 @@ Do a DEEP and AGGRESSIVE audit:
 
 4. Confirm submodule states (KnowledgeBase + Linus + context-arc) reflect latest pins.
 
-5. Final pass: read top-fold README + ARC-OSS-SHOWCASE + the pitch deck outline as if you
+5. URL truth-up audit. Run:
+     rg -n 'hackagora' --glob '!docs/archive/' --glob '!submodules/**'
+   Verify M.4's grep-and-replace pass already ran cleanly — there should be ZERO matches
+   outside docs/archive/ and submodules/. Any remaining matches are stale references the
+   M.4 sweep missed; fix them now (a-apin is canonical). Then verify the live URLs the
+   README + deck cite actually resolve:
+     curl -sI https://archimedes-arc.app | head -3
+     curl -sI https://github.com/a-apin/archimedes-arcadia | head -3
+   Both should be 200 (or 301 to https for archimedes-arc.app's redirect).
+
+6. Final pass: read top-fold README + ARC-OSS-SHOWCASE + the pitch deck outline as if you
    were a judge with 5 minutes. Flag anything that reads "intermediate" / "in-progress" /
    "unfinished" / "we were planning to".
 
 Output: a punch list of (a) files moved to archive, (b) files updated and what changed,
-(c) files deleted, (d) remaining issues you couldn't fix yourself + recommended owner.
+(c) files deleted, (d) URL audit results (hackagora matches + URL resolution checks),
+(e) remaining issues you couldn't fix yourself + recommended owner.
 
 Don't sanitize honesty — the pitch wedge IS operational candor. But DO remove stale
 intermediate artifacts that distract from the final product.
@@ -2735,6 +2949,11 @@ Spec elaboration protocol per § 2.6:
   repo locally; map the four-step workflow expected by the harness; identify the
   adapter shape needed to wrap Strategy Generation Agent + Portfolio Construction
   Agent into one StockBench-compatible agent. Verify Finnhub API key requirement.
+- T3.9 (paper-qa semantic retrieval): BIG. **Spawn audit Explore subagent.** Read
+  submodules/Linus/src/linus/knowledge/paperqa.py for the integration pattern; map
+  current Postgres papers table + PDF cache locations; verify paper-qa Docs API shape
+  for st-embeddings (no API key); identify exact insertion point in
+  strategy_fusion._select_candidates() behind the existing keyword filter.
 - T3.3, T3.4: MEDIUM. Maestro inline (depends on T3.2 output format).
 - T3.5 (Bedrock): MEDIUM. Filed but UNASSIGNED.
 
@@ -2751,7 +2970,11 @@ Execute in order (strict serial due to dependencies):
    This is the "we ship every protocol Xia formalizes" hero spec.
 7. **After T3.7:** AUDIT-SUBAGENT + file T3.8 (StockBench harness adapter + first run).
    UNASSIGNED. Sunday-afternoon priority — must land by 16:00 CT to feed M.12 (demo video v2).
-8. T3.5 (Bedrock): elaborate + file the spec but DO NOT prompt Dan to assign it. Stays
+8. **In parallel with T3.2 (independent surface; no GPU dependency):** AUDIT-SUBAGENT
+   + file T3.9 (paper-qa wrapping behind fusion candidate seam). UNASSIGNED. MUST-SHIP
+   per Dan's call — this is the wedge claim that upgrades "research-grounded" from
+   abstracts to paper-bodies + embeddings WITHOUT waiting on T3.2's pipeline.
+9. T3.5 (Bedrock): elaborate + file the spec but DO NOT prompt Dan to assign it. Stays
    on-record only.
 
 Daily AWS spend monitor: at end of every Sat-night session,
@@ -2769,9 +2992,11 @@ Anti-goals:
 - DO NOT assign t2o2 to any issue — Dan does that manually.
 - DO NOT file seed-grade specs — every spec gets elaborated per § 2.6 before filing.
 
-Done = T3.1 + T3.2 + T3.3 + T3.4 + T3.6 merged; S3 + DynamoDB populated; KB pipeline
-artifact in S3; Corpus Graph + KG tabs render real data; archimedes-arc.app serves
-through CloudFront + ALB + ASG; site survives a single-EC2 termination test.
+Done = T3.1 + T3.2 + T3.3 + T3.4 + T3.6 + T3.7 + T3.8 + T3.9 merged; S3 + DynamoDB
+populated; KB pipeline artifact in S3; Corpus Graph + KG tabs render real data;
+archimedes-arc.app serves through CloudFront + ALB + ASG; site survives a single-EC2
+termination test; paper-qa semantic-retrieval wired behind fusion candidate seam +
+/health reports paper_rag: live; StockBench result in docs/benchmarks/stockbench-results.md.
 ```
 
 ### Track D — Security + manual deliverables (TS.x + M.x)
@@ -2890,6 +3115,11 @@ Spec elaboration protocol per § 2.6:
 - T-PE.4 (spec rewrite): SMALL. Maestro inline. (NOTE: spec may already be rewritten by
   a parallel session; verify before filing.)
 - T-PE.5 (regime_tag + curated tagging): MEDIUM. Maestro inline.
+- T-PE.8 (strategy episodic memory): BIG. **Spawn audit Explore subagent.** Map current
+  StrategyRecord ORM + redis_state.recent_traces shape; map fusion + architect + rigor
+  gate emit points; verify keccak256_canonical_json helper is available; identify exact
+  Postgres patch shape mirroring papers.cluster_id pattern in db.py. **Reframes pitch
+  from "static library" to "compounding substrate" per Linus-Maestro audit (2026-05-23).**
 
 Execute in order (strict serial due to dependencies):
 1. AUDIT-SUBAGENT + file T-PE.1 (StrategyRegistry contract). UNASSIGNED. Foundational.
@@ -2898,8 +3128,11 @@ Execute in order (strict serial due to dependencies):
 4. **In parallel with T-PE.3:** elaborate + file T-PE.4 (spec rewrite) — but verify the spec
    isn't already rewritten by a parallel session.
 5. After T-PE.3 lands: elaborate + file T-PE.5 (regime_tag + curated library tagging). UNASSIGNED.
-6. After T-PE.5: AUDIT-SUBAGENT + file T-PE.6 (always-both generation). UNASSIGNED.
-7. After T-PE.6: AUDIT-SUBAGENT + file T-PE.7 (regime-aware portfolio weighting). UNASSIGNED.
+6. **In parallel with T-PE.5 (depends only on T-PE.3):** AUDIT-SUBAGENT + file T-PE.8
+   (strategy episodic memory). UNASSIGNED. MUST-SHIP per Dan's call — the wire that makes
+   the "compounding substrate" pitch claim demonstrable.
+7. After T-PE.5: AUDIT-SUBAGENT + file T-PE.6 (always-both generation). UNASSIGNED.
+8. After T-PE.6: AUDIT-SUBAGENT + file T-PE.7 (regime-aware portfolio weighting). UNASSIGNED.
 
 Anti-goals:
 - DO NOT keep the two-store split — full collapse to unified strategy_passports table.
@@ -2910,12 +3143,14 @@ Anti-goals:
 - DO NOT assign t2o2 to any issue — Dan does that manually.
 - DO NOT file seed-grade specs — every spec gets elaborated per § 2.6 before filing.
 
-Done = T-PE.1 + T-PE.2 + T-PE.3 + T-PE.4 + T-PE.5 + T-PE.6 + T-PE.7 merged; strategy
-passports unified in one Postgres table; every Tier-1 strategy carries a non-null
+Done = T-PE.1 + T-PE.2 + T-PE.3 + T-PE.4 + T-PE.5 + T-PE.6 + T-PE.7 + T-PE.8 merged;
+strategy passports unified in one Postgres table; every Tier-1 strategy carries a non-null
 on_chain_registration_tx visible on testnet.arcscan.app; every passport carries a
 regime_tag; Generate page emits bull + bear candidates per call; Portfolio Construction
-Agent applies regime-aware weighting; demo video v2 highlights the verified on-chain
-strategy anchor as a hero claim.
+Agent applies regime-aware weighting; strategy_proposals episodic table accruing
+rigor_pass + rigor_fail + user_rejected proposals (read via /api/strategies/proposals;
+"Considered alternatives" panel on StrategyPassport); demo video v2 highlights the
+verified on-chain strategy anchor as a hero claim AND the compounding-substrate framing.
 ```
 
 ---
