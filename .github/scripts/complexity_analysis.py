@@ -88,28 +88,29 @@ def analyze(changed_files: list[str], baseline_dir: str) -> str:
 
         for fn in info.function_list:
             nesting = getattr(fn, "max_nesting_depth", 0)
-            recursive = is_py and _is_recursive(source, fn.name)
-            orphan = is_py and _is_orphan(filepath, fn.name)
             base_cc = _baseline_cc(filepath, fn.name, baseline_dir)
-
-            rows = [
-                ("CC",        _cc_badge(fn.cyclomatic_complexity)),
-                ("Δ CC",      _delta(base_cc, fn.cyclomatic_complexity)),
-                ("Nesting",   f"{nesting}{'⚠️' if nesting >= 3 else ''}"),
-                ("Recursive", "✅" if recursive else "—"),
-                ("Orphan",    "⚠️" if orphan else "—"),
-            ]
-
-            header = f"### `{fn.name}` · `{_shorten(filepath)}:{fn.start_line}`"
-            table = ["| Metric | Branch |", "|---|---|"]
-            table += [f"| {k} | {v} |" for k, v in rows]
-            blocks.append(header + "\n" + "\n".join(table))
+            blocks.append({
+                "func": f"`{fn.name}`",
+                "file": f"`{_shorten(filepath)}:{fn.start_line}`",
+                "cc": _cc_badge(fn.cyclomatic_complexity),
+                "delta": _delta(base_cc, fn.cyclomatic_complexity),
+                "nesting": f"{nesting}{'⚠️' if nesting >= 3 else ''}",
+                "recursive": "✅" if (is_py and _is_recursive(source, fn.name)) else "—",
+                "orphan": "⚠️" if (is_py and _is_orphan(filepath, fn.name)) else "—",
+            })
 
     if not blocks:
         return "## 🔬 Complexity\n\nNo functions found in changed files.\n"
 
-    return "## 🔬 Complexity\n\n" + "\n\n".join(blocks) + \
-           "\n\n*CC: ✅ 1–5 · ⚠️ 6–10 · 🟠 11–15 · 🔴 16+*\n"
+    lines = [
+        "## 🔬 Complexity\n",
+        "| Function | File | CC | Δ CC | Nesting | Recursive | Orphan |",
+        "|---|---|---|---|---|---|---|",
+    ]
+    for r in blocks:
+        lines.append(f"| {r['func']} | {r['file']} | {r['cc']} | {r['delta']} | {r['nesting']} | {r['recursive']} | {r['orphan']} |")
+    lines.append("\n*CC: ✅ 1–5 · ⚠️ 6–10 · 🟠 11–15 · 🔴 16+*\n")
+    return "\n".join(lines)
 
 
 def main() -> None:
