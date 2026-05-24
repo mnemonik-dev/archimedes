@@ -338,8 +338,77 @@ async def get_corpus_kg(
     entity: str | None = None,
     depth: int = 1,
 ):
-    """Knowledge-graph subgraph filtered by entity."""
-    import json as _json
+    """Knowledge-graph subgraph from S3-backed kg_graph.json artifact.
+
+    When the KB pipeline has run, this reads the real REBEL/SciSpacy KG
+    (``kg_graph.json``) and filters by entity name. Falls back to
+    metadata-derived author/category KG when no artifact exists.
+    """
+    from archimedes.services.kb_artifacts import ArtifactNotFound, load_kg_graph
+
+    # Try real KG artifact first
+    try:
+        kg_data = load_kg_graph()
+        all_nodes = kg_data.get("nodes", [])
+        all_edges = kg_data.get("edges", [])
+
+        if entity:
+            # Filter to entity neighborhood
+            entity_lower = entity.lower()
+            matching_node_ids = set()
+            for n in all_nodes:
+                name = (n.get("canonical_name") or n.get("name") or "").lower()
+                if entity_lower in name:
+                    matching_node_ids.add(n.get("id"))
+
+            # Expand to depth hops
+            frontier = set(matching_node_ids)
+            visited = set(matching_node_ids)
+            for _ in range(depth):
+                next_frontier = set()
+                for e in all_edges:
+                    src = e.get("source") or e.get("subject_id")
+                    tgt = e.get("target") or e.get("object_id")
+                    if src in frontier and tgt not in visited:
+                        next_frontier.add(tgt)
+                    if tgt in frontier and src not in visited:
+                        next_frontier.add(src)
+                visited |= next_frontier
+                frontier = next_frontier
+                if not frontier:
+                    break
+
+            # Filter nodes and edges to the visited subgraph
+            filtered_nodes = [n for n in all_nodes if n.get("id") in visited]
+            node_ids = {n.get("id") for n in filtered_nodes}
+            filtered_edges = []
+            for e in all_edges:
+                src = e.get("source") or e.get("subject_id")
+                tgt = e.get("target") or e.get("object_id")
+                if src in node_ids and tgt in node_ids:
+                    filtered_edges.append(e)
+
+            return {
+                "status": "specter2_kg",
+                "total_nodes": len(all_nodes),
+                "total_edges": len(all_edges),
+                "nodes": filtered_nodes,
+                "edges": filtered_edges[:2000],
+                "filtered_by": entity,
+            }
+
+        return {
+            "status": "specter2_kg",
+            "total_nodes": len(all_nodes),
+            "total_edges": len(all_edges),
+            "nodes": all_nodes[:500],
+            "edges": all_edges[:2000],
+        }
+    except ArtifactNotFound:
+        # No KG artifact — fall back to metadata-derived KG
+        pass
+
+    # --- Metadata-derived fallback ---
     from collections import defaultdict
     from archimedes.models.corpus_store import PaperRecord
     from sqlalchemy import func, or_
@@ -373,8 +442,8 @@ async def get_corpus_kg(
             }
 
             try:
-                authors = _json.loads(p.authors) if p.authors else []
-            except (_json.JSONDecodeError, TypeError):
+                authors = json.loads(p.authors) if p.authors else []
+            except (json.JSONDecodeError, TypeError):
                 authors = []
             for a in authors[:5]:
                 a_key = f"author:{a}"
@@ -383,8 +452,8 @@ async def get_corpus_kg(
                 relations.append({"source": f"paper:{p.arxiv_id}", "target": a_key, "type": "authored_by"})
 
             try:
-                cats = _json.loads(p.categories) if p.categories else []
-            except (_json.JSONDecodeError, TypeError):
+                cats = json.loads(p.categories) if p.categories else []
+            except (json.JSONDecodeError, TypeError):
                 cats = []
             for c in cats[:3]:
                 c_key = f"category:{c}"
@@ -394,9 +463,9 @@ async def get_corpus_kg(
 
         return {
             "status": "metadata_derived",
-            "note": "Author/category KG from metadata. Full REBEL/SciSpacy KG pending KB pipeline port (#101).",
+            "note": "Author/category KG from metadata. Run KB pipeline for REBEL/SciSpacy KG.",
             "total_papers": total,
             "filtered": len(papers),
-            "entities": list(entities.values()),
-            "relations": relations[:2000],
+            "nodes": list(entities.values()),
+            "edges": relations[:2000],
         }

@@ -107,6 +107,9 @@ class PortfolioState:
 
     @property
     def current_value(self) -> float:
+        """Mark-to-market value of holdings at last known prices."""
+        # In the adapter, holdings are shares. When prices aren't available
+        # (e.g. before first execute), holdings are empty.
         return self.cash + sum(self.holdings.values())
 
     @property
@@ -386,30 +389,40 @@ class ArchimedesStockBenchAdapter:
         prices: dict[str, list[float]],
         day: int,
     ) -> None:
-        """Rebalance portfolio to match decision allocations."""
+        """Rebalance portfolio to match decision allocations.
+
+        Holdings are tracked as SHARES, not dollar values, so that
+        mark-to-market between rebalances captures real P&L.
+        """
         total_value = self.portfolio.current_value
 
-        # Update holdings to match target weights
-        new_holdings: dict[str, float] = {}
+        # Convert target weights → share counts
+        new_holdings: dict[str, float] = {}  # ticker → shares
         for ticker, weight in decision.allocations.items():
             if ticker in prices and prices[ticker][day] > 0:
                 target_value = total_value * weight
                 shares = target_value / prices[ticker][day]
-                new_holdings[ticker] = target_value
+                new_holdings[ticker] = shares
 
         self.portfolio.cash = total_value * decision.cash_weight
         self.portfolio.holdings = new_holdings
 
-        # Track value
-        new_value = self.portfolio.current_value
-        self.portfolio.net_values.append(new_value)
+        # Mark-to-market: revalue holdings at today's prices
+        portfolio_value = self.portfolio.cash
+        for ticker, shares in self.portfolio.holdings.items():
+            if ticker in prices and day < len(prices[ticker]):
+                portfolio_value += shares * prices[ticker][day]
+            else:
+                portfolio_value += shares  # fallback
+
+        self.portfolio.net_values.append(portfolio_value)
 
         if len(self.portfolio.net_values) > 1:
             prev = self.portfolio.net_values[-2]
-            daily_ret = (new_value / prev) - 1.0 if prev > 0 else 0.0
+            daily_ret = (portfolio_value / prev) - 1.0 if prev > 0 else 0.0
             self.portfolio.daily_returns.append(daily_ret)
 
-        self.portfolio.peak_value = max(self.portfolio.peak_value, new_value)
+        self.portfolio.peak_value = max(self.portfolio.peak_value, portfolio_value)
 
     # ── Main loop ────────────────────────────────────────────────
 
@@ -511,7 +524,7 @@ def run_multi_seed(
 
 # ── Results persistence ─────────────────────────────────────────
 
-RESULTS_DIR = Path(__file__).resolve().parents[3] / "docs" / "benchmarks"
+RESULTS_DIR = Path(__file__).resolve().parents[4] / "docs" / "benchmarks"
 
 
 def write_results_json(report: MultiSeedReport) -> Path:
