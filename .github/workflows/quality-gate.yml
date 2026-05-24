@@ -43,7 +43,7 @@ jobs:
           python-version: "3.12"
       - run: pip install --quiet ruff
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: "22"
           cache: npm
