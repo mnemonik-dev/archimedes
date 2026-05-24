@@ -45,6 +45,7 @@ async def get_current_regime():
         all_strats = strategy_provider.list_strategies()
         regime_keywords = regime_to_keywords.get(regime_value, [])
         recommended_ids: list[str] = []
+        recommended_titles: list[str] = []
         for keyword in regime_keywords:
             for s in all_strats:
                 title_lower = s.paper_title.lower().replace("_", " ")
@@ -52,7 +53,14 @@ async def get_current_regime():
                     keyword in title_lower or keyword.replace("-", "") in title_lower.replace("-", "")
                 ) and s.id not in recommended_ids:
                     recommended_ids.append(s.id)
+                    recommended_titles.append(s.paper_title)
                     break
+
+        # NOTE: do NOT coerce missing vix/* into 0.0 — see RegimeSignalsResponse
+        # docstring. None means "no data" and the UI hides the row honestly.
+        raw_vix = data.get("vix_level")
+        if raw_vix is None:
+            raw_vix = data.get("vix")
 
         return RegimeResponse(
             regime=regime_value,
@@ -60,7 +68,7 @@ async def get_current_regime():
             timestamp=data.get("timestamp", ""),
             regime_changed=data.get("regime_changed", False),
             signals=RegimeSignalsResponse(
-                vix_level=data.get("vix_level") or data.get("vix", 0.0),
+                vix_level=raw_vix,
                 sp500_above_ma50=data.get("sp500_above_ma50", True),
                 sp500_above_ma200=data.get("sp500_above_ma200", True),
                 vix_rate_of_change=data.get("vix_rate_of_change"),
@@ -74,6 +82,7 @@ async def get_current_regime():
             transition_probabilities=transitions,
             regime_history=history,
             recommended_strategies=recommended_ids[:2],
+            recommended_strategy_titles=recommended_titles[:2],
         )
 
     return RegimeResponse(
@@ -82,13 +91,14 @@ async def get_current_regime():
         timestamp="",
         regime_changed=False,
         signals=RegimeSignalsResponse(
-            vix_level=0.0,
+            vix_level=None,
             sp500_above_ma50=True,
             sp500_above_ma200=True,
         ),
         transition_probabilities=default_transitions,
         regime_history={"total": 0},
         recommended_strategies=[],
+        recommended_strategy_titles=[],
     )
 
 
