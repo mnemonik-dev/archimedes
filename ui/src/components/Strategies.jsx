@@ -680,7 +680,7 @@ export default function Strategies({ highlightStrategyId, defaultTab, onNavigate
   return (
     <div>
       <div className="mb-[18px]">
-        <h2 className="serif text-[2rem] mb-2.5">Library</h2>
+        <h2 className="serif text-[2rem] mb-2.5">Your Strategies</h2>
         <p className="body mb-1.5">
           Your strategies, plus a clearly-separated set of example strategies
           drawn from published research so you can learn the metric format.

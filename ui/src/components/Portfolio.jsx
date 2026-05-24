@@ -144,7 +144,7 @@ export default function Portfolio({ walletAddr, onSelectVault, onSelectTrace }) 
 
       {/* Browse all vaults */}
       <div className="mb-7">
-        <div className="label mb-3">Archimedes Vaults</div>
+        <div className="label mb-3">Your Vaults</div>
         {allVaults.length === 0 && (
           <div className="card" style={{ padding: 18 }}>
             <p className="body">No vaults deployed yet.</p>
@@ -226,7 +226,7 @@ export default function Portfolio({ walletAddr, onSelectVault, onSelectTrace }) 
 
       {/* Agent activity feed — real traces from /api/traces */}
       <div>
-        <div className="label mb-3">Recent Agent Activity</div>
+        <div className="label mb-3">Your Traces</div>
         {tracesLoading && <div className="caption">Loading traces…</div>}
         {!tracesLoading && recentTraces.length === 0 && (
           <div className="card" style={{ padding: 18 }}>

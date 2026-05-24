@@ -1,33 +1,43 @@
 # Progress
 
 ## Status
-In Progress — Security pillar (#177, #178) complete. Deployed to main.
+In Progress — Issue #167 (Generate single input + auto-route pipeline) complete. Deployed to main.
 
 ## Tasks
 
 ### Completed
-- **#177** — Nginx security headers: HSTS, CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy added to `nginx/nginx.conf`
-- **#178** — CORS lockdown: replaced wildcard `allow_origins=["*"]` with explicit origin list from `PUBLIC_DOMAIN` + `CORS_ORIGINS` env vars; preflight cache 600s
-- **Fix** — Pre-existing `UserProfile` model missing `Column` import; added `from sqlalchemy import Column`
+- **#167** — Generate page: single unified form (removed mode picker). Backend `_pick_pipeline()` auto-routes fusion/architect/agent. `pipeline_selected` SSE event emitted after `brief_validated`. GenerationStream passes pipeline selection to parent via `onPipelineSelected` callback.
 
-### Remaining (assigned to t2o2, not yet started)
+### Also Completed (prior sessions)
+- **#177** — Nginx security headers
+- **#178** — CORS lockdown
+- **#166** — Landing sidebar parity + CTA differentiation
+- **#169** — Corpus default Catalog tab + plain-English labels
+- **#170** — Reasoning verify arcscan enhancement
+- **#171** — Portfolio traces honesty
+- **#173** — Agents subpackage refactor
+
+## Files Changed (this session)
+- `ui/src/components/Generate.jsx` — removed mode picker (3 toggle buttons); single unified form with intent + risk + assets + depth
+- `ui/src/components/GenerationStream.jsx` — added `pipeline_selected` event label + `onPipelineSelected` callback
+- `backend/archimedes/agents/generation_pipeline.py` — added `_pick_pipeline()` function; emits `pipeline_selected` event after brief_validated
+- `backend/archimedes/api/generate_schemas.py` — added `pipeline_selected` to EventName union; added `mode` field (ignored, backwards-compat) to GenerateStartRequest
+- `backend/tests/services/test_generation_pipeline.py` — updated event ordering assertion; fixed stale patch paths
+
+## Validation
+- `pytest -q` → 371 passed, 2 skipped, 0 failures
+- `npm run build` → clean
+- AC: `grep -c "Streaming agent\|setMode\|useState('agent')" Generate.jsx` → 0
+- AC: `_pick_pipeline` exists in `generation_pipeline.py`
+- AC: `pipeline_selected` in schemas + pipeline (3+ matches)
+
+## Remaining (assigned to t2o2)
+- #168 — Explore page real oracle prices
+- #172 — WelcomeProfileModal
+- #174 — /api/health/amm + agent-runner vault poll
+- #175 — End-to-end testnet smoke
 - #176 — Migrate secrets to AWS SSM
 - #179 — Rate limiting (slowapi)
 - #180 — Dependabot + secret scanning
-- #181 — User-data minimization (encrypt email at rest)
-
-## Files Changed
-- `nginx/nginx.conf` — added 6 security headers in server block
-- `backend/archimedes/main.py` — CORS restricted to env-driven origin list + max_age=600
-- `.env.example` — added `PUBLIC_DOMAIN` and `LOCAL_DEV_ORIGINS` entries
-- `backend/archimedes/models/user_profile.py` — added missing `Column` import
-
-## Validation
-- `pytest -q` → 362 passed, 2 skipped, 0 failures
-- `grep -c "add_header" nginx/nginx.conf` → 6
-- `grep "allow_origins.*\*" backend/archimedes/main.py` → 0 matches (no wildcard)
-
-## Notes
-- The `test_fixture_pipeline_emits_full_event_sequence` failure is pre-existing (expects `pipeline_selected` event from a prior issue's subagent commit, not related to this change)
-- CSP `connect-src` allows Arc RPC, arcscan, coingecko, alchemy, z.ai, anthropic, and `wss://*` for wallet libraries
-- Local dev still works: `CORS_ORIGINS` env var defaults to `http://localhost:3000,http://localhost:80`
+- #181 — User-data minimization
+- #152–#165 — Track C/E (KB pipeline, passport unification, etc.)

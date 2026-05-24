@@ -104,9 +104,25 @@ export default function Explore({ onNavigate }) {
       </div>
 
       {loading && !assets.length && <div className="caption">Loading market data…</div>}
-      {error && (
+      {error && !assets.length && (
         <div className="info-box warning" style={{ marginBottom: 16 }}>
           Couldn't load assets: {error}.
+        </div>
+      )}
+
+      {!loading && !error && assets.length === 0 && (
+        <div className="info-box" style={{ marginBottom: 16 }}>
+          Oracle feed paused — no price data available. This page refreshes automatically when the oracle resumes.
+        </div>
+      )}
+
+      {!loading && !error && assets.length > 0 && assets.every(a => a.is_stale) && (
+        <div className="info-box warning" style={{ marginBottom: 16 }}>
+          Oracle feed paused — last update{' '}
+          <span className="mono" style={{ fontSize: '0.85rem' }}>
+            {assets[0]?.last_updated ? new Date(assets[0].last_updated).toLocaleString() : 'unknown'}
+          </span>.
+          Prices shown may be outdated.
         </div>
       )}
 
@@ -151,7 +167,17 @@ export default function Explore({ onNavigate }) {
                   <td style={{ padding: '10px 14px', fontWeight: 600 }}>
                     {a.symbol}
                     {a.is_stale && (
-                      <span className="tag tag-negative" style={{ marginLeft: 6, fontSize: '0.65rem' }}>
+                      <span
+                        className="tag"
+                        style={{
+                          marginLeft: 6,
+                          fontSize: '0.65rem',
+                          background: 'var(--warning-bg, #fef3c7)',
+                          color: 'var(--warning-text, #92400e)',
+                          borderRadius: 4,
+                          padding: '1px 5px',
+                        }}
+                      >
                         STALE
                       </span>
                     )}
@@ -189,8 +215,8 @@ export default function Explore({ onNavigate }) {
       )}
 
       <p className="caption" style={{ marginTop: 16, color: 'var(--text-4)' }}>
-        Prices refresh every minute. The "Vol 30d" column is annualized realized
-        volatility (std of daily returns × √252).
+        Prices from on-chain PriceOracle with yfinance fallback. Stale = oracle hasn't updated in &gt;5 minutes.
+        The "Vol 30d" column is annualized realized volatility (std of daily returns × √252).
       </p>
     </div>
   )
