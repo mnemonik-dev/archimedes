@@ -45,7 +45,7 @@ function shortHash(hash) {
 // CorrelationMatrix, RigorExplainer) lives on Library where the strategy
 // itself does — open via ?highlight=<id> deep-link from any trace card.
 
-function OnChainTraces({ onNavigate }) {
+function OnChainTraces({ onNavigate, highlightTraceId }) {
   const [traces, setTraces] = useState([])
   const [totalCount, setTotalCount] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -85,6 +85,21 @@ function OnChainTraces({ onNavigate }) {
   }, [])
 
   useEffect(() => { loadTraces() }, [loadTraces])
+
+  // Scroll + highlight the trace specified by ?trace_id=<id>
+  useEffect(() => {
+    if (!highlightTraceId || traces.length === 0) return
+    // Small delay to ensure DOM is painted
+    const timer = setTimeout(() => {
+      const el = document.getElementById(`trace-${highlightTraceId}`)
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        el.classList.add('trace-highlighted')
+        setTimeout(() => el.classList.remove('trace-highlighted'), 3000)
+      }
+    }, 150)
+    return () => clearTimeout(timer)
+  }, [highlightTraceId, traces])
 
   const verifyTrace = async (traceId) => {
     setVerifying(prev => ({ ...prev, [traceId]: true }))
@@ -134,7 +149,7 @@ function OnChainTraces({ onNavigate }) {
           {traces.map((t, i) => {
             const vResult = verifyResults[t.id]
             return (
-              <div key={i} className="card" style={{ padding: 14 }}>
+              <div key={i} id={`trace-${t.id}`} className="card" style={{ padding: 14 }}>
                 <div className="flex justify-between items-start mb-2">
                   <div className="flex gap-2 items-center flex-wrap">
                     <span style={{ fontWeight: 700, color: 'var(--accent)' }}>#{typeof t.id === 'string' ? t.id.slice(0, 8) : t.id}</span>
@@ -206,10 +221,54 @@ function OnChainTraces({ onNavigate }) {
                     </button>
                   )}
                   {vResult && (
-                    <span className={`caption flex items-center gap-1 ${vResult.is_verified ? 'positive' : 'negative'}`}>
-                      <span className={vResult.is_verified ? 'i-lucide-check w-3 h-3' : 'i-lucide-x w-3 h-3'} />
-                      {vResult.details}
-                    </span>
+                    <div className="flex flex-col gap-1.5 mt-1">
+                      <span className={`caption flex items-center gap-1 ${vResult.is_verified ? 'positive' : 'negative'}`}>
+                        <span className={vResult.is_verified ? 'i-lucide-check w-3 h-3' : 'i-lucide-x w-3 h-3'} />
+                        {vResult.details}
+                      </span>
+
+                      {/* On-chain receipt details */}
+                      {vResult.is_verified && t.arc_tx_hash && (
+                        <div className="flex items-center gap-3 flex-wrap text-xs text-[var(--text-3)]">
+                          <span className="flex items-center gap-1">
+                            <span className="i-lucide-file-text w-3 h-3" />
+                            Tx: <a
+                              href={`https://testnet.arcscan.app/tx/${t.arc_tx_hash}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="mono underline decoration-dotted underline-offset-2 hover:text-[var(--accent)] transition-colors"
+                            >
+                              {shortHash(t.arc_tx_hash)}
+                            </a>
+                            <span className="i-lucide-external-link w-2.5 h-2.5" />
+                          </span>
+                          {vResult.commit_block_number != null && (
+                            <span className="flex items-center gap-1">
+                              <span className="i-lucide-box w-3 h-3" />
+                              Block #{vResult.commit_block_number.toLocaleString()}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      {!t.arc_tx_hash && vResult.is_verified && (
+                        <span className="caption text-[var(--text-4)] flex items-center gap-1">
+                          <span className="i-lucide-clock w-3 h-3" />
+                          Not yet anchored on-chain
+                        </span>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Why does this matter? disclosure */}
+                  {vResult && !verifying[t.id] && (
+                    <details className="mt-1.5">
+                      <summary className="caption text-[var(--text-4)] cursor-pointer hover:text-[var(--text-2)] transition-colors select-none">
+                        Why does this matter?
+                      </summary>
+                      <div className="caption text-[var(--text-3)] mt-1.5 max-w-[480px] leading-relaxed">
+                        The hash is computed deterministically from the agent's reasoning, allocations, and regime context. By anchoring it on Arc's <code>ReasoningTraceRegistry</code>, anyone can independently recompute the hash and confirm the agent's decision existed at the recorded block — proving the reasoning preceded the trade, not the other way around.
+                      </div>
+                    </details>
                   )}
                 </div>
 
@@ -245,6 +304,11 @@ function OnChainTraces({ onNavigate }) {
 // ─── Main Export ─────────────────────────────────────────────
 
 export default function Reasoning({ onNavigate }) {
+  // Read ?trace_id= from URL for deep-link navigation from Portfolio
+  const highlightTraceId = typeof window !== 'undefined'
+    ? new URLSearchParams(window.location.search).get('trace_id')
+    : null
+
   return (
     <div>
       <div className="max-w-[720px] mb-7">
@@ -255,7 +319,7 @@ export default function Reasoning({ onNavigate }) {
           follow each trace back to the source strategy in the Library.
         </p>
       </div>
-      <OnChainTraces onNavigate={onNavigate} />
+      <OnChainTraces onNavigate={onNavigate} highlightTraceId={highlightTraceId} />
     </div>
   )
 }
