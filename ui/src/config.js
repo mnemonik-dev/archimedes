@@ -259,6 +259,13 @@ export const TOKEN_ABI = [
   { name: 'decimals',      type: 'function', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint8' }] },
 ]
 
+// Minimal ABI for USDC approve/allowance — used by DepositFlow stepper.
+// Same as TOKEN_ABI but scoped to the two functions needed for the deposit flow.
+export const USDC_ABI = [
+  { name: 'approve',       type: 'function', stateMutability: 'nonpayable', inputs: [{ type: 'address', name: 'spender' }, { type: 'uint256', name: 'amount' }], outputs: [{ type: 'bool' }] },
+  { name: 'allowance',     type: 'function', stateMutability: 'view', inputs: [{ type: 'address', name: 'owner' }, { type: 'address', name: 'spender' }], outputs: [{ type: 'uint256' }] },
+]
+
 export const SYNTH_VAULT_ABI = [
   { name: 'mint',                type: 'function', stateMutability: 'nonpayable', inputs: [{ type: 'uint256', name: 'amountUsdc' }], outputs: [{ type: 'uint256' }] },
   { name: 'burn',                type: 'function', stateMutability: 'nonpayable', inputs: [{ type: 'uint256', name: 'synthAmount' }], outputs: [{ type: 'uint256' }] },

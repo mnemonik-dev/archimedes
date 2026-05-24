@@ -4,14 +4,23 @@ Minimal bootstrap for the hackathon MVP. All routes are wired to
 chain services that read/write Arc smart contracts.
 """
 
-from fastapi import FastAPI
+import os
+
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
 # Load .env into os.environ at import time for modules that use os.getenv()
 # (circle_signer, oracle_updater) — pydantic ChainSettings handles ARC_ vars itself.
 from dotenv import load_dotenv
 load_dotenv("../.env", override=True)  # Project root .env first (has real secrets)
 load_dotenv(".env", override=False)  # Backend-local .env fills in any missing (no override)
+
+# Shared rate limiter (Redis-backed, falls back to in-memory).
+# Defined in a separate module to avoid circular imports with route modules.
+from archimedes.api.limiter import limiter
 
 from archimedes.api.routes import (
     agent_router,
@@ -39,6 +48,24 @@ app = FastAPI(
     description="Peer-reviewed AI portfolios, settled on Arc.",
     version="0.1.0",
 )
+
+# Wire rate limiter into the app state
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# Custom handler returns JSON 429 with rate-limit headers
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    """Return 429 JSON with X-RateLimit-* headers."""
+    response = JSONResponse(
+        status_code=429,
+        content={"detail": "Rate limit exceeded. Please slow down and try again later."},
+    )
+    # slowapi populates these headers on the response via the extension point;
+    # we ensure they're forwarded even when we override the handler.
+    if hasattr(exc, "detail"):
+        response.headers["X-RateLimit-Limit"] = str(getattr(exc, "limit", ""))
+    return response
 
 # Allow the Next.js frontend to call the API during development
 # Production: restricted to PUBLIC_DOMAIN env var (Issue #178).
@@ -150,6 +177,7 @@ app.include_router(user_router)
 
 
 @app.get("/health")
+@limiter.exempt
 async def health():
     """Health check — used by Docker healthcheck and CI/CD.
 
@@ -208,6 +236,7 @@ async def health():
 
 
 @app.get("/")
+@limiter.exempt
 async def root():
     return {
         "name": "Archimedes",

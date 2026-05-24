@@ -1,18 +1,14 @@
 import { useState } from 'react'
 import { createPortal } from 'react-dom'
+import DepositFlow from './DepositFlow'
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? ''
 
-// Phase 4 scaffold — opens from StrategyPassport's "Deploy as Vault →" CTA.
+// Opens from StrategyPassport's "Deploy as Vault →" CTA.
 // Wires to existing POST /api/vaults/create which deploys a new vault on Arc
 // via VaultFactory. After deploy, persists vault metadata (off-chain) via
 // POST /api/vaults/metadata so the strategy↔vault link survives reloads.
-//
-// Honest scope: this is the v1 deploy flow — vault is created, metadata is
-// persisted. Time-bound window enforcement, multi-step USDC approve + deposit
-// + setTargetAllocations, and on-chain agent-active triggering are Phase 4.5
-// work pending alignment with Marten + Chuan. The modal is explicit about
-// what does/doesn't happen on submit.
+// On success, hands off to DepositFlow for the 3-step approve→deposit→allocate.
 
 function nowPlusDays(days) {
   const d = new Date()
@@ -38,6 +34,7 @@ export default function CreateVaultModal({ strategy, walletAddr, onClose, onDepl
   const [agentAssisted, setAgentAssisted] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+  const [deployedVault, setDeployedVault] = useState(null) // triggers DepositFlow
 
   const handleDeploy = async () => {
     setError('')
@@ -87,15 +84,27 @@ export default function CreateVaultModal({ strategy, walletAddr, onClose, onDepl
         // Non-fatal — vault exists on-chain; metadata persistence is a UX hint.
       }
 
-      // Trade window is captured in state but not yet enforced by the contract.
-      // Phase 4.5 will add a vault_lifecycle table + agent-runner enforcement.
-      // For now, surface it in the success notice.
       if (onDeployed) onDeployed(vaultAddress)
+      // Open DepositFlow instead of closing
+      setDeployedVault(vaultAddress)
     } catch (e) {
       setError(e.message || 'Vault deployment failed')
     } finally {
       setSubmitting(false)
     }
+  }
+
+  // After successful vault deploy, show DepositFlow stepper instead of the form
+  if (deployedVault) {
+    return (
+      <DepositFlow
+        vaultAddress={deployedVault}
+        depositAmount={initialDeposit}
+        strategy={strategy}
+        onClose={() => { setDeployedVault(null); onClose?.() }}
+        onComplete={() => { setDeployedVault(null); onClose?.() }}
+      />
+    )
   }
 
   return createPortal(
@@ -181,8 +190,7 @@ export default function CreateVaultModal({ strategy, walletAddr, onClose, onDepl
               disabled={submitting}
             />
             <p className="caption mt-1 text-[var(--text-4)]">
-              Deposit + <code>setTargetAllocations</code> ship in Phase 4.5 — for v1
-              this modal creates the vault only; the deposit step is a follow-up.
+              Amount to deposit via the 3-step deposit flow after vault creation.
             </p>
           </label>
 
@@ -198,10 +206,9 @@ export default function CreateVaultModal({ strategy, walletAddr, onClose, onDepl
         </div>
 
         <div className="info-box mt-4" style={{ fontSize: '0.8rem' }}>
-          <strong>Scope note:</strong> v1 creates the vault on-chain and links it to this
-          strategy off-chain. Time-bound window enforcement (Phase 4.5) and the deposit
-          + <code>setTargetAllocations</code> wallet flow (Phase 5) are not yet wired —
-          this is the scaffold the rest of Phase 4 builds on.
+          <strong>Next step:</strong> after the vault is created on-chain, you'll complete a 3-step
+          deposit flow: <code>USDC.approve</code> → <code>vault.deposit</code> → <code>setTargetAllocations</code>.
+          Each step is signed by your wallet and confirmed on Arc.
         </div>
 
         {error && <div className="info-box warning mt-3">{error}</div>}

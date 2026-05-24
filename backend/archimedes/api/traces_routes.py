@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 
 from archimedes.api.schemas import (
     TraceListResponse,
@@ -11,6 +11,7 @@ from archimedes.api.schemas import (
     TracePublishResponse,
     TraceVerifyResponse,
 )
+from archimedes.api.limiter import limiter
 from archimedes.models.trace import ReasoningTrace, DecisionType
 
 traces_router = APIRouter(prefix="/api/traces", tags=["traces"])
@@ -250,7 +251,8 @@ async def publish_trace(req: TracePublishRequest):
 
 
 @traces_router.get("/{trace_id}/verify", response_model=TraceVerifyResponse)
-async def verify_trace(trace_id: str):
+@limiter.exempt
+async def verify_trace(trace_id: str, request: Request):
     """Verify a reasoning trace against its on-chain anchor."""
     from archimedes.chain.trace_publisher import trace_publisher
     from archimedes.services.redis_state import AgentStateStore

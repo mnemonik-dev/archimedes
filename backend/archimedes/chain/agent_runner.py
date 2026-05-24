@@ -81,6 +81,7 @@ class StrategyRunner:
         self.state = AgentStateStore()
         self._synth_addrs = chain_client.settings.synth_addresses
         self._usdc_addr = chain_client.settings.usdc_address
+        self._known_vaults: set[str] = set()  # Vaults we've already seen
 
     async def tick(self) -> None:
         """Run one full strategy evaluation cycle."""
@@ -148,8 +149,20 @@ class StrategyRunner:
             # 4. Build target allocations
             targets = self._weights_to_targets(target_weights, all_signals)
 
-            # 5. Get managed vaults
+            # 5. Get managed vaults (polling VaultFactory discovers new vaults)
             vaults = await self._get_managed_vaults()
+
+            # 5a. Discover new vaults from VaultFactory and add to state
+            new_vaults = await self._discover_new_vaults()
+            if new_vaults:
+                logger.info(
+                    "[tick %s] Discovered %d new vault(s): %s",
+                    tick_id, len(new_vaults),
+                    ", ".join(v[:10] for v in new_vaults),
+                )
+                # Merge discovered vaults into the managed set
+                vaults = list(set(vaults) | set(new_vaults))
+
             if not vaults:
                 logger.warning("[tick %s] No vaults available — sleeping", tick_id)
                 return
@@ -735,6 +748,8 @@ class StrategyRunner:
         try:
             vaults = await chain_executor.get_all_vaults()
             if vaults:
+                # Update known set
+                self._known_vaults = set(vaults)
                 return vaults
         except Exception as e:
             logger.warning("Cannot fetch vaults from factory: %s", e)
@@ -755,10 +770,42 @@ class StrategyRunner:
                 agent_assisted=True,
             )
             logger.info("Default vault created at %s", vault_address)
+            self._known_vaults.add(vault_address)
             return [vault_address]
         except Exception as e:
             logger.error("Failed to auto-create default vault: %s", e)
             return []
+
+    async def _discover_new_vaults(self) -> list[str]:
+        """Poll VaultFactory.getAllVaults() and return vaults not yet in _known_vaults.
+
+        Called once per tick. Newly discovered vaults are added to _known_vaults
+        so they won't be reported again. This allows user-created vaults (via
+        CreateVaultModal on the frontend) to be picked up within one tick interval.
+        """
+        try:
+            all_vaults = await chain_executor.get_all_vaults()
+        except Exception as e:
+            logger.debug("Cannot poll VaultFactory: %s", e)
+            return []
+
+        # If EXPLICIT_VAULTS is set, skip auto-discovery
+        if EXPLICIT_VAULTS:
+            return []
+
+        current = set(chain_client.to_checksum(v) for v in all_vaults)
+        known = set(chain_client.to_checksum(v) for v in self._known_vaults)
+        new = current - known
+
+        if new:
+            for v in new:
+                logger.info("Discovered new vault 0x%s…", v[:10])
+            self._known_vaults = current
+            return list(new)
+
+        # Keep known_vaults in sync even if nothing new
+        self._known_vaults = current
+        return []
 
 
 async def run() -> None:

@@ -2,6 +2,10 @@
 
 Wallet address is the primary key. All fields are optional.
 Created on first POST from the WelcomeProfileModal.
+
+Security note (Issue #181): the ``email`` column stores a Fernet-encrypted
+token, not plaintext. Always use ``email_crypto.encrypt_email`` / ``decrypt_email``
+when reading or writing this field.
 """
 
 from __future__ import annotations

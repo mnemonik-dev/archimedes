@@ -487,3 +487,26 @@ class AgentStatusResponse(BaseModel):
     managed_vaults: int = 0
     last_rebalance: str | None = None
     recent_events: list[dict] = []
+
+
+# ═══════════════════════════════════════════════════════════════
+# AMM Health
+# ═══════════════════════════════════════════════════════════════
+
+
+class AMMPoolHealth(BaseModel):
+    """Health status of a single AMM pool (synth/USDC pair)."""
+    symbol: str
+    status: str  # "healthy" | "low_liquidity" | "empty" | "error"
+    liquidity_usdc: float = 0.0
+    oracle_price: float | None = None
+    reserve_token: float = 0.0
+    reserve_usdc: float = 0.0
+    last_update: str  # ISO 8601
+
+
+class AMMHealthResponse(BaseModel):
+    """Health status of all AMM pools."""
+    pools: list[AMMPoolHealth]
+    healthy_count: int = 0
+    total_pools: int = 0

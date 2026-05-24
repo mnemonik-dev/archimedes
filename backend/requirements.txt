@@ -34,6 +34,9 @@ eth-account>=0.13
 eth-utils>=5.0
 cryptography>=42.0
 
+## Rate limiting
+slowapi>=0.1.9
+
 # Paper ingestion
 arxiv>=2.1
 pypdf>=4.3

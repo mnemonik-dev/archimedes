@@ -33,6 +33,7 @@ from archimedes.api.generate_schemas import (
 )
 from archimedes.agents.generation_pipeline import run_generation
 from archimedes.services.job_queue import EVENT_LOG_TTL, get_job_store
+from archimedes.api.limiter import limiter
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +55,8 @@ def _register_task(job_id: str, task: asyncio.Task) -> None:
 
 
 @generate_router.post("/start", response_model=GenerateStartResponse, status_code=202)
-async def start_generation(req: GenerateStartRequest) -> GenerateStartResponse:
+@limiter.limit("5/minute")
+async def start_generation(req: GenerateStartRequest, request: Request) -> GenerateStartResponse:
     """Create a generation job and start the pipeline in the background."""
     store = get_job_store()
     job_id = await store.enqueue(
