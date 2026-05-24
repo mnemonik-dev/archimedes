@@ -338,7 +338,7 @@ async def get_corpus_kg(
             for c in cats[:3]:
                 c_key = f"category:{c}"
                 if c_key not in entities:
-                    entities[c_key] = {"type": "category", "id": c, "label": c}
+                    entities[c_key] = {"type": "category", "id": c, "label": _category_label(c) or c}
                 relations.append({"source": f"paper:{p.arxiv_id}", "target": c_key, "type": "belongs_to"})
 
         return {

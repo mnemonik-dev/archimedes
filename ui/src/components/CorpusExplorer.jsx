@@ -12,7 +12,7 @@ async function apiGet(path) {
 const TABS = ['catalog', 'overview', 'graph', 'knowledge-graph']
 
 export default function CorpusExplorer() {
-  const [tab, setTab] = useState('overview')
+  const [tab, setTab] = useState('catalog')
   const [overview, setOverview] = useState(null)
   const [papers, setPapers] = useState([])
   const [graphData, setGraphData] = useState(null)
@@ -221,7 +221,7 @@ function OverviewTab({ overview }) {
         <div className="bar-chart">
           {(overview.categories || []).map(c => (
             <div key={c.name} className="bar-row">
-              <span className="bar-label" title={c.name}>{c.name}</span>
+              <span className="bar-label" title={c.name}>{c.label || c.name}</span>
               <div className="bar-track">
                 <div className="bar-fill" style={{ width: `${(c.count / maxCatCount) * 100}%` }} />
               </div>
@@ -293,7 +293,7 @@ function CatalogTab({ papers, total, page, loading, search, setSearch, categoryF
           value={categoryFilter}
           onChange={v => { setCategoryFilter(v); setPage(1) }}
           style={{ width: 180 }}
-          options={[{ value: '', label: 'All Categories' }, ...categories.map(c => ({ value: c.name, label: `${c.name} (${c.count})` }))]}
+          options={[{ value: '', label: 'All Categories' }, ...categories.map(c => ({ value: c.name, label: `${c.label || c.name} (${c.count})` }))]}
         />
       </div>
 
