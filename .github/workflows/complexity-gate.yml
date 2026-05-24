@@ -1,0 +1,96 @@
+# Complexity gate — runs on every PR to main.
+# Posts a per-function card for each changed Python/JS/TS file:
+#   CC, Δ CC vs main, nesting depth, recursion, orphan detection.
+# Informational only — never blocks merge.
+
+name: Complexity Gate
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "backend/**.py"
+      - "ui/src/**.js"
+      - "ui/src/**.ts"
+      - "ui/src/**.jsx"
+      - "ui/src/**.tsx"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  complexity:
+    name: Complexity analysis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.base_ref }}
+          path: .baseline
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: .github/docker/complexity-gate/Dockerfile
+
+      - name: Install lizard
+        run: pip install --quiet lizard
+
+      - name: Get changed files
+        id: changed
+        run: |
+          FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD \
+            -- '*.py' '*.js' '*.ts' '*.jsx' '*.tsx' | tr '\n' ' ')
+          COUNT=$(echo $FILES | wc -w | tr -d ' ')
+          echo "files=$FILES" >> $GITHUB_OUTPUT
+          echo "count=$COUNT" >> $GITHUB_OUTPUT
+
+      - name: Run complexity analysis
+        if: steps.changed.outputs.count > 0
+        run: |
+          python .github/scripts/complexity_analysis.py \
+            --changed-files ${{ steps.changed.outputs.files }} \
+            --baseline-dir .baseline \
+            --output-md /tmp/complexity_comment.md
+
+      - name: Post or update PR comment
+        if: steps.changed.outputs.count > 0
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.existsSync('/tmp/complexity_comment.md')
+              ? fs.readFileSync('/tmp/complexity_comment.md', 'utf8')
+              : '## 🔬 Complexity\n\n⚠️ Analysis did not produce output — check the Actions log.';
+
+            const marker = '<!-- complexity-gate-v1 -->';
+            const fullBody = `${marker}\n${body}`;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const existing = comments.find(c => c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: fullBody,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: fullBody,
+              });
+            }

@@ -1,22 +1,39 @@
-FROM python:3.12-slim
+# Stage 1: build — install packages and compile C extensions (gcc, libpq-dev).
+# Nothing from this stage except the installed packages reaches the runtime image.
+FROM python:3.12-slim AS builder
 
-WORKDIR /app
-
-# Install system deps needed by psycopg2-binary and general build
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc libpq-dev curl \
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends gcc libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --target=/deps -r requirements.txt
 
-# Copy application code
-COPY . .
+# Stage 2: runtime — python:3.12-slim without build tools, running as nonroot.
+# Distroless is not used here: psycopg2-binary is a Python 3.12 C extension and
+# gcr.io/distroless/python3-debian12 ships Python 3.11 (Debian 12 default).
+FROM python:3.12-slim
+
+RUN useradd --system --no-create-home --uid 1001 nonroot
+
+COPY --from=builder /deps /deps
+COPY . /app
+
+# Pre-create rw volume mount points with nonroot ownership.
+# Docker copies these dirs into named volumes on first initialisation, so the
+# volume inherits nonroot ownership rather than the default root:root.
+# Paths mirror docker-compose.yml: corpus-artifact is mounted at both locations.
+RUN mkdir -p /app/data/corpus-artifact /srv/corpus-artifact \
+    && chown nonroot:nonroot /app/data/corpus-artifact /srv/corpus-artifact
+
+ENV PYTHONPATH=/deps:/app
+WORKDIR /app
+
+USER nonroot
 
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+    CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
 
-CMD ["uvicorn", "archimedes.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "-m", "uvicorn", "archimedes.main:app", "--host", "0.0.0.0", "--port", "8000"]
