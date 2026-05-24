@@ -59,7 +59,7 @@ jobs:
           fmt_out=$(ruff format --check backend/archimedes 2>&1)
           fmt_exit=$?
 
-          errors=$(echo "$check_out" | grep -oP 'Found \K\d+(?= error)' || true)
+          errors=$(echo "$check_out" | grep -oP 'Found \K\d+(?= errors?)' || true)
           [ -z "$errors" ] && errors=0
           fmt_issues=$(echo "$fmt_out" | grep -oP '\d+(?= file)' || true)
           [ -z "$fmt_issues" ] && fmt_issues=0
