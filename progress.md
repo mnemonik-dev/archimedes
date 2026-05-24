@@ -8,6 +8,7 @@ In Progress
 - [x] #152 Corpus Graph + KG endpoints read from S3-backed KB artifacts
 - [x] #153 CorpusGraph + CorpusKG frontend components
 - [x] #158 Wire paper-qa as defense-in-depth ranker behind strategy_fusion.select_candidates()
+- [x] #157 StockBench evaluation harness: adapter + CLI + results
 
 ## Files Changed
 
