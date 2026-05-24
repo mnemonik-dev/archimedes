@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
-Complexity gate: post per-function metric cards as a PR comment.
-Each function gets a 2-column table (metric | branch value) + delta vs main.
-Never blocks merge — informational only.
+Complexity gate: aggregate metrics table comparing main vs PR branch.
+Rows = metrics, columns = main | PR. Never blocks merge.
 """
 import argparse
 import ast
@@ -10,23 +9,9 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from statistics import mean
 
 import lizard
-
-
-def _cc_badge(cc: int) -> str:
-    if cc <= 5:  return f"{cc} ✅"
-    if cc <= 10: return f"{cc} ⚠️"
-    if cc <= 15: return f"{cc} 🟠"
-    return f"{cc} 🔴"
-
-
-def _delta(before: int | None, after: int) -> str:
-    if before is None: return "new"
-    d = after - before
-    if d > 0:  return f"+{d} ⚠️"
-    if d < 0:  return f"{d} ✅"
-    return "—"
 
 
 def _is_recursive(source: str, name: str) -> bool:
@@ -52,64 +37,76 @@ def _is_orphan(filepath: str, name: str) -> bool:
     return not any(f for f in r.stdout.strip().splitlines() if f != filepath)
 
 
-def _baseline_cc(filepath: str, func_name: str, baseline_dir: str) -> int | None:
-    baseline = Path(baseline_dir) / filepath
-    if not baseline.exists():
-        return None
-    info = lizard.analyze_file(str(baseline))
-    if not info:
-        return None
-    for fn in info.function_list:
-        if fn.name == func_name:
-            return fn.cyclomatic_complexity
-    return None
+def _collect(files: list[str], root: str = "") -> dict:
+    """Collect aggregate metrics across all functions in the given files."""
+    cc_values, nesting_values = [], []
+    recursive_count, orphan_count = 0, 0
+
+    for filepath in files:
+        p = Path(root) / filepath if root else Path(filepath)
+        if not p.exists():
+            continue
+        info = lizard.analyze_file(str(p))
+        if not info:
+            continue
+        is_py = p.suffix == ".py"
+        source = p.read_text(errors="replace") if is_py else ""
+        for fn in info.function_list:
+            cc_values.append(fn.cyclomatic_complexity)
+            nesting_values.append(getattr(fn, "max_nesting_depth", 0))
+            if is_py and _is_recursive(source, fn.name):
+                recursive_count += 1
+            if is_py and _is_orphan(str(p), fn.name):
+                orphan_count += 1
+
+    return {
+        "cc":        round(mean(cc_values), 1) if cc_values else 0,
+        "nesting":   round(mean(nesting_values), 1) if nesting_values else 0,
+        "recursive": recursive_count,
+        "orphan":    orphan_count,
+        "fns":       len(cc_values),
+    }
 
 
-def _shorten(filepath: str) -> str:
-    for prefix in ("backend/archimedes/", "backend/", "ui/src/"):
-        if filepath.startswith(prefix):
-            return filepath[len(prefix):]
-    return filepath
+def _fmt_cc(v: float) -> str:
+    if v <= 5:  return f"{v} ✅"
+    if v <= 10: return f"{v} ⚠️"
+    if v <= 15: return f"{v} 🟠"
+    return f"{v} 🔴"
+
+
+def _fmt_delta(main_v: float, pr_v: float) -> str:
+    d = round(pr_v - main_v, 1)
+    if d > 0:  return f"+{d} ⚠️"
+    if d < 0:  return f"{d} ✅"
+    return "—"
 
 
 def analyze(changed_files: list[str], baseline_dir: str) -> str:
-    blocks = []
+    targets = [f for f in changed_files
+               if Path(f).suffix in {".py", ".js", ".ts", ".jsx", ".tsx"}]
+    if not targets:
+        return "## 🔬 Complexity\n\nNo Python or JS/TS files changed.\n"
 
-    for filepath in changed_files:
-        p = Path(filepath)
-        if not p.exists():
-            continue
-        info = lizard.analyze_file(filepath)
-        if not info:
-            continue
+    pr   = _collect(targets)
+    main = _collect(targets, root=baseline_dir)
 
-        is_py = p.suffix == ".py"
-        source = p.read_text(errors="replace") if is_py else ""
-
-        for fn in info.function_list:
-            nesting = getattr(fn, "max_nesting_depth", 0)
-            base_cc = _baseline_cc(filepath, fn.name, baseline_dir)
-            blocks.append({
-                "func": f"`{fn.name}`",
-                "file": f"`{_shorten(filepath)}:{fn.start_line}`",
-                "cc": _cc_badge(fn.cyclomatic_complexity),
-                "delta": _delta(base_cc, fn.cyclomatic_complexity),
-                "nesting": f"{nesting}{'⚠️' if nesting >= 3 else ''}",
-                "recursive": "✅" if (is_py and _is_recursive(source, fn.name)) else "—",
-                "orphan": "⚠️" if (is_py and _is_orphan(filepath, fn.name)) else "—",
-            })
-
-    if not blocks:
-        return "## 🔬 Complexity\n\nNo functions found in changed files.\n"
+    rows = [
+        ("CC (avg)",       _fmt_cc(main["cc"]),        _fmt_cc(pr["cc"])),
+        ("Δ CC",           "—",                         _fmt_delta(main["cc"], pr["cc"])),
+        ("Nesting (avg)",  str(main["nesting"]),        f"{pr['nesting']}{'⚠️' if pr['nesting'] >= 3 else ''}"),
+        ("Recursive fns",  str(main["recursive"]),      str(pr["recursive"])),
+        ("Orphan fns",     str(main["orphan"]),         f"{pr['orphan']}{'⚠️' if pr['orphan'] > main['orphan'] else ''}"),
+    ]
 
     lines = [
         "## 🔬 Complexity\n",
-        "| Function | File | CC | Δ CC | Nesting | Recursive | Orphan |",
-        "|---|---|---|---|---|---|---|",
+        f"*{pr['fns']} function{'s' if pr['fns'] != 1 else ''} across {len(targets)} changed file{'s' if len(targets) != 1 else ''}*\n",
+        "| Metric | main | PR |",
+        "|---|---|---|",
     ]
-    for r in blocks:
-        lines.append(f"| {r['func']} | {r['file']} | {r['cc']} | {r['delta']} | {r['nesting']} | {r['recursive']} | {r['orphan']} |")
-    lines.append("\n*CC: ✅ 1–5 · ⚠️ 6–10 · 🟠 11–15 · 🔴 16+*\n")
+    lines += [f"| {m} | {b} | {p} |" for m, b, p in rows]
+    lines.append("\n*CC: ✅ avg 1–5 · ⚠️ 6–10 · 🟠 11–15 · 🔴 16+*\n")
     return "\n".join(lines)
 
 
@@ -120,11 +117,8 @@ def main() -> None:
     parser.add_argument("--output-md", required=True)
     args = parser.parse_args()
 
-    targets = [f for f in args.changed_files
-               if Path(f).suffix in {".py", ".js", ".ts", ".jsx", ".tsx"}]
     try:
-        md = analyze(targets, args.baseline_dir) if targets \
-            else "## 🔬 Complexity\n\nNo Python or JS/TS files changed.\n"
+        md = analyze(args.changed_files, args.baseline_dir)
     except Exception as exc:
         import traceback
         md = (
