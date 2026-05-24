@@ -53,19 +53,15 @@ jobs:
       - name: ruff
         id: ruff
         run: |
-          set +e
-          check_out=$(ruff check backend/archimedes 2>&1)
-          check_exit=$?
-          fmt_out=$(ruff format --check backend/archimedes 2>&1)
-          fmt_exit=$?
+          ruff check backend/archimedes --output-format=json > /tmp/ruff.json 2>/dev/null || true
+          ruff format --check backend/archimedes > /tmp/ruff_fmt.txt 2>&1 || true
 
-          errors=$(echo "$check_out" | grep -oP 'Found \K\d+(?= errors?)' || true)
-          [ -z "$errors" ] && errors=0
-          fmt_issues=$(echo "$fmt_out" | grep -oP '\d+(?= file)' || true)
+          lint_errors=$(python3 -c "import json; print(len(json.load(open('/tmp/ruff.json'))))" 2>/dev/null || echo "0")
+          fmt_issues=$(grep -oP '\d+(?= file)' /tmp/ruff_fmt.txt || echo "0")
           [ -z "$fmt_issues" ] && fmt_issues=0
-          total=$((errors + fmt_issues))
+          total=$((lint_errors + fmt_issues))
 
-          if [ $check_exit -eq 0 ] && [ $fmt_exit -eq 0 ]; then
+          if [ "$total" -eq 0 ]; then
             echo "result=passed" >> "$GITHUB_OUTPUT"
           else
             echo "result=not passed" >> "$GITHUB_OUTPUT"
