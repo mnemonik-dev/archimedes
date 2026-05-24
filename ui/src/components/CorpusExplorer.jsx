@@ -1,5 +1,7 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import CustomSelect from './CustomSelect'
+import CorpusGraph from './CorpusGraph'
+import CorpusKG from './CorpusKG'
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? ''
 
@@ -15,16 +17,12 @@ export default function CorpusExplorer() {
   const [tab, setTab] = useState('catalog')
   const [overview, setOverview] = useState(null)
   const [papers, setPapers] = useState([])
-  const [graphData, setGraphData] = useState(null)
-  const [kgData, setKgData] = useState(null)
   const [selectedPaper, setSelectedPaper] = useState(null)
   const [search, setSearch] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('')
   const [page, setPage] = useState(1)
   const [totalPapers, setTotalPapers] = useState(0)
   const [loading, setLoading] = useState(false)
-  const [kgEntity, setKgEntity] = useState('')
-  const graphCanvasRef = useRef(null)
 
   // Fetch overview
   useEffect(() => {
@@ -49,27 +47,6 @@ export default function CorpusExplorer() {
 
   useEffect(() => { fetchPapers() }, [fetchPapers])
 
-  // Fetch graph data
-  useEffect(() => {
-    if (tab !== 'graph') return
-    apiGet('/api/papers/corpus/graph?sample=200&lod=1')
-      .then(setGraphData)
-      .catch(() => setGraphData(null))
-  }, [tab])
-
-  // Fetch KG data
-  const fetchKG = useCallback(async () => {
-    setLoading(true)
-    try {
-      const params = kgEntity ? `?entity=${encodeURIComponent(kgEntity)}` : ''
-      const data = await apiGet(`/api/papers/corpus/kg${params}`)
-      setKgData(data)
-    } catch { setKgData(null) }
-    setLoading(false)
-  }, [kgEntity])
-
-  useEffect(() => { if (tab === 'knowledge-graph') fetchKG() }, [tab, fetchKG])
-
   // Fetch paper detail
   const openPaper = async (arxivId) => {
     try {
@@ -77,61 +54,6 @@ export default function CorpusExplorer() {
       setSelectedPaper(data)
     } catch { setSelectedPaper(null) }
   }
-
-  // Simple canvas graph renderer
-  useEffect(() => {
-    if (tab !== 'graph' || !graphData || !graphCanvasRef.current || graphData.nodes.length === 0) return
-    const canvas = graphCanvasRef.current
-    const ctx = canvas.getContext('2d')
-    const W = canvas.width = canvas.offsetWidth
-    const H = canvas.height = canvas.offsetHeight
-    ctx.clearRect(0, 0, W, H)
-
-    // Circular layout for nodes
-    const cx = W / 2, cy = H / 2, R = Math.min(W, H) * 0.38
-    const nodeMap = {}
-    graphData.nodes.forEach((n, i) => {
-      const angle = (2 * Math.PI * i) / graphData.nodes.length - Math.PI / 2
-      n.x = cx + R * Math.cos(angle)
-      n.y = cy + R * Math.sin(angle)
-      nodeMap[n.id] = n
-    })
-
-    // Color by cluster
-    const clusters = [...new Set(graphData.nodes.map(n => n.cluster || 'default'))]
-    const clusterColors = {}
-    const palette = ['#6366f1', '#06b6d4', '#f59e0b', '#ef4444', '#10b981', '#8b5cf6', '#ec4899', '#14b8a6']
-    clusters.forEach((c, i) => { clusterColors[c] = palette[i % palette.length] })
-
-    // Draw edges
-    ctx.strokeStyle = 'rgba(100,100,140,0.12)'
-    ctx.lineWidth = 0.5
-    graphData.edges.forEach(e => {
-      const s = nodeMap[e.source], t = nodeMap[e.target]
-      if (!s || !t) return
-      ctx.beginPath()
-      ctx.moveTo(s.x, s.y)
-      ctx.lineTo(t.x, t.y)
-      ctx.stroke()
-    })
-
-    // Draw nodes
-    graphData.nodes.forEach(n => {
-      ctx.fillStyle = clusterColors[n.cluster || 'default'] || '#6366f1'
-      ctx.beginPath()
-      ctx.arc(n.x, n.y, 3, 0, 2 * Math.PI)
-      ctx.fill()
-    })
-
-    // Legend
-    ctx.font = '11px system-ui'
-    clusters.slice(0, 8).forEach((c, i) => {
-      ctx.fillStyle = clusterColors[c]
-      ctx.fillRect(10, 10 + i * 18, 10, 10)
-      ctx.fillStyle = '#a1a1aa'
-      ctx.fillText(c.length > 30 ? c.slice(0, 30) + '...' : c, 26, 19 + i * 18)
-    })
-  }, [tab, graphData])
 
   if (selectedPaper) {
     return <PaperDetail paper={selectedPaper} onBack={() => setSelectedPaper(null)} />
@@ -169,39 +91,13 @@ export default function CorpusExplorer() {
         />
       )}
       {tab === 'graph' && (
-        <div className="corpus-graph-container">
-          {graphData?.status === 'empty' ? (
-            <div className="corpus-empty">No papers in corpus yet.</div>
-          ) : (
-            <>
-              {graphData?.note && <div className="corpus-note">{graphData.note}</div>}
-              <canvas ref={graphCanvasRef} className="corpus-canvas" style={{ width: '100%', height: '500px' }} />
-              <div className="corpus-graph-stats">
-                {graphData && (
-                  <span className="stat-chip">{graphData.sampled} nodes / {graphData.edges?.length} edges (sampled from {graphData.total_papers?.toLocaleString()})</span>
-                )}
-              </div>
-            </>
-          )}
+        <div className="corpus-graph-container" style={{ padding: '8px 0' }}>
+          <CorpusGraph />
         </div>
       )}
       {tab === 'knowledge-graph' && (
-        <div className="corpus-kg-container">
-          <div className="kg-controls">
-            <input
-              type="text" placeholder="Filter by entity (author, topic, category)..."
-              value={kgEntity} onChange={e => setKgEntity(e.target.value)}
-              className="kg-search"
-            />
-          </div>
-          {kgData?.status === 'empty' ? (
-            <div className="corpus-empty">No papers in corpus yet.</div>
-          ) : (
-            <>
-              {kgData?.note && <div className="corpus-note">{kgData.note}</div>}
-              <KGViewer data={kgData} openPaper={openPaper} />
-            </>
-          )}
+        <div className="corpus-kg-container" style={{ padding: '8px 0' }}>
+          <CorpusKG onOpenPaper={openPaper} />
         </div>
       )}
     </div>
@@ -355,41 +251,6 @@ function CatalogTab({ papers, total, page, loading, search, setSearch, categoryF
           )}
         </>
       )}
-    </div>
-  )
-}
-
-function KGViewer({ data, openPaper }) {
-  if (!data || !data.entities) return null
-  const entityTypes = {}
-  data.entities.forEach(e => {
-    if (!entityTypes[e.type]) entityTypes[e.type] = []
-    entityTypes[e.type].push(e)
-  })
-  return (
-    <div className="kg-viewer">
-      <div className="kg-stats">
-        <span className="stat-chip">{data.entities?.length} entities</span>
-        <span className="stat-chip">{data.relations?.length} relations</span>
-        <span className="stat-chip">{data.filtered} papers matched</span>
-      </div>
-      {Object.entries(entityTypes).map(([type, entities]) => (
-        <div key={type} className="kg-section">
-          <h4>{type.charAt(0).toUpperCase() + type.slice(1)}s ({entities.length})</h4>
-          <div className="kg-entity-list">
-            {entities.slice(0, 50).map(e => (
-              <span key={e.id} className={`kg-entity kg-entity-${e.type}`}>
-                {type === 'paper' ? (
-                  <a onClick={() => openPaper(e.id)} title={e.label}>{e.label?.slice(0, 60)}</a>
-                ) : (
-                  <span>{e.label}</span>
-                )}
-              </span>
-            ))}
-            {entities.length > 50 && <span className="kg-more">+{entities.length - 50} more</span>}
-          </div>
-        </div>
-      ))}
     </div>
   )
 }

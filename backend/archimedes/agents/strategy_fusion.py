@@ -306,7 +306,8 @@ def select_candidates(brief: FusionBrief, corpus: list[CorpusPaper]) -> list[Cor
     1. Asset-class overlap filter (skipped if no asset_classes given).
     2. Rank by strategic_direction keyword hits, then recency (newer first
        — alpha decay favours fresher results), then arxiv_id for total order.
-    3. Take top `paper_budget`.
+    3. Semantic rerank via paper_rag (defense-in-depth: keyword + semantic).
+    4. Take top `paper_budget`.
     """
     terms = _asset_terms(brief.asset_classes)
     if terms:
@@ -325,6 +326,17 @@ def select_candidates(brief: FusionBrief, corpus: list[CorpusPaper]) -> list[Cor
         return (-hits, _recency_key(p.published), p.arxiv_id)
 
     ranked = sorted(filtered, key=score)
+
+    # Semantic rerank: defense-in-depth behind the keyword filter.
+    # When FUSION_SEMANTIC_RETRIEVAL is off or fails, keyword ranking is
+    # preserved unchanged.
+    try:
+        from archimedes.services.paper_rag import augment_candidate_scores
+        scored = augment_candidate_scores(brief.strategic_direction, ranked)
+        ranked = [c for c, _s in scored]
+    except Exception as exc:
+        logger.debug("fusion: semantic rerank skipped, keyword-only: %s", exc)
+
     return ranked[: brief.paper_budget]
 
 

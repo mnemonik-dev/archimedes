@@ -222,8 +222,59 @@ async def get_corpus_graph(
     sample: int = 500,
     lod: int = 1,
 ):
-    """Similarity graph nodes/edges for the corpus."""
-    import json as _json
+    """SPECTER2-similarity 2D scatter backed by KB pipeline artifacts.
+
+    Reads pre-computed UMAP projection or raw embeddings from S3 / local
+    artifact dir. Falls back to metadata-derived graph only when no KB
+    artifacts exist (503 with clear error).
+    """
+    from archimedes.services.kb_artifacts import (
+        ArtifactNotFound,
+        load_clusters,
+        load_embeddings,
+        load_topics,
+        load_umap_projection,
+        compute_and_cache_umap_projection,
+    )
+
+    # Try real SPECTER2-backed projection first
+    try:
+        points = load_umap_projection()
+        if points is None:
+            ids, embeddings = load_embeddings()
+            try:
+                clusters = load_clusters()
+            except ArtifactNotFound:
+                clusters = None
+            points = compute_and_cache_umap_projection(ids, embeddings, clusters)
+
+        # Load topics for cluster labels
+        try:
+            topics = load_topics()
+        except ArtifactNotFound:
+            topics = {}
+
+        # Sample if requested
+        if sample and len(points) > sample:
+            import random
+            points = random.sample(points, sample)
+
+        cluster_ids = list({p.get("cluster_id") for p in points if p.get("cluster_id")})
+
+        return {
+            "status": "specter2",
+            "total_papers": len(points),
+            "sampled": len(points),
+            "cluster_count": len(cluster_ids),
+            "topics": topics,
+            "points": points,
+            "edges": [],  # Graph edges not needed for scatter; UMAP positions encode similarity
+        }
+    except ArtifactNotFound:
+        # No KB artifacts — fall back to metadata-derived graph
+        pass
+
+    # --- Metadata-derived fallback ---
     from collections import defaultdict
     from archimedes.models.corpus_store import PaperRecord
     from sqlalchemy import func
@@ -246,8 +297,8 @@ async def get_corpus_graph(
         for p in papers:
             label = p.topic_label or p.primary_category if hasattr(p, 'primary_category') else None
             try:
-                cats = _json.loads(p.categories) if p.categories else []
-            except (_json.JSONDecodeError, TypeError):
+                cats = json.loads(p.categories) if p.categories else []
+            except (json.JSONDecodeError, TypeError):
                 cats = []
             if not cats:
                 cats = ["uncategorized"]
@@ -274,7 +325,7 @@ async def get_corpus_graph(
 
         return {
             "status": "metadata_derived",
-            "note": "Category co-occurrence graph from metadata. Embedding-based similarity pending KB pipeline port (#101).",
+            "note": "Category co-occurrence graph from metadata. Run KB pipeline for SPECTER2-backed similarity.",
             "total_papers": total,
             "sampled": len(nodes),
             "nodes": nodes,

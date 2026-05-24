@@ -112,21 +112,64 @@ async def corpus_overview() -> dict[str, Any]:
 
 @corpus_router.get("/graph")
 async def corpus_graph() -> dict[str, Any]:
-    """SPECTER2-similarity 2D scatter. Requires a completed KB run."""
-    manifest = _load_manifest()
-    if manifest is None or not (ARTIFACT_DIR / "embeddings.npy").exists():
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "Corpus graph requires a completed KB pipeline run. "
-                "Run `docker compose run --rm kb-runner python -m archimedes.scripts.run_kb_pipeline` "
-                "(or set KB_PIPELINE_ENABLED=1 in the kb-runner container) to produce embeddings.npy. "
-                "See docs/specs/kb-integration-spec.md."
-            ),
-        )
-    # Skeleton: when the pipeline lands, this loads embeddings.npy + ids.json,
-    # runs UMAP to 2D, returns {points: [{arxiv_id, x, y, cluster_id}], topics: {...}}.
-    raise HTTPException(status_code=501, detail="UMAP projection not yet wired; see Phase 3c.")
+    """SPECTER2-similarity 2D scatter. Requires a completed KB run.
+
+    Reads ``embeddings.npy`` + ``ids.json`` from S3 or local artifact dir,
+    computes UMAP projection (cached for 1h), and returns
+    ``{points: [{arxiv_id, x, y, cluster_id}], topics: {...}}``.
+    """
+    from archimedes.services.kb_artifacts import (
+        ArtifactNotFound,
+        load_clusters,
+        load_embeddings,
+        load_topics,
+        load_umap_projection,
+        compute_and_cache_umap_projection,
+    )
+
+    # 1. Try pre-computed UMAP projection first (fast path)
+    points = load_umap_projection()
+
+    if points is None:
+        # 2. Compute from raw embeddings + clusters
+        try:
+            ids, embeddings = load_embeddings()
+        except ArtifactNotFound:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error": "kb_artifact_not_found",
+                    "message": (
+                        "Corpus graph requires a completed KB pipeline run. "
+                        "Run `python -m archimedes.scripts.run_kb_pipeline` to produce "
+                        "embeddings.npy + ids.json. See docs/specs/kb-integration-spec.md."
+                    ),
+                    "retry_after": 60,
+                },
+            ) from None
+
+        try:
+            clusters = load_clusters()
+        except ArtifactNotFound:
+            clusters = None
+
+        points = compute_and_cache_umap_projection(ids, embeddings, clusters)
+
+    # Load topic labels for cluster annotation
+    try:
+        topics = load_topics()
+    except ArtifactNotFound:
+        topics = {}
+
+    # Deduplicate cluster IDs for summary
+    cluster_ids = list({p.get("cluster_id") for p in points if p.get("cluster_id")})
+
+    return {
+        "points": points,
+        "topics": topics,
+        "cluster_count": len(cluster_ids),
+        "point_count": len(points),
+    }
 
 
 @corpus_router.get("/kg/entities")

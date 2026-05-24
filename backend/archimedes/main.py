@@ -218,6 +218,17 @@ async def health():
     except Exception:
         pass
 
+    # Paper RAG health (semantic retrieval)
+    paper_rag_status = "disabled"
+    paper_rag_reason = ""
+    try:
+        from archimedes.services.paper_rag import paper_rag_health as _prag_health
+        _diag = _prag_health()
+        paper_rag_status = _diag.status
+        paper_rag_reason = _diag.reason
+    except Exception:
+        paper_rag_reason = "import failed"
+
     return {
         "status": "ok" if connected else "degraded",
         "service": "archimedes-backend",
@@ -234,6 +245,20 @@ async def health():
         "llm_has_api_key": bool(os.getenv("LLM_API_KEY") or os.getenv("ANTHROPIC_API_KEY")),
         "llm_has_auth_token": bool(os.getenv("LLM_AUTH_TOKEN") or os.getenv("ANTHROPIC_AUTH_TOKEN")),
         "llm_has_base_url": bool(os.getenv("LLM_BASE_URL") or os.getenv("ANTHROPIC_BASE_URL")),
+        "paper_rag": paper_rag_status,
+        "paper_rag_reason": paper_rag_reason,
+    }
+
+
+@app.get("/health/paper-rag")
+@limiter.exempt
+async def health_paper_rag():
+    """Dedicated paper-rag health endpoint."""
+    from archimedes.services.paper_rag import paper_rag_health
+    diag = paper_rag_health()
+    return {
+        "paper_rag": diag.status,
+        "reason": diag.reason,
     }
 
 
