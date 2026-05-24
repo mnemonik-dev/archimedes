@@ -1,14 +1,15 @@
 # Progress
 
 ## Status
-In Progress — Issue #150 (DepositFlow stepper modal) complete. Deployed to main.
+In Progress — Issue #181 (User-data minimization) complete. Deployed to main.
 
 ## Tasks
 
 ### Completed (this session)
-- **#150** — DepositFlow stepper modal: 3-step USDC.approve → vault.deposit → setTargetAllocations with per-step status (pending/waiting/confirming/done/failed), retry on error, arcscan tx links, localStorage progress persistence for resume. USDC_ABI added to config.js. Wired into CreateVaultModal replacing the Phase 4.5 placeholder.
+- **#181** — User-data minimization: encrypt email at rest (Fernet), scrub from logs, owner-only API echo. 12 new privacy tests + updated 12 route tests. 402 total tests green.
 
 ### Completed (prior sessions)
+- **#150** — DepositFlow stepper modal: 3-step USDC.approve → vault.deposit → setTargetAllocations
 - **#174** — `/api/health/amm` endpoint + agent_runner VaultFactory poll
 - **#172** — WelcomeProfileModal + personalized header
 - **#167** — Generate page single input + backend auto-route
@@ -20,17 +21,22 @@ In Progress — Issue #150 (DepositFlow stepper modal) complete. Deployed to mai
 - **#171** — Portfolio traces honesty
 - **#173** — Agents subpackage refactor
 
-## Files Changed (this session — Issue #150)
-- `ui/src/components/DepositFlow.jsx` — NEW: 366-line 3-step stepper modal component
-- `ui/src/components/CreateVaultModal.jsx` — Wired DepositFlow to replace Phase 4.5 placeholder; on vault deploy success, renders DepositFlow instead of closing
-- `ui/src/config.js` — Added `USDC_ABI` minimal export (approve + allowance fragments)
+## Files Changed (this session — Issue #181)
+- `backend/archimedes/services/email_crypto.py` — NEW: Fernet-based email encrypt/decrypt (env-var key)
+- `backend/archimedes/services/log_scrubber.py` — NEW: PII field scrubber for log output
+- `backend/archimedes/api/user_routes.py` — Owner-only echo via X-Wallet-Address header; encrypt on write, decrypt on owner read; log scrubbing
+- `backend/archimedes/api/limiter.py` — Disabled in TESTING mode
+- `backend/archimedes/models/user_profile.py` — Updated docstring noting encryption
+- `backend/tests/conftest.py` — Set TESTING=1 before imports
+- `backend/tests/test_user_routes.py` — Rewritten: unique wallets, owner/anonymous assertions
+- `backend/archimedes/tests/test_user_profile_privacy.py` — NEW: 12 tests for encryption, scrubbing, owner-only echo
 
 ## Validation
-- Frontend build: `npm run build` → clean (no new warnings)
-- Backend tests: `pytest -q -k "not user_profile_privacy and not test_user_routes"` → 378 passed, 0 failures
-- AC: `grep -c "DepositFlow" ui/src/components/CreateVaultModal.jsx` → 6 matches
-- AC: `grep -c "writeContract" ui/src/components/DepositFlow.jsx` → 3 (one per step)
-- AC: `grep -c "USDC_ABI" ui/src/config.js` → 1 (export exists)
-- AC: `grep -c "arcscan.app" ui/src/components/DepositFlow.jsx` → 1 (tx explorer links)
-- AC: `grep -c "Retry" ui/src/components/DepositFlow.jsx` → 1 (retry button on error)
-- AC: `grep -c "localStorage" ui/src/components/DepositFlow.jsx` → 4 (progress persistence)
+- Backend tests: 402 passed, 0 failed, 2 skipped (pre-existing Redis flakes)
+- Email encryption: round-trip verified (Fernet tokens differ from plaintext, decrypt back correctly)
+- Log scrubbing: grep confirms 0 raw email/display_name in log output
+- Owner-only: anonymous GET returns email=None, display_name=None; owner GET returns decrypted values
+- Rate limiter: properly disabled in test mode via TESTING env var
+
+## Open items
+- Issues still assigned to t2o2: #179 (rate limiting), #180 (dependabot), #176 (SSM secrets), #175 (E2E smoke), #165–#153 (Track C/E intelligence)
