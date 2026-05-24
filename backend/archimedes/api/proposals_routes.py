@@ -12,7 +12,7 @@ from fastapi import APIRouter, Query
 proposals_router = APIRouter(prefix="/api/proposals", tags=["proposals"])
 
 
-@proposals_router.get("/proposals")
+@proposals_router.get("/")
 async def list_proposals(
     verdict: str | None = Query(None, description="Filter by verdict: rigor_pass | rigor_fail | user_rejected | pending"),
     agent: str | None = Query(None, description="Filter by agent: fusion | architect | agent"),
@@ -42,7 +42,7 @@ async def list_proposals(
     }
 
 
-@proposals_router.get("/proposals/{generation_id}/siblings")
+@proposals_router.get("/{generation_id}/siblings")
 async def get_proposal_siblings(generation_id: str):
     """Get all proposals from the same generation — 'considered alternatives'."""
     from archimedes.services.strategy_memory import get_siblings

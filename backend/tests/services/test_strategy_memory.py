@@ -246,7 +246,7 @@ class TestProposalsAPI:
         return TestClient(app)
 
     def test_list_proposals_empty(self, client):
-        resp = client.get("/api/strategies/proposals")
+        resp = client.get("/api/proposals")
         assert resp.status_code == 200
         data = resp.json()
         assert "proposals" in data
@@ -260,7 +260,7 @@ class TestProposalsAPI:
             agent="fusion",
             intent="api test proposal",
         )
-        resp = client.get("/api/strategies/proposals")
+        resp = client.get("/api/proposals")
         assert resp.status_code == 200
         data = resp.json()
         assert data["total"] >= 1
@@ -274,7 +274,7 @@ class TestProposalsAPI:
             intent="failing proposal",
             rigor_verdict={"passing": False},
         )
-        resp = client.get("/api/strategies/proposals?verdict=rigor_fail")
+        resp = client.get("/api/proposals?verdict=rigor_fail")
         assert resp.status_code == 200
         data = resp.json()
         assert all(p["verdict"] == "rigor_fail" for p in data["proposals"])
@@ -285,7 +285,7 @@ class TestProposalsAPI:
         gid = "gen_sib_api"
         persist_proposal(generation_id=gid, agent="fusion", intent="sib api 1")
         persist_proposal(generation_id=gid, agent="architect", intent="sib api 2")
-        resp = client.get(f"/api/strategies/proposals/{gid}/siblings")
+        resp = client.get(f"/api/proposals/{gid}/siblings")
         assert resp.status_code == 200
         data = resp.json()
         assert data["generation_id"] == gid

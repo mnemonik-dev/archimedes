@@ -1,11 +1,12 @@
 # Progress
 
 ## Status
-In Progress — Issue #175 (E2E testnet smoke test) complete. Deployed to main.
+In Progress — Issue #162 (regime_tag) complete. Deployed to main.
 
 ## Tasks
 
 ### Completed (this session)
+- **#162** — regime_tag field on Strategy dataclass (bull/bear/regime_neutral). All 6 curated strategies tagged. Invalid/missing tag raises ValueError. API response includes regime_tag. 20 new tests.
 - **#175** — E2E testnet smoke test script: `verify_arc_e2e.py` with --dry-run (prerequisites check, exit 0) and --execute (full 11-step lifecycle). Evidence captured to `docs/runbooks/arc-testnet-e2e-evidence.md` with arcscan links.
 - **#179** — Rate limiting via slowapi: generate/start 5/min, profile POST 1/min, public GETs 60/min. Redis-backed, falls back to in-memory. Health + verify exempt. X-RateLimit headers. 402 tests green.
 - **#181** — User-data minimization: encrypt email at rest (Fernet), scrub from logs, owner-only API echo. 12 new privacy tests + updated 12 route tests. 402 total tests green.
