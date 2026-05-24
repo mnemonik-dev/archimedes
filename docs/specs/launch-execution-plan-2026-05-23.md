@@ -31,16 +31,17 @@ Pitch framing locked: Wall Street has the rigor toolkit (DSR/PBO/walk-forward OO
    - [Verification protocol](#25-verification-protocol)
    - [Spec elaboration process (hybrid Maestro pattern)](#26-spec-elaboration-process-hybrid-maestro-pattern)
 3. [Pitch frame + architecture](#3-pitch-frame--architecture)
-   - [Canonical pitch frame](#31-canonical-pitch-frame)
+   - [Canonical pitch frame](#31-canonical-pitch-frame) — opens with Xia et al. 2026 protocol-audit numbers
    - [User journey — directed click-graph](#32-user-journey--directed-click-graph)
    - [Agent architecture — 3 top-level agents × sub-agents × shared memory](#33-agent-architecture)
    - [Who does what — agent ↔ user interaction model](#331-who-does-what--agent--user-interaction-model)
-   - [Shared memory — 5-layer pillar (Linus lineage)](#34-shared-memory--5-layer-pillar-linus-lineage)
+   - [Shared memory — 5-layer pillar (Linus lineage + Xia refinement)](#34-shared-memory--5-layer-pillar-linus-lineage--xia-refinement)
    - [Corpus seeding strategy](#35-corpus-seeding-strategy)
+   - [Named protocols (Xia et al. 2026)](#36-named-protocols-xia-et-al-2026) — Outcome Embargo, Time-Aware Retrieval, Hierarchy of Truth, Source Tracking, V_check contract
 4. [Track A — vault execution path (T1.x)](#4-track-a--vault-execution-path-t1x)
 5. [Track B — UI/UX surface cleanup (T2.x)](#5-track-b--uiux-surface-cleanup-t2x)
-6. [Track C — AWS infrastructure + KB pipeline + virality-readiness (T3.x)](#6-track-c--aws-infrastructure--kb-pipeline-t3x)
-   - Includes T3.6 ALB + CloudFront + auto-scaling backend tier
+6. [Track C — AWS infrastructure + KB pipeline + virality-readiness + Xia protocols + StockBench (T3.x)](#6-track-c--aws-infrastructure--kb-pipeline-t3x)
+   - Includes T3.6 ALB + CloudFront + ASG, T3.7 Xia named protocols, T3.8 StockBench harness
 7. [Security pillar (TS.x)](#7-security-pillar-tsx)
 8. [Manual deliverables (M.x)](#8-manual-deliverables-mx)
 9. [Parallel-track Maestro prompts](#9-parallel-track-maestro-prompts)
@@ -63,11 +64,13 @@ Pitch framing locked: Wall Street has the rigor toolkit (DSR/PBO/walk-forward OO
 | **Identity** | Wallet = identity. No required signup. Optional `WelcomeProfileModal` on first wallet connect captures display_name + email + interests + attribution + marketing_opt_in. All fields optional; user can Skip. Header shows "Welcome, &lt;name&gt;" when set. |
 | **HTTPS + domain** | Chuan's bots register `archimedes-arc.app` via AWS Route 53 + obtain Let's Encrypt cert via certbot + configure nginx + force HTTP→HTTPS + HSTS. The `.app` TLD forces HTTPS via the HSTS preload list. End-to-end bot-provisioned. |
 | **Scalability + load-balancing** | First-class architectural pillar — virality-ready from day one. AWS Application Load Balancer in front of an auto-scaling group of EC2 (min=2, max=4, desired=2) for the backend tier; CloudFront distribution in front of ALB caches static assets at the edge and absorbs cold spikes. Postgres + Redis move to a dedicated database EC2 (v1) — RDS + ElastiCache is the v2 hop. Closes the "we go viral and our single EC2 dies" failure mode that would forfeit traction at the worst possible moment. T3.6 ships this; § 11 confirms the risk is mitigated, not just accepted. |
-| **LLM backend** | GLM-4.7 stays primary (working, tested, free tier). Ship BYOK header support (`X-Anthropic-Api-Key`) so judges + users can self-fund Claude direct. Bedrock spec is filed on-record but **unassigned** to `t2o2`; we activate it only if we choose to deploy. |
+| **LLM backend** | GLM-4.7 stays primary (working, tested, free tier). **Empirically validated:** GLM-4.5 ranks #3 globally on the StockBench benchmark (Chen et al. 2026, [arxiv 2510.02209](https://arxiv.org/abs/2510.02209)) — behind only Kimi-K2 (Moonshot) and Qwen3-235B-Instruct, ahead of Claude-4-Sonnet (#7) and GPT-5 (#9). StockBench also found that reasoning-tuned models DO NOT systematically outperform instruction-tuned in trading workflows — sharpens our skepticism of reasoning-mode-by-default. Ship BYOK header support (`X-Anthropic-Api-Key`) so judges + users can self-fund Claude direct. Bedrock spec is filed on-record but **unassigned** to `t2o2`; we activate it only if we choose to deploy. |
 | **Submission deadline** | Hard: Monday 2026-05-25 23:59 ET (Tue 04:59 UTC). Personal target: Sunday 2026-05-24 23:59 CT. Monday is buffer (final video re-record, late docs polish). |
 | **Delivery surface** | Three artifacts: (1) public GitHub repo at `a-apin/archimedes-arcadia` (org renamed from `hackagora` 2026-05-23 PM; GitHub auto-redirects old URLs), (2) live HTTPS website at `https://archimedes-arc.app`, (3) ≤ 3-minute demo video. All other docs are supporting evidence. |
 | **RFB alignment** | **Primary: [RFB 04 Adaptive Portfolio Manager](https://luma.com/7i50p2r9)** — direct hit (regime detection, asset allocation, rebalancing, risk management; goal-based PM interface; correlation-based diversification; cross-chain-ready rebalancing infra). **Adjacent: RFB 02 Prediction Market Trader Intelligence** (our Kelly Criterion + risk parity + +EV sizing maps to the "optimal bet sizing" primitive) and **RFB 06 Social Trading Intelligence** (our Tier-1 verified strategy library + paper-anchored passport + DSR/PBO rigor IS the "AI selects, weights, and monitors" pattern applied to strategies-as-traders; the rigor-gated library IS the leaderboard). Every refreshed doc in M.4 makes this alignment explicit. |
 | **Security posture** | First-class pillar (Section 7). Zero-trust, secrets out of `.env` into AWS SSM Parameter Store + IAM instance profile, HTTPS everywhere, security headers, CORS lockdown, rate limits, dependency scanning, secret-leak detection, user-data minimization with KMS encryption. Same rigor as the statistical pipeline. |
+| **Reproducibility target** | **R3 per Xia et al. 2026** ([arxiv 2605.19337](https://arxiv.org/abs/2605.19337)). Their audit of 19 trading-agent papers found **15/19 are R0** (no code/data artifacts), **0/19 reach R3** (fully replayable with artifact versioning + immutable provenance). Archimedes is engineered to be the first production trading-agent system to ship at R3: on-chain `ReasoningTraceRegistry` provides immutable timestamped anchors for every agent decision; KB pipeline artifacts persisted to S3 with versioned manifests; strategy DSLs + backtest seeds committed to git; vault contracts + ABIs verifiable on Arc. This is a pitch beat and a verification goal. |
+| **Academic backstop** | Two bleeding-edge papers anchor our pitch: **Xia et al. 2026 — "Agentic Trading: When LLM Agents Meet Financial Markets"** (arxiv 2605.19337, ESWA) for the architecture/protocol critique that frames our wedge; and **Chen et al. 2026 — "StockBench"** (arxiv 2510.02209) for the empirical benchmark our LLM backend ranks #3 on. Both go into the seed corpus (§ 3.5) and are cited explicitly in README + deck + ARC-OSS submission. |
 | **AWS account ownership** | Chuan's AWS account. The `t2o2` bot system provisions into it; Chuan absorbs the spend with anti-goals + budget alarms keeping costs bounded (T3.6 daily AWS spend monitor: pause if > $50/day). |
 | **Process: t2o2 assignment** | Claude + subagents **file** every issue but **do not assign** `t2o2`. Dan manually assigns + tracks via the GitHub Kanban board. This gives Dan a review-and-tweak gate before each issue fires; protects against spec ambiguity propagating into bot work. |
 | **Process: spec elaboration** | Hybrid model per § 2.6. Maestro subagents spawn a dedicated audit Explore subagent for the BIG specs (T2.2 / T2.7 / T3.1 / T3.2 / T3.6) — file:line precision, function signatures, exact grep patterns, test names, edge cases. For SMALL specs (T1.4 / T2.4 / T2.5 / TS.4 / TS.5) the Maestro does inline audit with Read + Grep tools. **Filed specs are bot-grade, not seed-grade.** The specs in §§ 4–7 of this plan are SEEDS — Maestros elaborate them against actual code before filing. |
@@ -252,13 +255,17 @@ uncertain about. **A 30-minute audit subagent run that catches one bot ambiguity
 
 ### 3.1 Canonical pitch frame
 
-**The problem.** Turning a trading idea into a *rigorously backtested, statistically analyzed, deployable* strategy is gatekept. Wall Street has the toolset (Deflated Sharpe, Probability of Backtest Overfitting, walk-forward OOS, stress tests, multi-agent risk pricing); most people don't. That's why Ken Griffin owns Citadel. Archimedes brings that rigor to anyone with idle USDC.
+**Opening beat (lead the deck with this).** In May 2026, [Xia et al. published](https://arxiv.org/abs/2605.19337) the first audit-grade survey of LLM trading agents. They screened 92 candidate studies, retained 77 in their evidence ledger, and identified 19 primary studies that actually emit tradable actions and evaluate them closed-loop. The numbers are damning: **only 2/19** report time-consistent train/test splits; **only 1/19** has an explicit transaction-cost model; **only 1/19** documents universe/survivorship handling; **15/19 are R0** (no code, no data, not replayable); **0/19 reach R3** (fully replayable with artifact versioning + immutable provenance). The entire trading-agent field is operating without the protocols that make finance a science instead of a story. **Archimedes is built to be the first production system to satisfy every gap Xia identifies — and the first to ship at R3.**
+
+**The problem.** Turning a trading idea into a *rigorously backtested, statistically analyzed, deployable* strategy is gatekept. Wall Street has the toolset (Deflated Sharpe, Probability of Backtest Overfitting, walk-forward OOS, stress tests, multi-agent risk pricing); most people don't. And even where AI-trading agents are being built — in academic labs and crypto-native shops — the protocol rigor isn't there (Xia et al. 2026). Archimedes brings the rigor to anyone with idle USDC, and brings the protocol auditability to the whole field.
 
 **The product.** Describe what you want in plain English. Archimedes' multi-agent system fuses your intent with 10,000 peer-reviewed q-fin papers and live market data into novel strategies, gates them through DSR + PBO + walk-forward OOS + look-ahead audit rigor, executes them in non-custodial vaults on Arc, and anchors every decision on-chain.
 
 **The wedge.** Rigor as the curation protocol. The November-2025 crisis showed trust-based curation breaks under stress. We prove the method, not the returns. *Win more than you lose, not never lose.*
 
-**The multi-agent narrative.** Fusion (novel synthesis from papers) + Architect (curated library picks) + Portfolio Advisor (Kelly sizing + risk parity) + Stress Engine (six-scenario shock testing) — three top-level agents with sub-agents apiece, connected by a 5-layer shared memory pillar borrowed from Linus's architecture (§ 3.4). The user's role and the trade-execution boundary are spelled out in § 3.3.1. Settlement on Arc with USDC; reasoning traces hashed on-chain via `ReasoningTraceRegistry`.
+**The multi-agent narrative.** Fusion (novel synthesis from papers) + Architect (curated library picks) + Portfolio Advisor (Kelly sizing + risk parity) + Stress Engine (six-scenario shock testing) — three top-level agents with sub-agents apiece, connected by a 5-layer shared memory pillar borrowed from Linus's architecture (§ 3.4) and refined by Xia's working-memory two-sublayer split for trading contexts. Our agent loop maps cleanly onto Xia's **Architecture-Capability-Adaptation (A-C-A)** taxonomy and implements all four named protocols Xia formalizes — **Outcome Embargo, Time-Aware Retrieval, Hierarchy of Truth, Source Tracking** (§ 3.6 details). The user's role and the trade-execution boundary are spelled out in § 3.3.1. Settlement on Arc with USDC; reasoning traces hashed on-chain via `ReasoningTraceRegistry`.
+
+**The empirical proof point.** Our primary LLM (GLM-4.7) is a direct successor to GLM-4.5, which **ranks #3 globally on StockBench** (Chen et al. 2026) — the first contamination-free, closed-loop, multi-month trading-agent benchmark. GLM-4.5 outranks Claude-4-Sonnet (#7), GPT-5 (#9), and the entire GPT-OSS family in real trading performance (Sortino ratio, max drawdown, return). Our T3.8 spec ships a StockBench harness that runs Archimedes' Strategy Generation Agent against the same evaluation, so the demo video v2 carries a real benchmark number — not a vibes claim.
 
 **Hackathon RFB alignment.** Archimedes is a direct fit for **[RFB 04 Adaptive Portfolio Manager](https://luma.com/7i50p2r9)** — the only one of the six RFBs that names every primitive we ship (regime detection, asset allocation by regime, rebalancing, risk management via Kelly + risk parity, correlation-based diversification, cross-chain-ready execution). The pitch deck and README lead with RFB 04 alignment. **Adjacent fit:** RFB 02 (Prediction Market Trader Intelligence — our +EV / Kelly sizing primitive maps directly without requiring us to ship prediction markets) and RFB 06 (Social Trading Intelligence — our Tier-1 verified strategy library, paper-anchored passport, and DSR/PBO rigor IS the "AI selects, weights, and monitors" pattern applied to strategies-as-traders; our rigor-gated library IS the leaderboard the RFB describes). Adjacencies are pitched as bonus surface area, not core claims.
 
@@ -336,9 +343,10 @@ flowchart TB
     LE_SE --> LE_DC --> LE_CB --> LE_TX --> LE_TP
   end
 
-  subgraph SM[Shared Memory — 5-layer pillar]
+  subgraph SM[Shared Memory — 5-layer pillar Linus + Xia refinement]
     direction LR
-    SM_A[A: KV cache / LLM context<br/>intra-step latent]
+    SM_A1[A.1: KV cache<br/>intra-step latent Linus]
+    SM_A2[A.2: Deterministic state store<br/>vault positions + balances + risk limits<br/>read-only from chain Xia audit-truth]
     SM_B[B: Redis<br/>per-job event log + scratchpad]
     SM_C[C: Postgres<br/>StrategyStore + vaults + traces]
     SM_D[D: Job memory<br/>per-strategy investigation]
@@ -354,7 +362,8 @@ flowchart TB
   LE -- decision trace --> SM_C
   LE -- on-chain anchor --> ON[Arc / ReasoningTraceRegistry]
 
-  SM_A -.feeds.-> SG_SS
+  SM_A1 -.feeds.-> SG_SS
+  SM_A2 -.gates.-> LE_TX
   SM_E -.feeds.-> SG_PR
   SM_B -.feeds.-> SG_SS
   SM_D -.feeds.-> LE_CB
@@ -447,17 +456,20 @@ sequenceDiagram
 
 **The architectural shape Dan asked about.** *Strategy Generation* answers "what should be done"; *Portfolio Construction* answers "how exactly do we do it" (and turns that into a deployable, signable proposal); *Live Execution* answers "given we have a configured vault, what do we do this minute, and how do we make it auditable forever." The user is in the loop only at the two binding moments (passport review + 4 signatures to deploy). After that, the user owns the funds and audits the agent's behavior at will; the agent owns the rebalance loop within tight on-chain rails. This is the pitch beat — "we agent the decisions, you sign the trades."
 
-### 3.4 Shared memory — 5-layer pillar (Linus lineage)
+### 3.4 Shared memory — 5-layer pillar (Linus lineage + Xia refinement)
 
-Borrowed primitive from Dan's Linus orchestration project. Names the persistence layers our agents operate over; gives the pitch a concrete "why we're different from rosetta-alpha" beat.
+Two lineages compose into one pillar. The **Linus 5-layer model** (DEC-0052) gives us cognitive grounding (A–E from intra-step latent through semantic knowledge). The **Xia et al. 2026 working-memory decomposition** sharpens Layer A specifically for trading-agent contexts by separating the intra-step latent (KV cache / forward pass) from the deterministic, read-only audit-truth substrate (vault positions, USDC balance, on-chain risk limits — sourced from chain, never editable by the LLM). Treating these as one layer would let the LLM hallucinate over the vault's actual state. Treating them separately makes audit-truth a hard wall the agent cannot cross.
 
-| Layer | Lifetime | Linus substrate | Archimedes substrate |
-|---|---|---|---|
-| A — Intra-step latent | Single forward pass | KV cache | LLM context (implicit) |
-| B — Within-session scratchpad | Single session | In-context window | SSE event log + RedisState per-job |
-| C — Cross-session episodic | Persistent | SQLite + content hashes + git | StrategyStore + Postgres `papers` + `vault_metadata` |
-| D — Investigation memory | Task-scoped | SQLite `investigations.db` | `generation_pipeline.py` event log per job + `redis_state.recent_traces()` |
-| E — Semantic knowledge | Persistent | KnowledgeBase (RDF + property graph) | q-fin corpus + KB pipeline artifacts (S3 + DynamoDB) |
+| Layer | Lifetime | Linus substrate | Archimedes substrate | Source |
+|---|---|---|---|---|
+| **A.1 — Intra-step latent** | Single forward pass | KV cache | LLM context (implicit; GLM-4.7 via z.ai) | Linus DEC-0052 |
+| **A.2 — Deterministic state store / audit-truth** | Live, externally written | (Linus does not split A) | Vault positions + USDC balance + target weights + risk limits — read from Arc, read-only to the agent. Source of truth for `agent_runner.py` cost-benefit checks. | **Xia et al. 2026 § 4.1** |
+| **B — Within-session scratchpad** | Single session | In-context window | SSE event log + RedisState per-job | Linus DEC-0052 |
+| **C — Cross-session episodic** | Persistent | SQLite + content hashes + git | StrategyStore + Postgres `papers` + `vault_metadata` | Linus DEC-0052 |
+| **D — Investigation memory** | Task-scoped | SQLite `investigations.db` | `generation_pipeline.py` event log per job + `redis_state.recent_traces()` | Linus DEC-0052 |
+| **E — Semantic knowledge** | Persistent | KnowledgeBase (RDF + property graph) | q-fin corpus + KB pipeline artifacts (S3 + DynamoDB), with Xia-formalized Source Tracking + Outcome Embargo (§ 3.6) | Linus DEC-0052 + Xia § 4.3 |
+
+**Why the A.1/A.2 split matters operationally.** The Live Execution Agent's cost-benefit sub-agent reads A.2 (real vault state from chain) as the ground truth for "what is my current weight"; it then reasons in A.1 about "should I rebalance." If the agent's KV-cached A.1 state drifts from A.2 (because of stale context or hallucination), the cost-benefit gate catches it because A.2 is sourced from `vault.totalAssets()` and `vault.balanceOf(...)` calls each tick, not from LLM memory. This is Xia's "Hierarchy of Truth" applied to our vault state: chain reads override agent narrative when they conflict.
 
 ### 3.5 Corpus seeding strategy
 
@@ -467,12 +479,42 @@ One-time manual rebuild via `python -m archimedes.scripts.run_kb_pipeline --rebu
 |---|---|---|
 | q-fin foundations | arxiv `q-fin.*` (ST/MF/CP/RM/PM/TR/GN/PR/EC) | 5,000 |
 | Machine learning for finance | arxiv `cs.LG` + `stat.ML` AND title/abstract has finance/trading/portfolio | 2,000 |
-| Agentic AI architecture | arxiv `cs.AI` + `cs.CL` AND query: "trading agent" OR "financial agent" OR "multi-agent finance" OR "tool-use" OR "ReAct" + manual additions: **TradingAgents** (Tauric Research), **Trading-R1** (arxiv 2509.11420), **QuantAgent**, **FinGPT**, **AlphaSeek**, **AutoGen** | 500 |
+| Agentic AI architecture | arxiv `cs.AI` + `cs.CL` AND query: "trading agent" OR "financial agent" OR "multi-agent finance" OR "tool-use" OR "ReAct" + manual additions: **Xia et al. 2026 "Agentic Trading: When LLM Agents Meet Financial Markets"** (arxiv 2605.19337, ESWA — the keystone protocol-critique survey we lead the pitch with), **Chen et al. 2026 "StockBench"** (arxiv 2510.02209 — the contamination-free closed-loop benchmark where GLM-4.5 ranks #3), **TradingAgents** (Tauric Research), **Trading-R1** (arxiv 2509.11420), **QuantAgent**, **FinGPT**, **AlphaSeek**, **AutoGen** | 500 |
 | Pure mathematics (relevant) | arxiv `math.OC` (optimization+control), `math.PR` (probability), `math.ST` (statistics theory), `stat.AP` (applied stats) | 1,500 |
 | Econometrics | arxiv `econ.EM` | 1,000 |
 | **Total seed target** | | **~10,000** |
 
 **Why the math + ML buckets matter for our wedge:** SPECTER2 embeddings cluster a TSMOM paper near an LLM-tool-use paper near an optimal-stopping math paper; the fusion engine then synthesizes a strategy drawing from all three. That cross-domain neighborhood is what makes fusion genuinely novel rather than keyword-rearrangement.
+
+### 3.6 Named protocols (Xia et al. 2026)
+
+Xia formalizes four named protocols that close the most common failure modes in trading-agent design. We adopt all four — both as **pitch beats** (each is a verifiable Strategy Passport admission requirement) and as **implemented protocols** (T3.7 ships the code that enforces them; T3.8 ships the benchmark that proves they don't degrade the agent). Adopting these protocols is the literal answer to "what makes Archimedes different from the 19-study primary subset Xia audited."
+
+Plus one formal contract: the **Reasoning I/O contract** that gates every action our agents emit.
+
+| Protocol | What it prevents | How Archimedes enforces it |
+|---|---|---|
+| **Outcome Embargo** (Xia § 4.2) | Oracle Fallacy — the agent retrieves a past episode and the retrieval surfaces the *outcome* of that episode, leaking future information into the decision. Episodes recorded at time `t` must not expose the outcome field until `t_now ≥ t + k`, where `k` is the realization delay. | KB ingest stamps every paper with a `publication_date`. Strategy Generation Agent's paper retrieval at backtest time `t` filters to `paper.publication_date < t - embargo_days` (default 30 days). On-chain `ReasoningTraceRegistry` anchors decision traces with the block timestamp at which the decision was made; "verify" recomputes against an embargo-respecting view of the KB so a trace cannot be retro-validated using papers that didn't exist at decision time. |
+| **Time-Aware Retrieval** (Xia § 4.2) | Regime drift — old episodes with high feature similarity may mislead post-regime-change. | SPECTER2 retrieval applies decay term `e^{−λ(t_now − t_k)}` to similarity scores, where `t_k` is `paper.publication_date` and `λ` is configurable per regime (higher `λ` in high-volatility regimes). The Strategy Generation Agent's market-context sub-agent feeds the current regime classification to choose `λ`. |
+| **Hierarchy of Truth** (Xia § 4.4) | Noise Injection — uncurated semantic memory (social signals, hype, manipulated news) overrides core decision logic. | Internal state (vault positions, USDC balance, on-chain risk limits — Layer A.2) **always** overrides external signals. The Live Execution Agent's cost-benefit sub-agent reads chain state directly each tick; if the LLM's narrative diverges from chain truth, chain wins and the decision is rejected. KB-sourced (peer-reviewed) signals also outrank uncurated sources (we currently ingest only peer-reviewed papers — Reddit/social are out of scope). |
+| **Source Tracking** (Xia § 4.3) | Provenance loss — agents cite "facts" that cannot be traced back to a verifiable source. | Every KB record stores `(arxiv_id, version, ingested_at, content_hash)`. Every Strategy Generation Agent decision trace includes the list of paper IDs it consulted with content hashes. `ReasoningTraceRegistry` anchors `keccak256(canonical_decision_trace)` on Arc; anyone can recompute and verify the cited papers existed and were not modified between decision time and verification time. |
+
+**Reasoning I/O contract (Xia § 5, V_check formalism).** Every action the Live Execution Agent emits passes through:
+
+```
+f(O_t, M_episodic, P_portfolio) → (A_cand, α, V_check)
+```
+
+- `O_t` — timestamped market observation (oracle prices + AMM liquidity at block `t`)
+- `M_episodic` — embargo-respecting view of past traces + relevant KB papers
+- `P_portfolio` — read-only vault state from Layer A.2 (chain-sourced)
+- `A_cand` — set of candidate actions (rebalance, hold)
+- `α ∈ [0, 1]` — agent confidence score (recorded in trace; threshold for action)
+- `V_check` — explicit validity check (e.g., `weights_sum == 10000_bps`, `no_weight_exceeds_max_concentration`, `cost_benefit > min_threshold`) — **rejects the action if any check fails**, regardless of `α`
+
+This contract is the antidote to **Hallucination Propagation** (Xia § 13.1) — the failure mode where multi-step LLM errors compound through agent loops and each step commits capital. `V_check` is mechanical and runs in deterministic Python; the LLM cannot override it.
+
+**Reproducibility tier.** We target **R3** (Xia § 4.2): fully replayable with artifact versioning + immutable provenance. The four named protocols above + on-chain trace anchoring + S3-versioned KB artifacts + git-committed strategy DSLs combine to make this achievable. As of Xia's audit (2026-03-09 screening cutoff), **0/19** primary trading-agent studies reach R3. Archimedes targets being the first.
 
 ---
 
@@ -1541,6 +1583,176 @@ Cross-lane (infra + backend). Chuan reviews ASG + DB EC2 refactor. Dan reviews C
 T3.1 (IAM role pattern), TS.1 (ACM cert for archimedes-arc.app)
 ```
 
+### T3.7 — Implement Xia 2026 named protocols (Outcome Embargo, Time-Aware Retrieval, Hierarchy of Truth, Source Tracking, V_check)
+
+```
+APIN - Backend - Implement Xia et al. 2026 named protocols in KB pipeline + Strategy Generation Agent + ReasoningTraceRegistry
+
+## TLDR
+Xia et al. 2026 (arxiv 2605.19337) formalizes four named protocols that close the most
+common failure modes in trading-agent design (Oracle Fallacy, regime drift, noise
+injection, provenance loss) plus a Reasoning I/O contract that prevents hallucination
+propagation. We codify all four protocols + the V_check contract as enforced mechanisms
+in our agent pipeline. This is the "we don't just talk about rigor, we ship it" PR.
+
+## Summary
+1. Outcome Embargo: KB ingest stamps publication_date; Strategy Generation Agent's
+   retrieval at backtest time t filters to paper.publication_date < t - embargo_days.
+   Default embargo_days = 30. Configurable.
+2. Time-Aware Retrieval: SPECTER2 similarity scores multiplied by decay term
+   exp(-lambda * (t_now - paper.publication_date_days)). Default lambda = 0.002/day.
+   Higher lambda in high-volatility regimes (regime-aware).
+3. Hierarchy of Truth: Live Execution Agent's cost-benefit sub-agent always reads
+   vault state from chain (Layer A.2) each tick; if LLM narrative diverges from chain
+   truth, chain wins and decision is rejected with a logged reason.
+4. Source Tracking: Every KB record gains (arxiv_id, version, ingested_at, content_hash);
+   every Strategy Generation Agent decision trace records consulted_paper_hashes list;
+   ReasoningTraceRegistry anchor includes the canonical hash that incorporates this list.
+5. Reasoning I/O contract (V_check): Add explicit Pydantic V_check class to
+   chain/agent_runner.py that runs deterministic validity checks (weights_sum_bps,
+   max_concentration, min_cost_benefit_bps) before any rebalance tx submission.
+   Rejects action regardless of LLM confidence if any check fails.
+
+## Scope
+Files to ADD:
+- backend/archimedes/services/embargo_filter.py — Outcome Embargo helper
+- backend/archimedes/services/time_aware_retrieval.py — Time-Aware Retrieval scoring
+- backend/archimedes/chain/v_check.py — V_check validator class
+- backend/archimedes/services/source_tracker.py — content-hash registry helper
+- docs/specs/xia-2026-protocols.md — short doc explaining each protocol + the Xia citation
+
+Files to MODIFY:
+- backend/archimedes/services/corpus_service.py — apply embargo + time-aware decay to retrieval
+- backend/archimedes/services/strategy_fusion.py — log consulted_paper_hashes
+- backend/archimedes/services/portfolio_agent.py — log consulted_paper_hashes
+- backend/archimedes/chain/agent_runner.py — call V_check before submitting tx; log V_check.passed in trace
+- backend/archimedes/chain/trace_publisher.py — include consulted_paper_hashes in canonical JSON
+- backend/archimedes/db.py — add content_hash + ingested_at columns to papers table (idempotent ALTER)
+- backend/archimedes/models/strategy_store.py — StrategyRecord stores embargo_days + lambda used at generation time
+
+Files to NOT TOUCH:
+- contracts/ (ReasoningTraceRegistry is unchanged; we only modify what we hash)
+- ui/ (no UI changes; protocols are server-side)
+
+## Acceptance
+- [ ] `grep -rn "publication_date\b" backend/archimedes/services/embargo_filter.py backend/archimedes/services/corpus_service.py` → multiple matches
+- [ ] `python -c "from archimedes.services.embargo_filter import apply_outcome_embargo; from datetime import date; r = apply_outcome_embargo([{'arxiv_id':'2510.02209','publication_date':date(2025,10,3)}], at=date(2025,1,1), embargo_days=30); assert len(r)==0; print('OK')"` → prints OK
+- [ ] `python -c "from archimedes.services.time_aware_retrieval import decayed_score; assert decayed_score(0.9, age_days=365, lam=0.002) < 0.9; print('OK')"` → prints OK
+- [ ] `python -c "from archimedes.chain.v_check import VCheck; vc = VCheck(weights_bps={'A':5000,'B':4500}, max_concentration_bps=6000, cost_benefit_bps=20, min_cost_benefit_bps=10); assert vc.run().passed is False; print('OK')"` → prints OK (weights don't sum to 10000)
+- [ ] `pytest -q backend/tests -k "embargo or time_aware or v_check or source_track"` → all pass; ≥ 12 new tests across the 4 protocols
+- [ ] `grep -n "consulted_paper_hashes" backend/archimedes/chain/trace_publisher.py` → match (canonical JSON includes the field)
+- [ ] Manual: run strategy generation; verify SSE trace event includes `consulted_paper_hashes: [...]` with non-empty list
+- [ ] Manual: trigger agent_runner with intentionally-invalid weights (sum != 10000); verify V_check rejects + trace records `v_check.passed = false` + tx is NOT submitted
+- [ ] `docs/specs/xia-2026-protocols.md` exists and cites Xia et al. 2026 (arxiv 2605.19337)
+
+## Verify
+docker compose up -d --build backend
+pytest -q backend/tests -k "embargo or time_aware or v_check or source_track"
+python -m archimedes.scripts.run_generation --brief 'trend following' --dry-run | jq '.consulted_paper_hashes'
+
+## Anti-goals
+- DO NOT modify the ReasoningTraceRegistry contract (Solidity unchanged).
+- DO NOT change the canonical-JSON convention beyond adding consulted_paper_hashes field.
+- DO NOT make embargo_days or lambda hardcoded constants — they are configurable per generation call.
+- DO NOT bypass V_check from any code path (chain/executor.py must call it).
+- DO NOT add LLM calls inside V_check (must be deterministic Python).
+- DO NOT remove the existing strategy_guardrail.py — V_check is additive.
+
+## Precedent
+- Existing canonical-JSON pattern: chain/trace_publisher.py::compute_hash
+- Existing rigor gate pattern: services/rigor_evaluator.py
+- Xia et al. 2026 §§ 4.2 (Outcome Embargo + Time-Aware Retrieval), 4.3 (Source Tracking), 4.4 (Hierarchy of Truth), 5 (Reasoning I/O contract V_check)
+
+## Lane note
+Cross-lane (intelligence + chain). Dan reviews protocol implementations; Chuan reviews V_check integration with agent_runner. Big spec — audit subagent REQUIRED per § 2.6.
+
+## Depends on
+T3.2 (KB pipeline writes publication_date + content_hash into manifest)
+```
+
+### T3.8 — StockBench harness adapter + first benchmark run
+
+```
+APIN - Intelligence - StockBench evaluation harness: adapt Archimedes Strategy Generation Agent to StockBench protocol; run + capture results
+
+## TLDR
+Chen et al. 2026 (arxiv 2510.02209) ships StockBench: a contamination-free, closed-loop,
+multi-month trading-agent benchmark (82 trading days, top-20 DJIA, $100k starting cash,
+daily decisions). Their 14 evaluated LLMs span GPT-5, Claude-4-Sonnet, GLM-4.5, Kimi-K2,
+Qwen3 variants. GLM-4.5 (our LLM family) ranks #3 by composite Sortino. We adapt
+Archimedes' Strategy Generation Agent to the StockBench harness and report a number.
+This becomes a hero claim in demo video v2 ("Archimedes scored X Sortino on StockBench,
+compared to Y for GLM-4.5 standalone").
+
+## Summary
+1. Clone github.com/ChenYXxxx/stockbench at a pinned SHA into submodules/.
+2. Write a StockBench-compatible agent adapter that wraps Archimedes' Strategy
+   Generation Agent + Portfolio Construction Agent into StockBench's four-step
+   workflow (portfolio overview → in-depth analysis → decision generation → execution).
+3. Run the benchmark over the published 82-day window (March 3 – June 30, 2025).
+   Use the StockBench harness; emit return / max_drawdown / Sortino + z-score composite.
+4. Persist results to docs/benchmarks/stockbench-results.md with the numbers + comparison
+   to the 14 published baselines. Include 3-seed mean + variance per StockBench protocol.
+5. Generate a deck-ready chart: Archimedes' Sortino vs. the 14 published baselines as a
+   sorted bar chart. Save to docs/benchmarks/stockbench-archimedes-sortino.png.
+
+## Scope
+Files to ADD:
+- submodules/stockbench/ (new git submodule, pinned SHA)
+- backend/archimedes/benchmarks/__init__.py
+- backend/archimedes/benchmarks/stockbench_adapter.py — wraps Strategy Generation Agent
+  in StockBench's expected agent interface
+- backend/archimedes/benchmarks/run_stockbench.py — operator-runnable harness driver
+- docs/benchmarks/stockbench-results.md — results writeup
+- docs/benchmarks/stockbench-archimedes-sortino.png — comparison chart
+- .gitmodules — add stockbench submodule entry
+
+Files to MODIFY:
+- environment.yml — add any StockBench dependencies (matplotlib for the chart; finnhub-python if not present)
+
+Files to NOT TOUCH:
+- ui/, contracts/
+- Strategy Generation Agent internals (we ADAPT, we don't modify, so the benchmark scores reflect what we actually ship)
+
+## Acceptance
+- [ ] `ls submodules/stockbench/` shows the cloned repo with the pinned SHA
+- [ ] `python -m archimedes.benchmarks.run_stockbench --dry-run` → exits 0; prints "would run 82 days, 20 stocks, 3 seeds"
+- [ ] `python -m archimedes.benchmarks.run_stockbench --execute --seeds 3` produces
+      docs/benchmarks/stockbench-results.md containing:
+        - final_return_pct (mean ± stdev across 3 seeds)
+        - max_drawdown_pct (mean ± stdev)
+        - sortino_ratio (mean ± stdev)
+        - composite_z_score and rank vs. the 14 published baselines
+- [ ] docs/benchmarks/stockbench-archimedes-sortino.png exists and shows Archimedes' Sortino plotted against the 14 published baselines, sorted descending
+- [ ] `pytest -q backend/tests -k "stockbench_adapter"` → all pass (mocks the harness)
+- [ ] The adapter does NOT bypass the rigor gate or any of the named protocols from T3.7 — verify via `grep -n "rigor_evaluator\|v_check\|embargo_filter" backend/archimedes/benchmarks/stockbench_adapter.py` → ≥ 3 matches
+
+## Verify
+git submodule status submodules/stockbench
+python -m archimedes.benchmarks.run_stockbench --dry-run
+cat docs/benchmarks/stockbench-results.md | head -40
+ls -la docs/benchmarks/stockbench-archimedes-sortino.png
+
+## Anti-goals
+- DO NOT modify Strategy Generation Agent to "win" the benchmark — adapter only.
+- DO NOT cherry-pick results across seeds; report mean ± stdev across all 3.
+- DO NOT report only the best seed.
+- DO NOT bypass embargo / time-aware retrieval / V_check during the benchmark — the whole point is to score what we actually ship.
+- DO NOT run the benchmark on test data that overlaps with KB publication dates < March 3, 2025 + embargo_days (contamination control).
+- DO NOT cite StockBench numbers in the deck without the chart artifact and the docs/benchmarks/stockbench-results.md file committed.
+
+## Precedent
+- StockBench harness: github.com/ChenYXxxx/stockbench (Chen et al. 2026)
+- Chen et al. 2026 Tables 2-5 for the 14 baseline numbers to plot against
+- Existing benchmark-style script pattern: backend/archimedes/scripts/bootstrap_vaults.py (operator-runnable, structured output)
+
+## Lane note
+Intelligence lane. Dan reviews adapter design + results writeup. Big spec — audit subagent REQUIRED per § 2.6 before filing because StockBench's four-step workflow needs careful mapping to our existing pipeline shape. Sunday-afternoon priority for demo video v2.
+
+## Depends on
+T3.7 (so the benchmark scores include the named protocols enforcing)
+```
+
 ---
 
 ## 7. Security pillar (TS.x)
@@ -1785,17 +1997,20 @@ TS.1 (needs 443 server block to exist)
 | M.9 | Visual review pass — Playwright + Claude multimodal review of every route at 4 breakpoints (375/768/1440/1920) | Claude | Sat evening before M.3 |
 | **M.10** | **Final repo polish + doc audit** — dedicated subagent does deep + aggressive doc audit; archive/remove intermediate build artifacts; ensure architecture/design/strategy/narrative docs are coherent + consistent; remove stale info; professional polish for public viewing | Claude (Track D) | **Sun afternoon (after T-tracks land)** |
 | **M.11** | **arc-canteen telemetry backfill** — `update-product` calls for last 5 days' worth of merges (Phase 4–9, KB integration, 10-contract deploy, Phase 8/9 UI ship); `update-traction` calls for any user/judge conversations; ongoing for every meaningful ship Sat → Sun | Dan + Claude | Sat AM + ongoing |
+| **M.12** | **StockBench benchmark result baked into demo video v2 + deck** — after T3.8 lands, capture the Sortino + return + drawdown numbers from `docs/benchmarks/stockbench-results.md`; insert into the deck as a comparison-bar slide; record video v2 with the number spoken aloud ("Archimedes scored X Sortino on StockBench, ranking #N against 14 published baselines"). Hard dependency for demo video v2. | Dan + Claude | Sun afternoon (after T3.8) |
 
-**Documents to align in M.4 (each gets refreshed to the canonical pitch frame in Section 3.1 — including the locked RFB alignment narrative + the virality-readiness architecture beat + the agent-user interaction model from § 3.3.1):**
+**Documents to align in M.4 (each gets refreshed to the canonical pitch frame in Section 3.1 — including the Xia 2026 opening, the StockBench empirical claim, the locked RFB alignment narrative, the virality-readiness architecture beat, the agent-user interaction model from § 3.3.1, and the four named protocols from § 3.6):**
 
-- `docs/demo-script-pitch-deck-outline.md` — refresh deck outline + open with RFB 04 alignment statement
+- `docs/demo-script-pitch-deck-outline.md` — refresh deck outline. **Slide 1 leads with Xia et al. 2026 numbers** (2/19, 1/19, 0/19, 15/19, 0/19) → cuts to "Archimedes is the answer." RFB 04 alignment statement on slide 2. StockBench Sortino comparison chart on the empirical-proof slide.
 - `docs/specs/claude-design-prompts.md` (if exists; create if not, using Appendix C)
-- `docs/competitor-landscape.md` (add rosetta-alpha as the most credible competitor; refresh framing)
-- `docs/judging-rubric-assessment.md` (refresh Day-12 score with TS + T3.6 ALB-CloudFront additions)
-- `docs/anti-features.md` (add security non-claims + BYOK posture + we-don't-promise-returns posture)
-- `README.md` — top fold updated; quick-start updated to `https://archimedes-arc.app`; explicit "Built for [RFB 04 Adaptive Portfolio Manager](https://luma.com/7i50p2r9) with adjacent fit to RFB 02 + RFB 06" badge or statement near the title; org references updated to `a-apin`
-- `ARC-OSS-SHOWCASE.md` — add TS pillar as forkable primitives; add T3.6 scalability architecture as a forkable primitive
-- `CLAUDE.md` (this repo's project context) — verify the team table + the canonical pitch frame match Section 3.1; update HTTPS domain reference; verify RFB 04 + RFB 02 + RFB 06 alignment is named in the Scope section
+- `docs/competitor-landscape.md` (add rosetta-alpha as the most credible competitor; refresh framing; explicitly position Archimedes against the 19-study primary subset Xia audits)
+- `docs/judging-rubric-assessment.md` (refresh Day-12 score with TS + T3.6 ALB-CloudFront + T3.7 named protocols + T3.8 StockBench rank)
+- `docs/anti-features.md` (add security non-claims + BYOK posture + we-don't-promise-returns posture + "all LLM agents underperform passive baseline in downturns per StockBench — we don't pretend otherwise")
+- `README.md` — top fold updated; quick-start updated to `https://archimedes-arc.app`; explicit "Built for [RFB 04 Adaptive Portfolio Manager](https://luma.com/7i50p2r9) with adjacent fit to RFB 02 + RFB 06" badge or statement near the title; org references updated to `a-apin`; **add Xia et al. 2026 + Chen et al. 2026 + Trading-R1 + TradingAgents to a "Cited literature" section** with arxiv links
+- `ARC-OSS-SHOWCASE.md` — add TS pillar as forkable primitives; add T3.6 scalability architecture as a forkable primitive; add T3.7 named-protocols implementation as a forkable primitive ("Outcome Embargo, Time-Aware Retrieval, Hierarchy of Truth, Source Tracking, V_check — every Xia 2026 protocol, in production code")
+- `CLAUDE.md` (this repo's project context) — verify the team table + the canonical pitch frame match Section 3.1; update HTTPS domain reference; verify RFB 04 + RFB 02 + RFB 06 alignment is named in the Scope section; add Xia + StockBench to the architectural primitives section
+- `docs/benchmarks/stockbench-results.md` — committed by T3.8; referenced from README + deck
+- `docs/specs/xia-2026-protocols.md` — committed by T3.7; referenced from ARC-OSS-SHOWCASE
 
 **RFB-alignment language for the README (drop-in):**
 
@@ -1983,23 +2198,31 @@ Spec elaboration protocol per § 2.6:
 - T3.6 (ALB + CloudFront + ASG): BIG. **Spawn audit Explore subagent.** Map current
   docker-compose.production.yml; verify which services share state vs are stateless;
   identify Postgres + Redis externalization risks; map ACM cert region constraint.
+- T3.7 (Xia 2026 named protocols): BIG. **Spawn audit Explore subagent.** Map current
+  corpus_service.py retrieval surface; chain/agent_runner.py tick loop; trace_publisher
+  canonical JSON shape; strategy_guardrail.py existing validation. Identify exact
+  insertion points for embargo_filter, time_aware_retrieval, V_check, source_tracker.
+- T3.8 (StockBench harness): BIG. **Spawn audit Explore subagent.** Clone StockBench
+  repo locally; map the four-step workflow expected by the harness; identify the
+  adapter shape needed to wrap Strategy Generation Agent + Portfolio Construction
+  Agent into one StockBench-compatible agent. Verify Finnhub API key requirement.
 - T3.3, T3.4: MEDIUM. Maestro inline (depends on T3.2 output format).
 - T3.5 (Bedrock): MEDIUM. Filed but UNASSIGNED.
 
 Execute in order (strict serial due to dependencies):
-1. AUDIT-SUBAGENT + file T3.1 (S3 + DynamoDB + IAM). UNASSIGNED. Foundation. After Dan
-   assigns + bot lands:
-     aws s3 ls s3://archimedes-corpus-artifacts-prod/
-     aws dynamodb describe-table --table-name archimedes-papers-index
+1. AUDIT-SUBAGENT + file T3.1 (S3 + DynamoDB + IAM). UNASSIGNED. Foundation.
 2. AUDIT-SUBAGENT + file T3.2 (GPU EC2 + KB pipeline). UNASSIGNED. Cold-start expected
-   4-6h. Anti-goals enforced HARD: g4dn.xlarge maximum; spot if available; teardown
-   confirmed in PR comment.
+   4-6h.
 3. **In parallel with T3.2 (independent infra surface):** AUDIT-SUBAGENT + file T3.6
-   (ALB + CloudFront + ASG). UNASSIGNED. Coordinate with Track D's TS.1 (ACM cert needed
-   for ALB). Pitch beat — virality-readiness.
+   (ALB + CloudFront + ASG). UNASSIGNED. Pitch beat — virality-readiness.
 4. After T3.2 produces S3 artifact: elaborate + file T3.3 (corpus graph + KG endpoints).
 5. After T3.3 + T3.6: elaborate + file T3.4 (CorpusGraph + CorpusKG UI render real data).
-6. T3.5 (Bedrock): elaborate + file the spec but DO NOT prompt Dan to assign it. Stays
+6. **After T3.2:** AUDIT-SUBAGENT + file T3.7 (Xia 2026 named protocols — Outcome
+   Embargo, Time-Aware Retrieval, Hierarchy of Truth, Source Tracking, V_check). UNASSIGNED.
+   This is the "we ship every protocol Xia formalizes" hero spec.
+7. **After T3.7:** AUDIT-SUBAGENT + file T3.8 (StockBench harness adapter + first run).
+   UNASSIGNED. Sunday-afternoon priority — must land by 16:00 CT to feed M.12 (demo video v2).
+8. T3.5 (Bedrock): elaborate + file the spec but DO NOT prompt Dan to assign it. Stays
    on-record only.
 
 Daily AWS spend monitor: at end of every Sat-night session,
@@ -2059,24 +2282,33 @@ SECURITY (TS.x) — all UNASSIGNED:
 8. TS.8 user-data minimization — folded into T2.7 PR review.
 
 MANUAL (M.x):
-- M.1: update submodule pins (KnowledgeBase + Linus). Pull Linus
-  experiments/2026-05-22-kb-pipeline-completion/ via `git submodule update --remote`.
-  Commit the new SHAs.
+- M.1: update submodule pins (KnowledgeBase + Linus + StockBench once T3.8 lands).
+  Pull Linus experiments/2026-05-22-kb-pipeline-completion/ via
+  `git submodule update --remote`. Commit the new SHAs.
 - M.2: `pytest -q` once after #142/#143 merge. Record pass count.
 - M.3: demo video v1 Saturday evening. Loom / QuickTime. ≤ 3 min. Hit the canonical
   user journey end-to-end.
-- M.4: pitch + demo doc refresh (canonical pitch frame from § 3.1). 7 docs listed in § 8.
+- M.4: pitch + demo doc refresh (canonical pitch frame from § 3.1 — **OPENS WITH XIA
+  ET AL. 2026 NUMBERS** per § 3.1's opening beat). 10 docs listed in § 8 (now includes
+  benchmarks/stockbench-results.md + specs/xia-2026-protocols.md from T3.7 + T3.8).
 - M.5: archive stale specs to docs/archive/.
-- M.6: ARC-OSS form fill + submission.
-- M.7: demo video v2 Sunday morning.
-- M.8: hackathon submission form Sunday afternoon (CT midnight target).
+- M.6: ARC-OSS form fill + submission. **Must cite Xia + StockBench in the
+  literature-grounding field.**
+- M.7: demo video v2 Sunday afternoon — after T3.8 lands. Bake StockBench Sortino
+  number into the deck slide + speak it aloud in the recording.
+- M.8: hackathon submission form Sunday evening (CT midnight target).
 - M.9: visual review pass Saturday evening before M.3.
 - M.10: FINAL REPO POLISH SUBAGENT PASS. Sunday afternoon, after all functional work
   validates. Spawn foreground general-purpose subagent with the prompt embedded in § 8.
 - M.11: arc-canteen telemetry backfill. Sat AM + ongoing.
+- **M.12: StockBench result baked into demo video v2 + deck** — hard dependency on
+  T3.8 landing. Capture Sortino + return + drawdown + rank-vs-baselines from
+  docs/benchmarks/stockbench-results.md; insert deck slide; speak the number in v2.
+  This is the hero empirical claim for the demo.
 
 PITCH FRAME (canonical — every doc aligns):
-See § 3.1.
+See § 3.1. Opens with Xia et al. 2026 audit numbers (2/19, 1/19, 0/19, 15/19, 0/19).
+Cites StockBench (Chen et al. 2026) for the LLM-backend empirical proof point.
 
 Anti-goals:
 - DO NOT submit any form before demo video URL is final.
@@ -2131,6 +2363,9 @@ MON 23:59 ET     Hard deadline.
 5. **AWS spend spike.** Daily Cost Explorer query at end of each session; pause if > $50/day. T3.6 (ALB + ASG + CloudFront + dedicated DB EC2) is the largest steady-state add; baseline budget assumption ~$5/day idle.
 6. **Recent bot merges may have closed-without-fixing.** M.10 doc audit catches this; Verification Protocol guards forward.
 7. **T3.6 dedicated-DB EC2 is a single point of failure for state.** Backend tier is horizontally scaled but Postgres + Redis still live on one box (v1). Mitigation: nightly pg_dump → S3 (folded into T3.6 acceptance OR a TS follow-up); RDS + ElastiCache documented as v2 hop in pitch.
+8. **Bear-market underperformance (StockBench finding).** Chen et al. 2026 documents that ALL 14 evaluated LLM trading agents underperform the equal-weight passive baseline during the January–April 2025 downturn — including the top performer. Mitigation: Stress Engine's 6-scenario suite includes a sustained-downturn scenario; we pitch this honestly ("we don't pretend our agents are downturn-proof; we surface bear-market drawdown explicitly in every Strategy Passport").
+9. **Hallucination Propagation (Xia § 13.1).** Multi-step LLM errors compound through agent loops and each step commits capital. Mitigation: T3.7's deterministic V_check gate rejects any action whose validity checks fail, regardless of LLM confidence. Chain-sourced Layer A.2 state overrides LLM narrative.
+10. **StockBench number underperforms baselines (T3.8 worst case).** If Archimedes' StockBench Sortino is below the 14 published baselines, we have an empirically weak claim for the deck. Mitigation: even an honest "ranked Nth" with rigor-gate explanation is a stronger pitch than no number; the four named protocols (T3.7) are a defensible reason if the score is lower (we trade some raw performance for auditability + embargo-respecting decisions); record the result honestly and pitch the architectural rigor regardless.
 
 **Risks that USED to be on this list but are now mitigated by design (not just accepted):**
 
