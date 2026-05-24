@@ -133,7 +133,7 @@ export default function Landing({ onNavigate }) {
           ]} />
         </div>
         <div className="mt-4 text-center">
-          <button className="btn-secondary" onClick={() => onNavigate('library')}>
+          <button className="btn-secondary" onClick={() => onNavigate('library', { tab: 'examples' })}>
             Browse {stats?.strategyCount || 6} Strategies →
           </button>
         </div>
