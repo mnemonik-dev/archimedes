@@ -330,10 +330,18 @@ class RegimeResponse(BaseModel):
     transition_probabilities: dict | None = None  # From get_transition_probabilities()
     regime_history: dict | None = None  # From get_regime_history_summary()
     recommended_strategies: list[str] | None = None  # Strategy IDs best for this regime
+    # Paper titles for each recommended_strategies id, in matching order.
+    # Surfaced so the UI can show "Volatility-Managed Portfolios" instead of
+    # a raw strategy hash (red-team report 2026-05-24 H3).
+    recommended_strategy_titles: list[str] | None = None
 
 
 class RegimeSignalsResponse(BaseModel):
-    vix_level: float
+    # vix_level is nullable: the VIX feed can be unavailable (no data) and we
+    # MUST NOT render that as 0.0 — VIX is a price-of-insurance index that
+    # floors around 10, so 0 is dishonest. None means "agent feed not
+    # connected" (red-team report 2026-05-24 H2).
+    vix_level: float | None = None
     sp500_above_ma50: bool
     sp500_above_ma200: bool
     vix_rate_of_change: float | None = None  # VIX momentum
