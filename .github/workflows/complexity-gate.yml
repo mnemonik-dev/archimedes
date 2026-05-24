@@ -30,6 +30,7 @@ on:
       - "ui/src/**.tsx"
 
 permissions:
+  contents: read
   pull-requests: write
 
 jobs:
