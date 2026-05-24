@@ -1,0 +1,122 @@
+# Complexity gate — runs on every PR to main.
+#
+# Per-function metrics vs. main baseline:
+#   CC (cyclomatic complexity)  — lizard, cross-language
+#   Nesting depth               — lizard (max nested loops/conditionals)
+#   Δ CC                        — delta vs. same function on main
+#   Recursive                   — Python AST only (direct self-calls)
+#
+# Thresholds:
+#   CC  1–5   ✅ simple
+#   CC  6–10  ⚠️ moderate  (flagged, no block)
+#   CC 11–15  🟠 complex   (flagged, no block)
+#   CC 16+    🔴 critical  → blocks merge
+#   Nesting ≥ 3 ⚠️         (flagged, no block)
+#
+# Container image is built and pushed to GHCR on every push to main (deploy.yml).
+# The analysis script is pure Python — no git subprocess — so distroless works.
+# Baseline comparison is handled by checking out main into a separate directory.
+
+name: Complexity Gate
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "backend/**.py"
+      - "ui/src/**.js"
+      - "ui/src/**.ts"
+      - "ui/src/**.jsx"
+      - "ui/src/**.tsx"
+
+permissions:
+  pull-requests: write
+  packages: read
+
+jobs:
+  complexity:
+    name: Complexity analysis
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/${{ github.repository_owner }}/archimedes-complexity-gate:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      # PR HEAD — checked out into the default workspace
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Main baseline — checked out into a sibling directory so the script
+      # can compare files without needing git inside the container
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.base_ref }}
+          path: .baseline
+
+      - name: Get changed files
+        id: changed
+        run: |
+          FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD \
+            -- '*.py' '*.js' '*.ts' '*.jsx' '*.tsx' | tr '\n' ' ')
+          echo "files=$FILES" >> $GITHUB_OUTPUT
+          echo "count=$(echo $FILES | wc -w)" >> $GITHUB_OUTPUT
+
+      - name: Run complexity analysis
+        id: analysis
+        if: steps.changed.outputs.count > 0
+        run: |
+          python .github/scripts/complexity_analysis.py \
+            --changed-files ${{ steps.changed.outputs.files }} \
+            --baseline-dir .baseline \
+            --output-json /tmp/complexity_result.json \
+            > /tmp/complexity_comment.md
+        continue-on-error: true
+
+      - name: Post or update PR comment
+        if: steps.changed.outputs.count > 0
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            let body, result;
+            try {
+              body = fs.readFileSync('/tmp/complexity_comment.md', 'utf8');
+              result = JSON.parse(fs.readFileSync('/tmp/complexity_result.json', 'utf8'));
+            } catch {
+              body = '## 🔬 Complexity Analysis\n\n⚠️ Analysis script failed — check the Actions log.';
+              result = { has_critical: false };
+            }
+
+            const marker = '<!-- complexity-gate-v1 -->';
+            const fullBody = `${marker}\n${body}`;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const existing = comments.find(c => c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: fullBody,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: fullBody,
+              });
+            }
+
+            if (result.has_critical) {
+              core.setFailed('Critical complexity detected (CC ≥ 16). Reduce function complexity before merging.');
+            }

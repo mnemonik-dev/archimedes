@@ -1,0 +1,106 @@
+# Release tag — fires on every push to main.
+#
+# If the push came from a merged PR, creates a semver annotated tag:
+#
+#   !version-release in PR title or body → major bump  (x.0.0)
+#   !minor          in PR title or body → minor bump  (0.x.0)
+#   anything else                       → patch bump  (0.0.x)
+#
+# Tags are created via the GitHub API (no git push, no checkout needed).
+# First tag ever starts from v0.0.0 and bumps from there.
+# Direct pushes to main (no associated PR) are skipped silently.
+
+name: Release Tag
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    name: Tag release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create release tag
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // 1. Find the merged PR for this commit
+            const { data: prs } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.sha,
+            });
+
+            const merged = prs.find(pr => pr.merged_at);
+            if (!merged) {
+              core.info('No merged PR for this commit — skipping tag.');
+              return;
+            }
+
+            // 2. Determine bump type from PR title + body
+            const text = `${merged.title}\n${merged.body ?? ''}`;
+            let bump = 'patch';
+            if (text.includes('!version-release')) bump = 'major';
+            else if (text.includes('!minor'))       bump = 'minor';
+            core.info(`PR #${merged.number}: "${merged.title}" → ${bump} bump`);
+
+            // 3. Find the latest semver tag (v0.0.0 format)
+            const { data: tags } = await github.rest.repos.listTags({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100,
+            });
+
+            const parsed = tags
+              .filter(t => /^v\d+\.\d+\.\d+$/.test(t.name))
+              .map(t => {
+                const [major, minor, patch] = t.name.slice(1).split('.').map(Number);
+                return { major, minor, patch };
+              })
+              .sort((a, b) => b.major - a.major || b.minor - a.minor || b.patch - a.patch);
+
+            const cur = parsed[0] ?? { major: 0, minor: 0, patch: 0 };
+            core.info(`Current: v${cur.major}.${cur.minor}.${cur.patch}`);
+
+            // 4. Compute next version
+            let { major, minor, patch } = cur;
+            if      (bump === 'major') { major++;  minor = 0; patch = 0; }
+            else if (bump === 'minor') {            minor++;  patch = 0; }
+            else                       {                       patch++;  }
+            const next = `v${major}.${minor}.${patch}`;
+
+            // 5. Create annotated tag via GitHub API
+            try {
+              const tagObj = await github.rest.git.createTag({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag: next,
+                message: `${next}: ${merged.title} (#${merged.number})`,
+                object: context.sha,
+                type: 'commit',
+                tagger: {
+                  name: 'github-actions[bot]',
+                  email: 'github-actions[bot]@users.noreply.github.com',
+                  date: new Date().toISOString(),
+                },
+              });
+
+              await github.rest.git.createRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: `refs/tags/${next}`,
+                sha: tagObj.data.sha,
+              });
+
+              core.notice(`Tagged ${context.sha.slice(0, 7)} → ${next} (${bump} via PR #${merged.number})`);
+            } catch (err) {
+              if (err.status === 422) {
+                core.warning(`Tag ${next} already exists — skipping. (Possible race between concurrent merges.)`);
+              } else {
+                throw err;
+              }
+            }
