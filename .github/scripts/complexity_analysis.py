@@ -239,18 +239,37 @@ def main() -> None:
     parser.add_argument("--baseline-dir", required=True,
                         help="Path to the checkout of the base branch (e.g. .baseline/)")
     parser.add_argument("--output-json", required=True)
+    parser.add_argument("--output-md", required=True,
+                        help="Path to write the markdown comment body")
     args = parser.parse_args()
 
-    targets = [f for f in args.changed_files if Path(f).suffix in {".py", ".js", ".ts", ".jsx", ".tsx"}]
-    if not targets:
-        print("## 🔬 Complexity Analysis\n\nNo Python or JS/TS files changed.")
-        Path(args.output_json).write_text(json.dumps({"has_critical": False, "total_funcs": 0}))
-        sys.exit(0)
+    output_json = Path(args.output_json)
+    output_md = Path(args.output_md)
 
-    md, summary = generate(targets, args.baseline_dir)
-    print(md)
-    Path(args.output_json).write_text(json.dumps(summary))
-    sys.exit(1 if summary["has_critical"] else 0)
+    try:
+        targets = [f for f in args.changed_files if Path(f).suffix in {".py", ".js", ".ts", ".jsx", ".tsx"}]
+        if not targets:
+            output_md.write_text("## 🔬 Complexity Analysis\n\nNo Python or JS/TS files changed.\n")
+            output_json.write_text(json.dumps({"has_critical": False, "total_funcs": 0}))
+            sys.exit(0)
+
+        md, summary = generate(targets, args.baseline_dir)
+        output_md.write_text(md)
+        output_json.write_text(json.dumps(summary))
+        sys.exit(1 if summary["has_critical"] else 0)
+
+    except Exception as exc:
+        import traceback as tb
+        error_md = (
+            "## 🔬 Complexity Analysis\n\n"
+            f"> ⚠️ Analysis error: `{exc}`\n\n"
+            "<details><summary>Traceback</summary>\n\n"
+            f"```\n{tb.format_exc()}\n```\n\n"
+            "</details>\n"
+        )
+        output_md.write_text(error_md)
+        output_json.write_text(json.dumps({"has_critical": False, "total_funcs": 0}))
+        sys.exit(0)
 
 
 if __name__ == "__main__":

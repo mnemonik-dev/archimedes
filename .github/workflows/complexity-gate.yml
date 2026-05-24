@@ -74,7 +74,7 @@ jobs:
             --changed-files ${{ steps.changed.outputs.files }} \
             --baseline-dir .baseline \
             --output-json /tmp/complexity_result.json \
-            > /tmp/complexity_comment.md
+            --output-md /tmp/complexity_comment.md
         continue-on-error: true
 
       - name: Post or update PR comment
