@@ -17,6 +17,54 @@ We hit the showcase criteria explicitly:
 - ✅ **Documentation explains functionality and usage** — every primitive has a per-primitive spec doc; project-level docs in [`README.md`](README.md), [`SETUP.md`](SETUP.md), [`OPERATIONS.md`](OPERATIONS.md), [`ARC.md`](ARC.md), and [`docs/`](docs/README.md)
 - ✅ **Standalone, fork-friendly modules** — each primitive lives in its own file(s) with clearly named imports and no hidden coupling
 
+## Agent ↔ user interaction model
+
+**The custody boundary.** Funds sit in the user's ERC-4626 vault contract; the agent's on-chain capability is bounded to `rebalance(tokens, weights_bps)` — never withdraw, never change allocations, never change owner. The user signs all 4 binding deployment transactions; the agent operates within those rails autonomously after deployment. The sequence:
+
+```mermaid
+sequenceDiagram
+  participant U as User (wallet)
+  participant SG as Strategy Generation Agent
+  participant PC as Portfolio Construction Agent
+  participant V as Vault contract (Arc)
+  participant LE as Live Execution Agent (agent_runner)
+  participant AMM as AMM + PriceOracle (Arc)
+  participant R as ReasoningTraceRegistry (Arc)
+
+  U->>SG: Describe brief on /generate (intent, risk, asset classes)
+  SG->>SG: Paper retrieval + market context + synthesis + rigor gate
+  SG-->>U: StrategyPassport (paper anchors, DSR/PBO, OOS) on /strategy/:id
+  Note over U,SG: No funds moved. Agent has zero trade authority at this point.
+
+  U->>PC: Click 'Deploy as Vault' (CreateVaultModal)
+  PC->>PC: Asset selection + Kelly sizing + stress test → vault proposal
+  PC-->>U: Vault proposal (target weights, projected behavior, fee model)
+  U->>V: Sign #1 vault.create(strategy_id) via wallet (CreateVaultModal)
+  U->>V: Sign #2 USDC.approve(vault, amount) (DepositFlow stepper)
+  U->>V: Sign #3 vault.deposit(amount, receiver) (DepositFlow stepper)
+  U->>V: Sign #4 vault.setTargetAllocations(tokens, weights_bps) (DepositFlow stepper)
+  Note over U,V: User has now FUNDED + CONFIGURED the vault. Agent gains *rebalance authority only*.
+
+  loop Every agent tick (default 60s; configurable per strategy)
+    LE->>V: Read current vault state (NAV, current weights, USDC balance)
+    LE->>AMM: Read oracle prices + AMM pool liquidity
+    LE->>LE: Signal evaluation (strategy DSL) → drift calc → cost-benefit
+    alt rebalance triggered
+      LE->>V: Submit rebalance tx (Circle signer; agent has approved-router role)
+      V->>AMM: Execute swap(s) per target weights
+      LE->>R: Publish decision trace (canonical hash + paper anchors + reasoning)
+    else hold (no profitable rebalance)
+      LE->>R: Publish 'hold' trace (auditable inactivity)
+    end
+  end
+
+  U->>R: Click 'Verify on-chain' on /reasoning?trace_id=X
+  R-->>U: VERIFIED ✓ (hash matches anchor) + arcscan tx link
+  U->>V: Withdraw (vault.withdraw at any time; agent cannot block)
+```
+
+This is the technical claim behind "non-custodial in the strong sense" — the worst the agent can do is rebalance within the user's stated risk envelope. The user retains exit authority at all times.
+
 ## The seven forkable primitives
 
 ### 1. Strategy Passport schema + validation

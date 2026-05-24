@@ -42,6 +42,7 @@ Pitch framing locked: Wall Street has the rigor toolkit (DSR/PBO/walk-forward OO
 5. [Track B — UI/UX surface cleanup (T2.x)](#5-track-b--uiux-surface-cleanup-t2x)
 6. [Track C — AWS infrastructure + KB pipeline + virality-readiness + Xia protocols + StockBench (T3.x)](#6-track-c--aws-infrastructure--kb-pipeline-t3x)
    - Includes T3.6 ALB + CloudFront + ASG, T3.7 Xia named protocols, T3.8 StockBench harness
+   - [**6.5 Track E — Strategy Passport unification + bear-strategy architecture (T-PE.x)**](#65-track-e--strategy-passport-unification--bear-strategy-architecture-t-pex) — T-PE.1 StrategyRegistry contract, T-PE.2 multi-paper refactor, T-PE.3 unified store, T-PE.4 spec rewrite, T-PE.5 regime_tag, T-PE.6 always-both generation, T-PE.7 regime-aware weighting
 7. [Security pillar (TS.x)](#7-security-pillar-tsx)
 8. [Manual deliverables (M.x)](#8-manual-deliverables-mx)
 9. [Parallel-track Maestro prompts](#9-parallel-track-maestro-prompts)
@@ -937,48 +938,54 @@ Frontend + light backend; Daniel R reviews.
 none
 ```
 
-### T2.5 — Reasoning Verify-on-chain wired
+### T2.5 — Reasoning Verify-on-chain ENHANCEMENT (rescoped 2026-05-23 PM)
 
 ```
-APIN - Frontend - Reasoning: "Verify on-chain" button actually calls /api/traces/{id}/verify
+APIN - Frontend - Reasoning: enhance the (already-working) Verify on-chain button with arcscan tx hash + block number inline
 
 ## TLDR
-Backend /api/traces/{trace_id}/verify EXISTS (traces_routes.py:252) and recomputes hash +
-checks ReasoningTraceRegistry. UI button currently sets state to "Verifying..." and does
-nothing. Wire promise resolution + render VERIFIED ✓ / MISMATCH ✗ with arcscan link.
+**RESCOPED 2026-05-23 PM.** Prior version claimed the Verify button was a no-op. That's
+wrong — reading Reasoning.jsx lines 89-104, verifyTrace(traceId) DOES call
+/api/traces/{trace_id}/verify and renders the result with check/x icon + details text.
+Current state: works, but result UI shows only the truthy `details` field. ENHANCEMENT
+adds inline display of anchor_tx + block_number + arcscan.app deep-link, so users see
+not just "VERIFIED" but the actual on-chain receipt they can independently verify.
 
 ## Summary
-Frontend Reasoning.jsx wires the Verify button onClick to fetch
-/api/traces/{trace_id}/verify, shows the result + link to arcscan.
+Reasoning.jsx already calls /verify. Extend the verifyResults rendering to surface
+anchor_tx + block_number + a one-click arcscan link. Add a "Why does this matter?" disclosure
+inline that explains the verification semantics (recomputes hash, compares against
+ReasoningTraceRegistry, anyone can audit).
 
 ## Scope
 Files to MODIFY:
-- ui/src/components/Reasoning.jsx — wire Verify button to endpoint.
+- ui/src/components/Reasoning.jsx — extend the `vResult` rendering block (around lines 208-213)
+  to display anchor_tx + block_number + arcscan link when is_verified is true.
 
-Files to NOT TOUCH: backend, ReasoningTraceRegistry.sol, trace_publisher.py.
+Files to NOT TOUCH: backend (verify endpoint already works), ReasoningTraceRegistry.sol, trace_publisher.py.
 
 ## Acceptance
-- [ ] `curl -s http://localhost:8000/api/traces/<trace_id>/verify` for a real trace_id returns 200 with
-      {is_verified, computed_hash, on_chain_hash, anchor_tx, block_number}
-- [ ] Browser /reasoning → click "Verify on-chain" on any trace → button flips to
-      "VERIFIED ✓" (green) or "MISMATCH ✗" (red) within 2s
-- [ ] Verified result renders arcscan.app/tx/<anchor_tx> link
-- [ ] If trace has no on-chain anchor, button shows "Not yet anchored" with explanation
-- [ ] `pytest -q backend/tests -k "verify and trace"` → all pass
+- [ ] `grep -n "vResult.anchor_tx\|vResult.block_number" ui/src/components/Reasoning.jsx` → ≥ 2 matches
+- [ ] `grep -n "arcscan.app\|testnet.arcscan" ui/src/components/Reasoning.jsx` → ≥ 1 match (link target)
+- [ ] Browser /reasoning → click Verify on-chain on any anchored trace → see (in addition to the existing check icon + details):
+      anchor_tx (truncated 0x1234…5678) + block #N + arcscan link
+- [ ] If trace has no on-chain anchor (vResult.is_verified=false because there's nothing to verify against), show "Not yet anchored" inline message (currently: only generic error message)
+- [ ] `pytest -q backend/tests -k "verify and trace"` → still pass (no backend change; backend already returns the fields we render)
 
 ## Verify
-docker compose up -d --build
-TRACE_ID=$(curl -s http://localhost:8000/api/traces?limit=1 | jq -r '.traces[0].id')
-curl -s http://localhost:8000/api/traces/${TRACE_ID}/verify | jq
+docker compose up -d --build nginx
+# Browser /reasoning; click Verify on-chain on any trace with an arc_tx_hash; verify the
+# arcscan link is clickable and goes to testnet.arcscan.app/tx/<anchor_tx>
 
 ## Anti-goals
-- DO NOT alter canonical JSON / hash convention.
+- DO NOT modify the backend /verify endpoint — it already returns the fields we need.
 - DO NOT add a new contract method.
-- DO NOT cache verify results (each click is a fresh check).
+- DO NOT add caching of verify results (each click stays a fresh check).
+- DO NOT change the verify protocol — UI enhancement only.
 
 ## Precedent
-- chain/trace_publisher.py::compute_hash canonical JSON pattern.
-- ReasoningTraceRegistry ABI in contracts/abis/.
+- ui/src/components/Reasoning.jsx existing verifyTrace handler (line 89-104) — extend, don't rewrite
+- arcscan link pattern used elsewhere in the codebase (search for testnet.arcscan)
 
 ## Lane note
 Frontend; Daniel R reviews.
@@ -1755,7 +1762,529 @@ T3.7 (so the benchmark scores include the named protocols enforcing)
 
 ---
 
-## 7. Security pillar (TS.x)
+## 6.5 Track E — Strategy Passport unification + bear-strategy architecture (T-PE.x)
+
+Goal: ship the **Strategy Passport** to its full architectural promise — multi-paper fusion-native, unified single store, regime-aware (bull / bear / regime_neutral tags + always-both generation + regime-aware portfolio weighting), and on-chain anchored via a new `StrategyRegistry.sol` contract. Closes the four gaps identified in the Strategy Passport diagnostic (2026-05-23): scalar paper fields break fusion, two divergent stores prevent fusion backtesting, `on_chain_registration_tx` is always null because no contract exists, and the system has no structural defense against the bear-market vulnerability StockBench documented.
+
+**Reference docs:**
+- [docs/diagrams/strategy-passport-architecture.md](../diagrams/strategy-passport-architecture.md) — canonical architecture reference (multi-paper, regime-aware, unified store, on-chain anchor; multiple mermaid diagrams)
+- [docs/specs/strategy-passport-spec.md](strategy-passport-spec.md) — implementation contract (rewritten in T-PE.4 to match the unified architecture)
+- Xia et al. 2026 (arxiv 2605.19337) — protocol critique that motivates R3 reproducibility target
+- Chen et al. 2026 (arxiv 2510.02209, StockBench) — empirical bear-market vulnerability that motivates Layers 1-3 of the bear-strategy architecture
+
+**Why this track gates the pitch.** Without Track E, three things break: (a) fusion strategies cannot pass through the rigor gate (they live in a slimmer JSON-blob store with no typed rigor columns), which kills our "fusion is the major user-facing primitive" claim; (b) `on_chain_registration_tx` renders as blank in the UI for every strategy, which makes the "every Tier-1 strategy is on-chain anchored" pitch beat unverifiable; (c) the system has no structural defense against the bear-market vulnerability StockBench documented, which leaves us empirically weak in exactly the conditions where the field is weakest. Track E ships in the 36h window per Dan's explicit cadence call.
+
+### T-PE.1 — Build StrategyRegistry.sol + chain/strategy_publisher.py
+
+```
+APIN - Contracts+Backend - StrategyRegistry.sol on Arc + Python publisher that fires on Tier-1 promotion
+
+## TLDR
+The passport's "every Tier-1 strategy is on-chain anchored" claim has been a wired-but-empty
+field for weeks (on_chain_registration_tx ships through the dataclass + API + UI but is always
+None). T-PE.1 builds the missing StrategyRegistry.sol contract on Arc and the
+chain/strategy_publisher.py service that fires the registerStrategy() call on Tier-1
+promotion (passes_rigor_gate flips false→true).
+
+## Summary
+1. New Solidity contract StrategyRegistry.sol with registerStrategy(strategyId,
+   methodologyHash, paperCorpusHash, regimeTag, curatorSig). Interface IStrategyRegistry.sol.
+2. Deploy contract to Arc testnet; cache ABI to contracts/abis/.
+3. New backend service chain/strategy_publisher.py that listens for Tier-1 promotion events
+   (StrategyPassport.passes_rigor_gate transition false→true) and fires the contract call
+   via Circle signer + records the anchor tx hash + block back into the strategy_passports
+   table.
+4. Update strategy schema in T-PE.2 to populate on_chain_registration_tx + on_chain_registration_block.
+
+## Scope
+Files to ADD:
+- contracts/src/StrategyRegistry.sol
+- contracts/src/interfaces/IStrategyRegistry.sol
+- contracts/abis/StrategyRegistry.json (generated by Foundry build)
+- contracts/abis/IStrategyRegistry.json
+- backend/archimedes/chain/strategy_publisher.py
+- backend/archimedes/chain/strategy_publisher.test.py (or backend/tests/chain/test_strategy_publisher.py)
+- contracts/script/DeployStrategyRegistry.s.sol (Foundry deploy script)
+
+Files to MODIFY:
+- contracts/foundry.toml — confirm Arc testnet config
+- backend/archimedes/chain/contracts.py::ContractLoader — register new contract ABI
+- backend/archimedes/chain/agent_runner.py — invoke strategy_publisher on Tier-1 promotion
+
+Files to NOT TOUCH:
+- ReasoningTraceRegistry.sol (unchanged; per-decision trace anchoring already works)
+- ui/ (T-PE.2 + T-PE.3 + T-PE.5 own the UI changes)
+
+## Acceptance
+- [ ] `cd contracts && forge build` succeeds; ABIs written to contracts/abis/StrategyRegistry.json + IStrategyRegistry.json
+- [ ] `cast call <deployed_address> "isRegistered(bytes32)(bool)" <unregistered_id>` returns false
+- [ ] `python -c "from archimedes.chain.strategy_publisher import StrategyPublisher; pub = StrategyPublisher(); print(pub.is_anchored('0x'+'00'*32))"` exits 0 (False for null id)
+- [ ] `pytest -q backend/tests/chain/test_strategy_publisher.py` — at least 6 new tests pass (anchoring success, anchoring idempotency, signature validation, gas estimation, error path on RPC failure, integration with agent_runner Tier-1-promotion hook)
+- [ ] Manual: trigger a Tier-1 promotion on Arc testnet; verify the StrategyRegistered event emits on testnet.arcscan.app with correct hashes; verify the strategy_passports table row's on_chain_registration_tx is populated with the tx hash
+- [ ] Anti-tracking: candidate strategies (passes_rigor_gate=false) MUST NOT be anchored — verify by promoting then demoting a strategy and confirming no on-chain entry
+
+## Verify
+cd contracts && forge build
+forge script script/DeployStrategyRegistry.s.sol --rpc-url $ARC_TESTNET_RPC_URL --broadcast
+pytest -q backend/tests/chain/test_strategy_publisher.py
+
+## Anti-goals
+- DO NOT make this contract upgradeable (immutable per architectural-principles.md).
+- DO NOT anchor candidate (failed-rigor) strategies — only Tier-1 promotions.
+- DO NOT remove or modify ReasoningTraceRegistry.sol.
+- DO NOT use SHA-256 anywhere — keccak256 throughout to match on-chain verification.
+- DO NOT add any front-running protection or gating that would prevent open inspection of registered strategies.
+- DO NOT commit the curator private key — Circle Wallets signer per existing pattern.
+
+## Precedent
+- contracts/src/ReasoningTraceRegistry.sol — mirror this shape (event emission, simple registry, no upgradeability).
+- backend/archimedes/chain/trace_publisher.py — mirror the publisher service pattern (canonical hashing + Circle signer + idempotent retry).
+- backend/archimedes/chain/contracts.py::ContractLoader — extend with the new contract registration.
+
+## Lane note
+Cross-lane (contracts + chain backend). Chuan reviews Solidity + the deploy script. Dan reviews
+the publisher service + the agent_runner hook. Big spec — audit subagent REQUIRED per § 2.6
+before filing.
+
+## Depends on
+none (foundational); ANCHORS T-PE.3 (which populates the on_chain_* fields on Tier-1 promotion)
+```
+
+### T-PE.2 — Multi-paper passport refactor (StrategyPassport dataclass + PaperRef)
+
+```
+APIN - Backend - Refactor Strategy dataclass into StrategyPassport with papers: list[PaperRef]
+
+## TLDR
+Current Strategy dataclass has scalar paper_arxiv_id, paper_title, etc. — assumes a SINGLE
+paper. Fusion strategies synthesize from N papers; the scalar shape literally breaks them.
+Refactor to a list-of-PaperRef shape so the passport is fusion-native from day one.
+
+## Summary
+1. New backend/archimedes/models/paper_ref.py defining PaperRef dataclass with arxiv_id, doi,
+   title, authors, venue, year, citation_count, contribution (string describing what this
+   paper contributed to the fusion).
+2. Rename Strategy → StrategyPassport in backend/archimedes/models/strategy.py.
+   Replace scalar paper_* fields with papers: list[PaperRef]. Add regime_tag field
+   (Literal["bull", "bear", "regime_neutral"]). Switch methodology_hash from SHA-256 to
+   keccak256. Add on_chain_registration_tx + on_chain_registration_block + arcscan_url.
+3. Update all import sites across backend/ to the new name.
+4. Update API schemas (api/schemas.py) — StrategyResponse uses papers list. Add per-paper-
+   blended paper_claim_blended_sharpe field.
+5. Update services/strategy_provider.py to build StrategyPassport with papers list-of-1 from
+   curated .py files (backward compat for single-paper strategies). The PAPER_ARXIV_IDS
+   constant in curated files becomes a list (with a one-shot file rewrite alongside).
+
+## Scope
+Files to ADD:
+- backend/archimedes/models/paper_ref.py
+- backend/archimedes/models/__init__.py (or update existing if present) — export the new types
+
+Files to MODIFY:
+- backend/archimedes/models/strategy.py — Strategy → StrategyPassport; scalar paper_* → papers list; add regime_tag; switch to keccak256
+- backend/archimedes/api/schemas.py — StrategyResponse mirrors the new dataclass
+- backend/archimedes/api/strategies_routes.py::_to_strategy_response — map the new dataclass
+- backend/archimedes/services/strategy_provider.py — emit StrategyPassport with papers list-of-1 from curated files
+- backend/archimedes/services/strategy_fusion.py — emit StrategyPassport with papers list-of-N
+- backend/archimedes/services/strategy_architect.py — emit StrategyPassport
+- backend/archimedes/services/portfolio_agent.py — read papers via new shape
+- analytics-engine/strategies/*.py — replace single PAPER_ARXIV_ID with PAPER_ARXIV_IDS list (one-shot rewrite of 4 files)
+- backend/tests/test_strategy_endpoints.py — update fixtures to multi-paper shape
+- ui/src/components/Strategies.jsx — render papers list (per-paper rows in expansion)
+- ui/src/components/StrategyPassport.jsx (from PR #142) — render papers as a table
+
+Files to NOT TOUCH:
+- contracts/ (T-PE.1 owns)
+- ReasoningTraceRegistry trace shape (unchanged)
+- statistical_regime.py (T-PE.5 owns regime integration)
+
+## Acceptance
+- [ ] `python -c "from archimedes.models.paper_ref import PaperRef; from archimedes.models.strategy import StrategyPassport; p = StrategyPassport(id='x', papers=[PaperRef(arxiv_id='1', title='t', authors=[], doi=None, venue=None, year=None, citation_count=None, contribution=None)], methodology_text='m', methodology_hash='0x'+'00'*32, regime_tag='bull'); assert len(p.papers) == 1; print('OK')"` → prints OK
+- [ ] `grep -rn "paper_arxiv_id:\s*str" backend/` → 0 matches (no more scalar field; only `papers: list[PaperRef]`)
+- [ ] `grep -rn "from archimedes.models.strategy import Strategy\b" backend/` → 0 matches (renamed to StrategyPassport everywhere)
+- [ ] `pytest -q backend/tests` → same or higher pass count vs before (no regressions; new tests for multi-paper)
+- [ ] `curl -s http://localhost:8000/api/strategies/<curated_id> | jq '.papers | length'` → 1 (curated single-paper still works)
+- [ ] After T-PE.3 lands: `curl -s http://localhost:8000/api/strategies/<fusion_id> | jq '.papers | length'` → ≥ 2 (fusion multi-paper)
+- [ ] `python -c "from archimedes.models.strategy import StrategyPassport; from eth_utils import keccak; m = 'test'; assert StrategyPassport.compute_methodology_hash_keccak(m) == '0x' + keccak(text=m).hex(); print('OK')"` → prints OK (keccak256 matches eth_utils canonical impl)
+
+## Verify
+docker compose up -d --build backend
+pytest -q backend/tests
+curl -s http://localhost:8000/api/strategies/ | jq '.strategies[0].papers'
+# expect: array of 1+ PaperRef objects
+
+## Anti-goals
+- DO NOT preserve scalar paper_arxiv_id / paper_title / etc. fields — full migration to papers list.
+- DO NOT shim the new shape with a property that returns papers[0].* — force callers to use the new shape.
+- DO NOT keep SHA-256 anywhere in the passport hashing path — keccak256 throughout.
+- DO NOT add a primary/additional split — all papers are first-class in the list.
+- DO NOT change StrategyRecord ORM here (T-PE.3 owns the persistence layer).
+
+## Precedent
+- backend/archimedes/models/strategy.py current Strategy dataclass (60+ fields) — preserve the rigor + backtest fields; only refactor the paper provenance section.
+- backend/archimedes/chain/trace_publisher.py::compute_hash — keccak256 canonical pattern.
+- eth_utils.keccak — canonical Python keccak256 binding.
+
+## Lane note
+Cross-lane (backend models + API + UI). Daniel R reviews UI; Daniel B reviews backend. Big spec
+— audit subagent REQUIRED per § 2.6 before filing.
+
+## Depends on
+T-PE.1 (so on_chain_registration_tx populates correctly)
+```
+
+### T-PE.3 — Strategy store unification (one Postgres table; collapse curated + generated)
+
+```
+APIN - Backend - Unify file-based + StrategyRecord ORM into ONE strategy_passports Postgres table
+
+## TLDR
+Today there are two parallel strategy stores: file-based Strategy dataclass for CURATED +
+StrategyRecord Postgres ORM for GENERATED. Fusion outputs go to the slim store, which is
+why fusion can't pass through the rigor gate. Collapse to ONE strategy_passports table that
+every strategy (curated, fusion, architect) writes into and reads from. File-based .py files
+become the seed source; Postgres becomes the runtime substrate.
+
+## Summary
+1. New backend/archimedes/services/passport_loader.py — ingest pipeline that writes a
+   StrategyPassport to the unified Postgres table from any source (curated file load,
+   fusion agent output, architect agent output).
+2. Replace StrategyRecord ORM with a new StrategyPassport ORM that has every dataclass field
+   as a typed column (or first-class relation for papers list). New paper_refs table FK'd to
+   strategy_passports. New rigor_results + backtest_results tables.
+3. One-shot migration script backend/archimedes/scripts/migrate_to_unified_passport_store.py
+   that (a) reads existing StrategyRecord rows, (b) reads curated files via strategy_provider,
+   (c) writes both into the unified strategy_passports table, (d) verifies row counts.
+4. strategy_provider.py becomes a SHIM that reads from the unified store (curated files are
+   still the seed source, but read-after-write goes through the new ORM).
+5. All API routes + services read from the unified store.
+
+## Scope
+Files to ADD:
+- backend/archimedes/services/passport_loader.py
+- backend/archimedes/scripts/migrate_to_unified_passport_store.py
+
+Files to MODIFY:
+- backend/archimedes/models/strategy_store.py — replace StrategyRecord with StrategyPassportRecord (typed columns matching the dataclass)
+- backend/archimedes/db.py — add CREATE TABLE for paper_refs + rigor_results + backtest_results; ALTER for strategy_passports
+- backend/archimedes/services/strategy_provider.py — becomes a shim over passport_loader (backward compat)
+- backend/archimedes/services/strategy_fusion.py — write to unified store via passport_loader
+- backend/archimedes/services/strategy_architect.py — same
+- backend/archimedes/api/strategies_routes.py — read from unified store
+- backend/tests/ — update all strategy-related fixtures
+
+Files to NOT TOUCH:
+- analytics-engine/strategies/*.py files (T-PE.2 owns the seed format)
+
+## Acceptance
+- [ ] `psql -c "\dt" | grep strategy_passports` → table exists
+- [ ] `psql -c "\dt" | grep paper_refs` → table exists
+- [ ] `psql -c "SELECT column_name FROM information_schema.columns WHERE table_name='strategy_passports' AND column_name IN ('regime_tag','methodology_hash','passes_rigor_gate','deflated_sharpe_ratio','pbo_score','on_chain_registration_tx');"` → 6 rows (all expected columns present)
+- [ ] `python -m archimedes.scripts.migrate_to_unified_passport_store --dry-run` exits 0; reports row counts to migrate
+- [ ] `python -m archimedes.scripts.migrate_to_unified_passport_store --execute` exits 0; row counts match
+- [ ] After migration: `psql -c "SELECT COUNT(*) FROM strategy_passports;"` ≥ existing (StrategyRecord count + curated file count)
+- [ ] `grep -rn "class StrategyRecord\b" backend/` → 0 matches (replaced)
+- [ ] `pytest -q backend/tests` — same or higher pass count
+- [ ] Fusion strategy now has rigor_verdict typed columns: `curl -s http://localhost:8000/api/strategies/<fusion_id> | jq '.deflated_sharpe_ratio'` → non-null number (no longer hidden in a JSON blob)
+
+## Verify
+docker compose up -d --build backend
+python -m archimedes.scripts.migrate_to_unified_passport_store --dry-run
+python -m archimedes.scripts.migrate_to_unified_passport_store --execute
+pytest -q backend/tests
+
+## Anti-goals
+- DO NOT keep two parallel stores in production — full collapse to the unified table.
+- DO NOT lose ANY data in the migration — run --dry-run + --execute with row-count checks; halt on any mismatch.
+- DO NOT change the file-based seed format (analytics-engine/strategies/*.py) here — T-PE.2 owns that.
+- DO NOT couple the API surface to the ORM internals — route through dataclass via passport_loader.
+- DO NOT add new dependencies beyond what's already in backend/requirements.txt or environment.yml.
+
+## Precedent
+- backend/archimedes/models/strategy_store.py — current StrategyRecord shape (gut + replace)
+- backend/archimedes/db.py — existing idempotent CREATE TABLE pattern (papers.cluster_id etc.)
+- Existing one-shot migration patterns in backend/archimedes/scripts/
+
+## Lane note
+Cross-lane (backend models + persistence + DB schema). Dan reviews. Big spec — audit subagent
+REQUIRED per § 2.6 before filing because the migration is irreversible without careful planning.
+
+## Depends on
+T-PE.1 (anchor tx field) + T-PE.2 (the dataclass shape this ORM mirrors)
+```
+
+### T-PE.4 — Rewrite docs/specs/strategy-passport-spec.md to match unified architecture
+
+```
+APIN - Docs - Bring strategy-passport-spec.md current with the post-Track-E unified architecture
+
+## TLDR
+The current spec describes Postgres tables (`strategies`, `backtest_results` ALTERs) that
+don't exist; API endpoints (`/api/decisions/*`) that don't exist; SHA-256 methodology hashing
+that we're abandoning for keccak256. The spec is stale relative to the implementation. Rewrite
+it as the implementation contract for the post-T-PE.1/2/3/5 unified + multi-paper + regime-
+aware + on-chain-anchored Strategy Passport.
+
+## Summary
+Replace docs/specs/strategy-passport-spec.md with a rewrite that:
+1. Cross-references docs/diagrams/strategy-passport-architecture.md as the canonical reference doc.
+2. Documents the unified strategy_passports table schema (one table, typed columns, paper_refs FK).
+3. Documents the new dataclass shape (PaperRef + StrategyPassport with papers list + regime_tag).
+4. Documents the API surface as actually shipped (replace /api/decisions/* endpoint references with /api/strategies/{id}/passport + /verify + /anchor + /api/traces/* cross-reference).
+5. Documents the StrategyRegistry.sol contract interface + anchoring policy (Tier-1 only).
+6. Documents the multi-paper paper-claim-blending behavior.
+7. Documents the regime_tag enum + always-both generation policy + regime-aware portfolio weighting.
+8. Switches all hashing references from SHA-256 to keccak256.
+9. Updates Estimated Lift table with T-PE.x spec IDs.
+
+(NOTE: This spec gets drafted by a parallel subagent earlier in the session — confirm that
+work was committed before this spec issue gets opened. If the parallel subagent's work is
+present and complete, this issue may be a no-op / closed-with-evidence.)
+
+## Scope
+Files to MODIFY (or REPLACE):
+- docs/specs/strategy-passport-spec.md
+
+Files to NOT TOUCH:
+- docs/diagrams/strategy-passport-architecture.md (already canonical; spec cross-references it)
+- Any code
+
+## Acceptance
+- [ ] `grep -c "/api/decisions/" docs/specs/strategy-passport-spec.md` → 0 (removed stale endpoint refs)
+- [ ] `grep -c "SHA-256\|sha256\|sha_256" docs/specs/strategy-passport-spec.md` → 0 (all hashing is keccak256)
+- [ ] `grep -c "ALTER TABLE strategies" docs/specs/strategy-passport-spec.md` → 0 (stale single-table-ALTER syntax gone)
+- [ ] `grep -c "papers:\s*list\|PaperRef\|regime_tag" docs/specs/strategy-passport-spec.md` → ≥ 3 each (new shape documented)
+- [ ] `grep -c "StrategyRegistry" docs/specs/strategy-passport-spec.md` → ≥ 3 (contract documented)
+- [ ] Spec cross-references docs/diagrams/strategy-passport-architecture.md at least once
+- [ ] Length 400-600 lines (current is 316; rewrite is comprehensive but not bloated)
+
+## Verify
+wc -l docs/specs/strategy-passport-spec.md
+grep -c "SHA-256\|sha256" docs/specs/strategy-passport-spec.md  # expect 0
+
+## Anti-goals
+- DO NOT remove the canonical hashing details — preserve and update.
+- DO NOT remove the edge-case discipline section — extend with the new T-PE rules.
+- DO NOT add mermaid diagrams to the spec — the architecture doc owns those; spec is text + tables + code blocks.
+- DO NOT commit any code changes here — docs only.
+
+## Precedent
+- docs/diagrams/strategy-passport-architecture.md — the canonical architecture reference
+
+## Lane note
+Docs lane. Dan reviews. SMALL spec — Maestro inline per § 2.6.
+
+## Depends on
+T-PE.1 + T-PE.2 + T-PE.3 (so the spec describes what actually shipped)
+```
+
+### T-PE.5 — regime_tag schema + curated library tagging
+
+```
+APIN - Backend+Data - Add regime_tag to passport schema; tag the existing curated library
+
+## TLDR
+Foundational layer for the bear-strategy architecture (Layer 1 of the 3-layer Option D pattern):
+every Strategy Passport carries a regime_tag enum (bull / bear / regime_neutral). The curated
+library needs explicit tagging now so the Portfolio Construction Agent has something to balance.
+
+## Summary
+1. Add regime_tag enum field to StrategyPassport (Literal["bull", "bear", "regime_neutral"]).
+   T-PE.2 already adds this; T-PE.5 ensures it's seeded correctly in the curated library.
+2. Tag the existing 3-4 curated strategies in analytics-engine/strategies/*.py:
+   - Faber 2007 SMA200: regime_tag="bull" (trend-following, momentum-tilted)
+   - Moskowitz et al. 2012 TSMOM: regime_tag="bull" (momentum)
+   - Moreira-Muir 2017 Vol-Managed: regime_tag="bear" (defensive, vol-managed)
+   - Any buy-and-hold baseline: regime_tag="bull"
+3. Update the corpus seeding strategy (docs/corpus-architecture.md) to bias the bear bucket
+   with: Bondarenko / Whaley (vol risk premium), Ang/Chen/Xing 2006 (downside beta),
+   defensive sector rotation papers, short-interest factor research. Add an entry in
+   docs/specs/launch-execution-plan-2026-05-23.md § 3.5 corpus seeding.
+4. UI: add a regime filter to Strategies.jsx Library — facet by regime_tag.
+
+## Scope
+Files to MODIFY:
+- analytics-engine/strategies/faber_sma200.py — add REGIME_TAG = "bull"
+- analytics-engine/strategies/tsmom.py — add REGIME_TAG = "bull"
+- analytics-engine/strategies/volatility_managed.py — add REGIME_TAG = "bear"
+- (any other curated strategy file — verify with find analytics-engine/strategies -name '*.py' -not -name 'backtest*')
+- backend/archimedes/services/strategy_provider.py — parse REGIME_TAG metadata constant
+- docs/corpus-architecture.md — document the bear-strategy bucket seeding
+- docs/specs/launch-execution-plan-2026-05-23.md § 3.5 — add bear-bucket detail
+- ui/src/components/Strategies.jsx — add regime filter chip group
+
+Files to NOT TOUCH:
+- contracts/ (regime_tag is anchored as bytes by T-PE.1's StrategyRegistry)
+- Generation pipeline (T-PE.6 owns)
+
+## Acceptance
+- [ ] `grep -n "REGIME_TAG" analytics-engine/strategies/*.py` → matches in all curated strategy files
+- [ ] `curl -s http://localhost:8000/api/strategies/ | jq '.strategies[].regime_tag' | sort -u` → ["bear","bull","regime_neutral"] (or a subset; all non-null)
+- [ ] `curl -s 'http://localhost:8000/api/strategies/?regime=bear' | jq '.strategies | length'` → ≥ 1 (filter works)
+- [ ] Browser /library — regime filter chips visible; clicking "bear" filters to bear-tagged strategies
+- [ ] `pytest -q backend/tests -k "regime_tag"` → ≥ 4 new tests pass
+
+## Verify
+docker compose up -d --build backend nginx
+curl -s 'http://localhost:8000/api/strategies/?regime=bear' | jq '.strategies[0].regime_tag'
+
+## Anti-goals
+- DO NOT mint strategies without regime_tag — make the field required (NOT NULL) in the ORM.
+- DO NOT silently default to "regime_neutral" when classification is ambiguous — surface as an error.
+- DO NOT touch the generation flow (T-PE.6 owns).
+
+## Precedent
+- analytics-engine/strategies/*.py existing PAPER_* / METHODOLOGY_* constant pattern
+- Existing filter chip pattern in Strategies.jsx (Generated/Examples tabs)
+
+## Lane note
+Cross-lane (backend + data + UI). Dan reviews regime tagging; Önder reviews the corpus-bucket
+guidance. MEDIUM spec — Maestro inline per § 2.6.
+
+## Depends on
+T-PE.2 (the dataclass field), T-PE.3 (the typed column in the unified store)
+```
+
+### T-PE.6 — Always-both generation (Strategy Generation Agent emits bull + bear candidates)
+
+```
+APIN - Backend - Strategy Generation Agent emits BOTH a bull-tilted AND a bear-tilted candidate per Generate call
+
+## TLDR
+Layer 2 of the bear-strategy architecture (Option D from launch plan diagnostic). Every
+Generate call runs the Strategy Generation Agent TWICE: once with bull-leaning system prompt
++ biased paper retrieval; once with bear-leaning. Both candidates pass through the rigor gate.
+User sees both with regime tags; can accept one, both, or neither. Counter to StockBench's
+"all agents underperform passive baseline in downturns" finding.
+
+## Summary
+1. Extend generation_pipeline._pick_pipeline → _pick_pipelines (plural). Always returns
+   2-3 pipeline plans: one bull-tilted, one bear-tilted, and (optionally) one regime_neutral.
+2. New system prompts per regime in services/strategy_fusion.py:
+   - Bull prompt biases toward trend-following / momentum / risk-on synthesis
+   - Bear prompt biases toward vol-managed / defensive / inverse-momentum synthesis
+3. Biased paper retrieval per regime: bull retrieval queries cluster IDs tagged momentum
+   /trend; bear retrieval queries cluster IDs tagged defensive / vol-managed.
+4. SSE stream emits pipeline_selected event with payload {pipelines: [{regime:"bull", reason}, {regime:"bear", reason}]} — array instead of single value.
+5. Generate.jsx renders BOTH FusionResult cards side-by-side (or stacked on mobile) with
+   regime tag pills. User can deploy one, both, or neither.
+6. If KB has no candidate papers for a regime matching the brief, agent emits an explicit
+   "no <bull|bear> candidate available — your brief is structurally one-sided" message;
+   honest empty state, not silent drop.
+
+## Scope
+Files to MODIFY:
+- backend/archimedes/services/generation_pipeline.py — _pick_pipelines (plural) + SSE event shape
+- backend/archimedes/services/strategy_fusion.py — bull/bear system prompts + biased retrieval
+- backend/archimedes/api/generate_schemas.py — pipeline_selected event allows array
+- backend/archimedes/api/generate_routes.py — SSE stream emits the array
+- ui/src/components/Generate.jsx — render both result cards
+- backend/tests/services/test_generation_pipeline.py — new tests for dual-output
+
+Files to NOT TOUCH:
+- T-PE.5's regime_tag (passport schema is unchanged; this is the generation flow that POPULATES the tag)
+- Portfolio Construction Agent (T-PE.7 owns the regime-aware weighting)
+
+## Acceptance
+- [ ] `curl -X POST http://localhost:8000/api/generate/start -d '{"brief":{"intent":"trend following with low drawdown","risk_appetite":"moderate"}}' -H "Content-Type: application/json"` → returns 202 with job_id
+- [ ] SSE stream for that job emits pipeline_selected event with payload `{pipelines: [...]}` (array, length 2-3)
+- [ ] Both candidate strategies persisted to strategy_passports with correct regime_tag (one "bull", one "bear")
+- [ ] Browser /generate after job completes — TWO FusionResult cards visible with regime pill badges
+- [ ] When KB lacks bear-friendly papers for a brief: pipeline_selected emits `[{regime:"bull", ...}, {regime:"bear", error:"no_candidate_papers"}]` → UI shows explicit "no bear candidate" message
+- [ ] `pytest -q backend/tests/services/test_generation_pipeline.py -k "always_both or dual"` → ≥ 5 new tests pass
+
+## Verify
+docker compose up -d --build
+# Browser /generate; submit a brief; both regime cards appear after generation completes
+curl -s http://localhost:8000/api/strategies/?regime=bull | jq '.strategies | length'
+curl -s http://localhost:8000/api/strategies/?regime=bear | jq '.strategies | length'
+# both should grow when generation runs
+
+## Anti-goals
+- DO NOT fall back to single-output silently — always try both regimes.
+- DO NOT generate fake bear candidates when KB is genuinely one-sided — emit honest empty state.
+- DO NOT couple generation regime choice to current statistical_regime (T-PE.7 owns regime-aware deployment; T-PE.6 always emits both).
+- DO NOT increase LLM cost without bound — bull + bear generation = 2x cost per Generate; document this trade-off in the spec.
+
+## Precedent
+- backend/archimedes/services/generation_pipeline.py current _pick_pipeline implementation
+- Multi-candidate generation already exists for the 3-mode picker; this builds on the same primitive
+
+## Lane note
+Cross-lane (backend + UI). Dan reviews backend; Daniel R reviews UI. Big spec — audit subagent
+REQUIRED per § 2.6.
+
+## Depends on
+T-PE.5 (regime_tag schema must exist; curated library must be tagged so retrieval can bias)
+```
+
+### T-PE.7 — Regime-aware portfolio weighting (Portfolio Construction Agent reads regime → mixes bull/bear)
+
+```
+APIN - Backend - Portfolio Construction Agent reads regime + applies bull/bear weight schedule
+
+## TLDR
+Layer 3 of the bear-strategy architecture. Portfolio Construction Agent reads current regime
+from statistical_regime.py and applies a regime-aware weight schedule when assembling the
+vault: more bull-tilted strategies in risk_on, more bear-tilted in risk_off. The portfolio
+survives the regime it's actually in.
+
+## Summary
+1. Extend services/portfolio_optimizer.py to accept a regime_weight_schedule + current regime
+   inputs.
+2. Hardcoded weight schedules per risk profile in v1:
+   - conservative: {risk_on: bull=50/bear=40/neutral=10, risk_off: bull=20/bear=70/neutral=10, transition: bull=30/bear=50/neutral=20}
+   - moderate: {risk_on: bull=70/bear=25/neutral=5, risk_off: bull=25/bear=70/neutral=5, transition: bull=40/bear=40/neutral=20}
+   - aggressive: {risk_on: bull=85/bear=10/neutral=5, risk_off: bull=10/bear=85/neutral=5, transition: bull=50/bear=40/neutral=10}
+3. Live Execution Agent (agent_runner.py) detects regime transitions; triggers
+   recompute_target_weights() on transition. Cost-benefit gate still applies (don't rebalance
+   if cost > benefit).
+4. UI: Portfolio page displays current regime + the bull/bear/neutral mix the agent has
+   deployed; visual breakdown of "you currently hold X% bull strategies, Y% bear, Z% neutral".
+
+## Scope
+Files to MODIFY:
+- backend/archimedes/services/portfolio_optimizer.py — add regime_weight_schedule + regime-aware mix
+- backend/archimedes/services/portfolio_agent.py — wire schedule to agent decisions
+- backend/archimedes/chain/agent_runner.py — regime-transition detection + recompute trigger
+- backend/archimedes/api/strategies_routes.py — advisor endpoint returns regime breakdown
+- ui/src/components/PortfolioAdvisor.jsx — render regime breakdown bars
+- backend/tests/services/test_portfolio_optimizer.py — new tests for regime-aware weighting
+
+Files to NOT TOUCH:
+- statistical_regime.py (consumer, not producer)
+- Vault contracts (no contract-level regime awareness)
+
+## Acceptance
+- [ ] `curl -s http://localhost:8000/api/strategies/advisor?risk_profile=moderate | jq '.regime_breakdown'` → object with bull_weight, bear_weight, neutral_weight summing to 1.0
+- [ ] `python -c "from archimedes.services.portfolio_optimizer import regime_weight_schedule; s = regime_weight_schedule('moderate', 'risk_off'); assert s['bear'] == 0.70; print('OK')"` → prints OK
+- [ ] Simulated regime transition risk_on → risk_off triggers a recompute event in agent_runner logs (verify with docker compose logs agent | grep "regime_transition")
+- [ ] Browser /portfolio — regime breakdown bars visible; sum to 100%
+- [ ] `pytest -q backend/tests/services/test_portfolio_optimizer.py -k "regime"` → ≥ 6 new tests pass
+- [ ] Stress engine scenarios include at least one regime-flip test that penalizes over-tilted portfolios
+
+## Verify
+docker compose up -d --build
+curl -s 'http://localhost:8000/api/strategies/advisor?risk_profile=moderate' | jq '.regime_breakdown'
+
+## Anti-goals
+- DO NOT make regime_weight_schedule user-configurable in v1 (hardcoded per risk profile; v2 ships configuration).
+- DO NOT trigger rebalance on every regime tick — cost-benefit gate must apply.
+- DO NOT remove existing Kelly + risk parity optimization — regime weighting is a SECOND-PASS overlay.
+
+## Precedent
+- backend/archimedes/services/portfolio_optimizer.py existing Kelly + risk-parity logic
+- backend/archimedes/services/statistical_regime.py existing regime classifier (consumer of)
+
+## Lane note
+Cross-lane (backend + UI). Dan reviews backend; Daniel R reviews UI. Big spec — audit subagent
+REQUIRED per § 2.6.
+
+## Depends on
+T-PE.5 (regime_tag schema), T-PE.6 (always-both generation gives the agent strategies to mix)
+```
+
+---
 
 First-class. Same rigor as the statistical pipeline. Zero-trust posture, secrets out of `.env`, IAM-scoped resource access, HTTPS everywhere, security headers + CORS + rate limits, dependency scanning, user-data minimization.
 
@@ -2320,6 +2849,75 @@ Done = HTTPS live; all TS.1-TS.8 merged; ARC-OSS submitted; hackathon form submi
 v2 demo video uploaded; M.10 repo polish complete; every doc aligned to pitch frame.
 ```
 
+### Track E — Strategy Passport unification + bear-strategy architecture (T-PE.x)
+
+```
+You're driving Track E of the Archimedes launch plan. Goal: ship the Strategy Passport to
+its full architectural promise — multi-paper fusion-native, unified single store, regime-
+aware (bull/bear/regime_neutral), and on-chain anchored via new StrategyRegistry.sol. This
+track closes the three pitch-blocking gaps surfaced in the 2026-05-23 Strategy Passport
+diagnostic and structurally counters the bear-market vulnerability StockBench documented.
+
+Repo: as Track A.
+Plan file: docs/specs/launch-execution-plan-2026-05-23.md
+Architecture reference: docs/diagrams/strategy-passport-architecture.md (mermaid + narrative)
+Implementation contract: docs/specs/strategy-passport-spec.md (rewritten in T-PE.4)
+
+Read first:
+- Sections 1, 2.6 (spec elaboration), 3.6 (named protocols cross-ref), 6.5 (the seven T-PE
+  spec drafts in full).
+- docs/diagrams/strategy-passport-architecture.md (canonical architecture)
+- docs/specs/strategy-passport-spec.md (current spec; T-PE.4 rewrites it)
+- backend/archimedes/models/strategy.py (current scalar-paper dataclass)
+- backend/archimedes/models/strategy_store.py (current slim ORM to be replaced)
+- backend/archimedes/services/strategy_provider.py (current file-based loader)
+- contracts/src/ReasoningTraceRegistry.sol (pattern for the new StrategyRegistry.sol)
+
+Spec elaboration protocol per § 2.6:
+- T-PE.1 (StrategyRegistry contract): BIG. **Spawn audit Explore subagent.** Verify Foundry
+  build config; map existing contract deploy pattern; identify Circle signer wiring for the
+  publisher service.
+- T-PE.2 (multi-paper refactor): BIG. **Spawn audit Explore subagent.** Map all callsites of
+  scalar paper_arxiv_id / paper_title across backend + UI; identify all touchpoints.
+- T-PE.3 (store unification): BIG. **Spawn audit Explore subagent.** Map existing
+  StrategyRecord ORM consumers; design migration; verify db.py idempotent ALTER pattern.
+- T-PE.6 (always-both generation): BIG. **Spawn audit Explore subagent.** Map current
+  _pick_pipeline + SSE event shape; design dual-output without breaking existing single-
+  output consumers.
+- T-PE.7 (regime-aware weighting): BIG. **Spawn audit Explore subagent.** Map portfolio
+  optimizer current signature; design schedule overlay without breaking existing Kelly +
+  risk parity.
+- T-PE.4 (spec rewrite): SMALL. Maestro inline. (NOTE: spec may already be rewritten by
+  a parallel session; verify before filing.)
+- T-PE.5 (regime_tag + curated tagging): MEDIUM. Maestro inline.
+
+Execute in order (strict serial due to dependencies):
+1. AUDIT-SUBAGENT + file T-PE.1 (StrategyRegistry contract). UNASSIGNED. Foundational.
+2. After T-PE.1 lands: AUDIT-SUBAGENT + file T-PE.2 (multi-paper refactor). UNASSIGNED.
+3. After T-PE.2 lands: AUDIT-SUBAGENT + file T-PE.3 (store unification). UNASSIGNED.
+4. **In parallel with T-PE.3:** elaborate + file T-PE.4 (spec rewrite) — but verify the spec
+   isn't already rewritten by a parallel session.
+5. After T-PE.3 lands: elaborate + file T-PE.5 (regime_tag + curated library tagging). UNASSIGNED.
+6. After T-PE.5: AUDIT-SUBAGENT + file T-PE.6 (always-both generation). UNASSIGNED.
+7. After T-PE.6: AUDIT-SUBAGENT + file T-PE.7 (regime-aware portfolio weighting). UNASSIGNED.
+
+Anti-goals:
+- DO NOT keep the two-store split — full collapse to unified strategy_passports table.
+- DO NOT preserve scalar paper_* fields after T-PE.2 — full migration to papers list.
+- DO NOT use SHA-256 anywhere in passport hashing — keccak256 throughout for on-chain compat.
+- DO NOT anchor candidate (failed-rigor) strategies on-chain — only Tier-1 promotions.
+- DO NOT generate fake bear candidates when KB is genuinely one-sided — honest empty state.
+- DO NOT assign t2o2 to any issue — Dan does that manually.
+- DO NOT file seed-grade specs — every spec gets elaborated per § 2.6 before filing.
+
+Done = T-PE.1 + T-PE.2 + T-PE.3 + T-PE.4 + T-PE.5 + T-PE.6 + T-PE.7 merged; strategy
+passports unified in one Postgres table; every Tier-1 strategy carries a non-null
+on_chain_registration_tx visible on testnet.arcscan.app; every passport carries a
+regime_tag; Generate page emits bull + bear candidates per call; Portfolio Construction
+Agent applies regime-aware weighting; demo video v2 highlights the verified on-chain
+strategy anchor as a hero claim.
+```
+
 ---
 
 ## 10. Execution timeline (UTC)
@@ -2369,6 +2967,9 @@ MON 23:59 ET     Hard deadline.
 
 **Risks that USED to be on this list but are now mitigated by design (not just accepted):**
 
+- **~~Bear-market underperformance.~~** ALL 14 LLM agents in StockBench underperformed the passive baseline during the January–April 2025 downturn. Track E's three-layer bear-strategy architecture (regime_tag on every passport + always-both generation in T-PE.6 + regime-aware portfolio weighting in T-PE.7) is the structural answer. We don't ship a long-bias system that gets eaten alive when macro flips; we ship a portfolio that adapts its bull/bear mix to the regime the agent actually faces. Stress engine includes a regime-flip scenario that explicitly penalizes over-tilted portfolios.
+- **~~Fusion strategies can't pass the rigor gate.~~** Two divergent strategy stores (file-based passport for curated; slim JSON-blob ORM for generated) meant fusion outputs couldn't be backtested through the DSR/PBO/OOS pipeline. T-PE.3 collapses the two stores into one typed `strategy_passports` table; fusion strategies now flow through the same rigor pipeline as curated. The "fusion is the major user-facing primitive" claim becomes verifiable.
+- **~~`on_chain_registration_tx` always renders blank.~~** The field has been wired through the dataclass + API + UI for weeks, but no `StrategyRegistry.sol` existed to populate it. T-PE.1 ships the contract + `chain/strategy_publisher.py`; Tier-1 promotion now fires `registerStrategy()`. The "every Tier-1 strategy is on-chain anchored" pitch beat becomes verifiable from any block explorer.
 - **~~Virality kills the demo.~~** A successful demo that goes viral previously meant a single EC2 buckling under the load — forfeiting traction at the exact moment the market was paying attention. T3.6's ALB + CloudFront + auto-scaling group closes this; the system absorbs 50,000 wallet connections by scaling out and edge-caching, not by going down. The architecture pitches viral-readiness as a deliberate beat, not a hope.
 - **~~Plain HTTP red flag for judges.~~** TS.1 (Let's Encrypt cert on nginx — and now T3.6's ACM cert on ALB) closes this; green padlock at archimedes-arc.app from Sunday onward.
 - **~~Secrets in .env on a single EC2.~~** TS.2 moves to AWS SSM Parameter Store + IAM instance profile; the new backend AMI (T3.6) bakes nothing sensitive.

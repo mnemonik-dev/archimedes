@@ -171,6 +171,70 @@ The Tier 1 badge means "this vault's strategies survive all four primitives." Th
 flag means "this vault carries reasoning traces but the strategies have not been
 paper-grounded or selection-bias-corrected." Both are useful; neither is misrepresented.
 
+## Agent architecture overview
+
+Archimedes ships three top-level agents (Strategy Generation, Portfolio Construction, Live Execution), each with sub-agents, connected by a 5-layer shared memory pillar (Layer A's two-sublayer split per Xia et al. 2026):
+
+```mermaid
+flowchart TB
+  subgraph SG[Strategy Generation Agent]
+    direction TB
+    SG_PR[Paper Retrieval sub-agent<br/>SPECTER2 NN + KG entity]
+    SG_MC[Market Context sub-agent<br/>regime + oracle + history]
+    SG_SS[Strategy Synthesis sub-agent<br/>LLM fusion call: brief × papers × market]
+    SG_RG[Rigor Gate<br/>DSR + PBO + OOS + look-ahead]
+    SG_PR --> SG_SS
+    SG_MC --> SG_SS
+    SG_SS --> SG_RG
+  end
+
+  subgraph PC[Portfolio Construction Agent]
+    direction TB
+    PC_AS[Asset Selection sub-agent<br/>individual instruments, paper-anchored]
+    PC_SZ[Sizing sub-agent<br/>Kelly + risk parity + USDC floor]
+    PC_ST[Stress Test sub-agent<br/>6 scenario shocks]
+    PC_AS --> PC_SZ
+    PC_SZ --> PC_ST
+  end
+
+  subgraph LE[Live Execution Agent — agent_runner.py loop]
+    direction TB
+    LE_SE[Signal Evaluation sub-agent<br/>does strategy DSL say rebalance?]
+    LE_DC[Drift Calculation sub-agent<br/>target vs current weights]
+    LE_CB[Cost-Benefit sub-agent<br/>is rebalance worth fee + slippage?]
+    LE_TX[Trade Execution<br/>Circle signer → AMM swap]
+    LE_TP[Trace Publishing<br/>canonical hash → ReasoningTraceRegistry]
+    LE_SE --> LE_DC --> LE_CB --> LE_TX --> LE_TP
+  end
+
+  subgraph SM[Shared Memory — 5-layer pillar Linus + Xia refinement]
+    direction LR
+    SM_A1[A.1: KV cache<br/>intra-step latent Linus]
+    SM_A2[A.2: Deterministic state store<br/>vault positions + balances + risk limits<br/>read-only from chain Xia audit-truth]
+    SM_B[B: Redis<br/>per-job event log + scratchpad]
+    SM_C[C: Postgres<br/>StrategyStore + vaults + traces]
+    SM_D[D: Job memory<br/>per-strategy investigation]
+    SM_E[E: KB corpus<br/>papers + clusters + KG]
+  end
+
+  USER[User brief] --> SG
+  SG -- StrategyRecord persisted --> SM_C
+  SG -- ReasoningTrace anchored --> SM_C
+  SM_C --> PC
+  PC -- VaultCreated event --> SM_C
+  SM_C --> LE
+  LE -- decision trace --> SM_C
+  LE -- on-chain anchor --> ON[Arc / ReasoningTraceRegistry]
+
+  SM_A1 -.feeds.-> SG_SS
+  SM_A2 -.gates.-> LE_TX
+  SM_E -.feeds.-> SG_PR
+  SM_B -.feeds.-> SG_SS
+  SM_D -.feeds.-> LE_CB
+```
+
+The custody + authority boundary — agents have rebalance authority only; users sign all 4 binding deployment transactions — is what makes Archimedes non-custodial in the strong sense. See [`docs/specs/launch-execution-plan-2026-05-23.md` § 3.3.1](specs/launch-execution-plan-2026-05-23.md#331-who-does-what--agent--user-interaction-model) for the sequence-diagram detail.
+
 ## The three layers, named explicitly
 
 Borrowing a framing from prediction-market architecture (Canteen's _Unbundling the

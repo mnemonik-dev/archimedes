@@ -73,6 +73,40 @@ Foundry, Circle wallet, and oracle targets (`compile`, `test`, `wallet`, `feed`,
 
 **Nobody is grounding portfolio decisions in peer-reviewed quant research with verifiable on-chain reasoning, settled in pure USDC.** That's the gap. Full thesis: [`docs/competitor-landscape.md`](docs/competitor-landscape.md).
 
+## User journey
+
+**Canonical user journey** — 7 click steps from cold land to a verified on-chain decision.
+
+```mermaid
+flowchart LR
+  L[/Landing/]
+  G[/generate/]
+  ST[/strategy/:id/]
+  CV{CreateVaultModal}
+  DF{DepositFlow stepper}
+  P[/portfolio/]
+  R[/reasoning?trace_id=X/]
+  V{Verify on-chain}
+
+  L -- 'Generate a Strategy →' --> G
+  G -- submit brief; SSE stream completes --> ST
+  ST -- 'Deploy as Vault →' (wallet required) --> CV
+  CV -- create succeeds --> DF
+  DF -- 3 signatures: approve → deposit → setTargetAllocations --> P
+  P -- click activity trace --> R
+  R -- 'Verify on-chain' --> V
+
+  %% Alternate paths (allowed; not canonical)
+  L -. 'Browse Example Library' .-> LIB[/library?tab=examples/]
+  LIB -. click row .-> ST
+  L -. sidebar Explore .-> E[/explore/]
+  E -. 'Use in Generate' .-> G
+  L -. sidebar Corpus .-> C[/corpus/]
+  C -. paper detail → 'Generate from this' .-> G
+```
+
+Every other route (Library tabs, Corpus Graph/KG, Explore sparklines, Learnings) is reachable from the sidebar but supplementary.
+
 ## Documentation map
 
 Three documents are the front door for different audiences:
