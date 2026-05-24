@@ -436,6 +436,21 @@ the resulting PR.
 - **Verify independently — "closed" ≠ "fixed".** The system sometimes closes an
   issue without resolving it. Re-check against the acceptance command on a cold
   clone before trusting completion; reopen with evidence if unmet.
+- **Pre-close verification gate (added 2026-05-24).** Before closing *any* issue,
+  the agentic system MUST:
+  1. Run every acceptance-criteria command listed in the issue and verify the
+     exact expected output matches.
+  2. For every anti-goal / "DO NOT" directive (e.g. "DO NOT keep `setMode` in
+     `Generate.jsx`"), run an explicit `grep` or equivalent check proving the
+     forbidden pattern is absent. If the grep finds a match → the issue is not
+     done.
+  3. If any acceptance check or anti-goal check fails, do **not** close the
+     issue. Instead, comment with the failing evidence and leave the issue
+     **open**.
+  This gate exists because three issues (#166, #167, #168) were closed with
+  commits that touched unrelated files or made cosmetic edits that passed a
+  naive heuristic without doing the structural work. Pattern-match on commit
+  messages is not verification — running the actual commands is.
 
 Copy-paste skeleton:
 
