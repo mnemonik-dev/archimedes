@@ -14,6 +14,31 @@ from statistics import mean
 import lizard
 
 
+def _max_nesting(source: str) -> float:
+    """Average max nesting depth across all functions via AST."""
+    depths = []
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return 0.0
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            depths.append(_node_depth(node))
+    return round(mean(depths), 1) if depths else 0.0
+
+
+def _node_depth(root: ast.AST, _nesting_nodes=(ast.For, ast.While, ast.If, ast.With, ast.Try, ast.ExceptHandler)) -> int:
+    max_d = [0]
+    def walk(node, d):
+        if isinstance(node, _nesting_nodes):
+            d += 1
+            max_d[0] = max(max_d[0], d)
+        for child in ast.iter_child_nodes(node):
+            walk(child, d)
+    walk(root, 0)
+    return max_d[0]
+
+
 def _is_recursive(source: str, name: str) -> bool:
     try:
         for node in ast.walk(ast.parse(source)):
@@ -53,11 +78,12 @@ def _collect(files: list[str], root: str = "") -> dict:
         source = p.read_text(errors="replace") if is_py else ""
         for fn in info.function_list:
             cc_values.append(fn.cyclomatic_complexity)
-            nesting_values.append(getattr(fn, "max_nesting_depth", 0))
             if is_py and _is_recursive(source, fn.name):
                 recursive_count += 1
             if is_py and _is_orphan(str(p), fn.name):
                 orphan_count += 1
+        if is_py and source:
+            nesting_values.append(_max_nesting(source))
 
     return {
         "cc":        round(mean(cc_values), 1) if cc_values else 0,
@@ -77,8 +103,9 @@ def _fmt_cc(v: float) -> str:
 
 def _fmt_delta(main_v: float, pr_v: float) -> str:
     d = round(pr_v - main_v, 1)
-    if d > 0:  return f"+{d} ⚠️"
-    if d < 0:  return f"{d} ✅"
+    if d > 1.0:  return f"+{d} ⚠️"
+    if d > 0:    return f"+{d}"
+    if d < 0:    return f"{d} ✅"
     return "—"
 
 
