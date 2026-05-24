@@ -168,7 +168,12 @@ class TestUpsertEncryption:
 
             mock_session.add = capture_add
             import asyncio
-            result = asyncio.get_event_loop().run_until_complete(upsert_profile(payload))
+            from starlette.requests import Request as StarletteRequest
+            from starlette.responses import Response as StarletteResponse
+            from unittest.mock import MagicMock as _MagicMock
+            mock_req = _MagicMock(spec=StarletteRequest)
+            mock_resp = _MagicMock(spec=StarletteResponse)
+            result = asyncio.get_event_loop().run_until_complete(upsert_profile(payload, request=mock_req, response=mock_resp))
 
         # The stored email must be encrypted (not plaintext)
         assert added_obj is not None
