@@ -16,9 +16,49 @@ import json
 import os
 import time
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi.testclient import TestClient
+
+from archimedes.db import get_session, init_db
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _use_tmp_db(tmp_path, monkeypatch):
+    """Point the DB at a temp SQLite so we don't pollute the real one."""
+    db_path = tmp_path / "test_kb_artifacts.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    init_db()
+    yield
+
+
+@pytest.fixture()
+def client(tmp_path, monkeypatch):
+    """TestClient with mocked chain client (no testnet calls)."""
+    with patch("archimedes.chain.client.chain_client") as mock_chain, \
+         patch("archimedes.chain.executor.chain_executor") as mock_executor:
+        mock_chain.is_connected = AsyncMock(return_value=False)
+        mock_chain.send_transaction = AsyncMock(return_value="0xmock_tx_hash")
+        mock_chain.usdc_address = "0x3600000000000000000000000000000000000000"
+        mock_chain.synthetic_factory_address = ""
+        mock_chain.amm_router_address = "0xd5b829f9d364a8bbe1caf6c8b19cb05371b178f4"
+        mock_chain.vault_factory_address = "0xca873414070844aeb98b0bf1051f81969c79cc32"
+        mock_chain.reasoning_trace_registry_address = "0x42d8a23edb897cbee203e9fa197eb05ab5106ca6"
+        mock_chain.asset_registry_address = "0x2d44550711137916df6175587d17886281a0fbc7"
+
+        mock_executor.execute_swap = AsyncMock(return_value={"tx_hash": "0xmock_swap"})
+        mock_executor.get_balance = AsyncMock(return_value=1000000)
+        mock_executor.get_portfolio = AsyncMock(return_value={})
+
+        from archimedes.main import app
+        tc = TestClient(app)
+        yield tc
 
 
 # ---------------------------------------------------------------------------

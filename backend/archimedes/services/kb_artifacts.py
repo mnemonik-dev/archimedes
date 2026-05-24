@@ -244,7 +244,10 @@ def compute_and_cache_umap_projection(
     embeddings,
     clusters: dict[str, str] | None = None,
 ) -> list[dict]:
-    """Compute UMAP 2D projection from embeddings and cache it.
+    """Compute 2D projection from embeddings and cache it.
+
+    Tries in order: UMAP → PCA (sklearn) → randomized projection (numpy only).
+    The last fallback requires *only* numpy and always works.
 
     Parameters
     ----------
@@ -262,17 +265,51 @@ def compute_and_cache_umap_projection(
     """
     import numpy as np
 
-    # UMAP — try importing; if not available, fall back to simple PCA
+    n, d = embeddings.shape
+
+    # Try UMAP (best quality, requires umap-learn)
     try:
         from umap import UMAP
-        reducer = UMAP(n_components=2, n_neighbors=15, min_dist=0.1, random_state=42)
+        reducer = UMAP(n_components=2, n_neighbors=min(15, n - 1), min_dist=0.1, random_state=42)
         coords = reducer.fit_transform(embeddings)
     except ImportError:
-        logger.info("kb_artifacts: umap-learn not installed, using PCA fallback")
+        pass
+    else:
+        coords = _finalize_projection(ids, coords, clusters)
+        _cache_set("umap_projection", coords)
+        return coords
+
+    # Try PCA (good quality, requires scikit-learn)
+    try:
         from sklearn.decomposition import PCA
         reducer = PCA(n_components=2, random_state=42)
         coords = reducer.fit_transform(embeddings)
+    except ImportError:
+        pass
+    else:
+        logger.info("kb_artifacts: using PCA (scikit-learn) for 2D projection")
+        coords = _finalize_projection(ids, coords, clusters)
+        _cache_set("umap_projection", coords)
+        return coords
 
+    # Pure-numpy fallback: randomized projection (Gaussian)
+    logger.info("kb_artifacts: using random projection (numpy-only) for 2D projection")
+    rng = np.random.RandomState(42)
+    proj = rng.randn(d, 2).astype(embeddings.dtype)
+    proj /= np.linalg.norm(proj, axis=0, keepdims=True)  # normalize columns
+    coords = embeddings @ proj
+    coords = _finalize_projection(ids, coords, clusters)
+    _cache_set("umap_projection", coords)
+    return coords
+
+
+def _finalize_projection(
+    ids: list[str],
+    coords,
+    clusters: dict[str, str] | None,
+) -> list[dict]:
+    """Convert raw 2D coordinates to list of point dicts."""
+    import numpy as np
     points = []
     for i, arxiv_id in enumerate(ids):
         points.append({
@@ -281,6 +318,4 @@ def compute_and_cache_umap_projection(
             "y": float(coords[i, 1]),
             "cluster_id": clusters.get(arxiv_id) if clusters else None,
         })
-
-    _cache_set("umap_projection", points)
     return points
