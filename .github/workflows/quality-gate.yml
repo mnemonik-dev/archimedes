@@ -1,0 +1,69 @@
+# Quality gate — runs on every PR to main.
+#
+# Hard blocks:
+#   backend-tests  — pytest unit suite (no DB/Redis required)
+#   lint           — ruff check + ruff format --check
+#   frontend-lint  — eslint via npm run lint
+#
+# Agent-only (t2o2 PRs):
+#   coverage-gate  — fails if unit coverage drops below 60%
+
+name: Quality Gate
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  backend-tests:
+    name: Backend — unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install --quiet -r backend/requirements.txt "pytest>=8.3" "pytest-asyncio>=0.24" "pytest-cov>=5.0"
+      - name: Test
+        run: pytest -m "not integration" --tb=short -q
+
+  lint:
+    name: Backend — ruff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install --quiet ruff
+      - run: ruff check backend/archimedes
+      - run: ruff format --check backend/archimedes
+
+  frontend-lint:
+    name: Frontend — eslint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - run: cd ui && npm ci --quiet
+      - run: cd ui && npm run lint
+
+  coverage-gate:
+    name: Backend — coverage (agent PRs only)
+    if: github.event.pull_request.user.login == 't2o2'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install --quiet -r backend/requirements.txt "pytest>=8.3" "pytest-asyncio>=0.24" "pytest-cov>=5.0"
+      - run: pytest -m "not integration" --cov=archimedes --cov-fail-under=60 --tb=short -q

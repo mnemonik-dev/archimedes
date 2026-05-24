@@ -21,24 +21,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  push-ci-images:
-    name: Push CI images to GHCR
-    runs-on: ubuntu-latest
-    permissions:
-      packages: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@v6
-        with:
-          context: .github/docker/complexity-gate
-          push: true
-          tags: ghcr.io/${{ github.repository_owner }}/archimedes-complexity-gate:latest
-
   deploy:
     name: Deploy
     runs-on: ubuntu-latest
