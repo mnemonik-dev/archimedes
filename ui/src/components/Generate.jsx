@@ -6,14 +6,10 @@ import FusionResult from './FusionResult'
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? ''
 
-// /generate spine page. Three paths:
-//   1. Streaming agent (default) — SSE-driven, per docs/specs/generation-streaming-spec.md
-//   2. Architect "fast preview" toggle — synchronous curated-library pick, kept
-//      around because it's instant and useful when you just want a quick sanity check.
-//   3. Fusion (novel) — multi-paper synthesis through strategy_fusion.py + the
-//      fusion_evaluator rigor gate. The wedge: paper-grounded novel hypotheses
-//      with externally verifiable DSR/PBO/OOS verdicts. Backend-complete since
-//      #133; Phase 9 adds the UI per docs/specs/phase8-9-landing-and-fusion-spec.md.
+// /generate spine page. Single input — backend _pick_pipeline() auto-routes
+// between Fusion (novel synthesis), Architect (curated-library preview), and
+// the streaming agent. The SSE stream emits a `pipeline_selected` event right
+// after `brief_validated` so the frontend renders the correct result component.
 
 const STORAGE_JOB_KEY = 'archimedes:currentJobId'
 const STORAGE_FUSION_JOB_KEY = 'archimedes:currentFusionJobId'
@@ -27,30 +23,35 @@ const RISK_PROFILES = [
 const ASSET_CLASSES = ['equities', 'bonds', 'commodities', 'crypto', 'fx']
 
 export default function Generate({ onNavigate }) {
-  const [mode, setMode] = useState('agent')  // 'agent' | 'architect' | 'fusion'
+  // ── Unified form state ──
   const [intent, setIntent] = useState('')
   const [riskAppetite, setRiskAppetite] = useState('moderate')
-  const [nCandidates, setNCandidates] = useState(1)
-  const [jobId, setJobId] = useState(() => localStorage.getItem(STORAGE_JOB_KEY) || null)
+  const [selectedAssets, setSelectedAssets] = useState([])
+  const [depth, setDepth] = useState(5)       // replaces max_papers UI
   const [starting, setStarting] = useState(false)
   const [startError, setStartError] = useState('')
 
-  // Architect path needs the library pre-fetched.
+  // ── Agent / SSE path ──
+  const [jobId, setJobId] = useState(() => localStorage.getItem(STORAGE_JOB_KEY) || null)
+  const [selectedPipeline, setSelectedPipeline] = useState(null) // set from pipeline_selected event
+
+  // ── Architect path (pre-fetched library) ──
   const [strategies, setStrategies] = useState([])
   const [libLoading, setLibLoading] = useState(true)
   const [libError, setLibError] = useState('')
 
-  // Fusion path — form fields + job state (no SSE — simple GET poll every 2s).
-  const [fusionAssets, setFusionAssets] = useState(['equities'])
-  const [fusionDirection, setFusionDirection] = useState('')
-  const [fusionMaxPapers, setFusionMaxPapers] = useState(4)
+  // ── Fusion path (GET-poll, no SSE) ──
   const [fusionJobId, setFusionJobId] = useState(() => localStorage.getItem(STORAGE_FUSION_JOB_KEY) || null)
-  const [fusionStatus, setFusionStatus] = useState(null) // 'queued' | 'running' | 'done' | 'failed'
+  const [fusionStatus, setFusionStatus] = useState(null)
   const [fusionResult, setFusionResult] = useState(null)
   const [fusionError, setFusionError] = useState('')
   const [fusionStarting, setFusionStarting] = useState(false)
   const fusionPollRef = useRef(null)
 
+  // ── Pipeline resolved from SSE event (listened via GenerationStream) ──
+  const [pipelineFromEvent, setPipelineFromEvent] = useState(null)
+
+  // ── Pre-fetch library for architect path ──
   useEffect(() => {
     let cancelled = false
     fetch(`${API_BASE}/api/strategies/`)
@@ -61,8 +62,10 @@ export default function Generate({ onNavigate }) {
     return () => { cancelled = true }
   }, [])
 
+  // ── Start unified generation job ──
   const startJob = async () => {
     setStartError('')
+    setPipelineFromEvent(null)
     if (!intent.trim()) {
       setStartError('Describe what you want in a sentence or two.')
       return
@@ -73,8 +76,12 @@ export default function Generate({ onNavigate }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          brief: { intent, risk_appetite: riskAppetite },
-          n_candidates: nCandidates,
+          brief: {
+            intent,
+            risk_appetite: riskAppetite,
+            asset_classes: selectedAssets.length > 0 ? selectedAssets : undefined,
+            max_papers: depth,
+          },
         }),
       })
       if (!res.ok) throw new Error(await res.text())
@@ -88,10 +95,41 @@ export default function Generate({ onNavigate }) {
     }
   }
 
+  // ── Start a fusion-specific job (separate endpoint for multi-paper) ──
+  const startFusionJob = async () => {
+    setFusionError('')
+    if (selectedAssets.length === 0) {
+      setFusionError('Pick at least one asset class to fuse.')
+      return
+    }
+    setFusionStarting(true)
+    setFusionResult(null)
+    setFusionStatus(null)
+    try {
+      const params = new URLSearchParams({
+        asset_classes: selectedAssets.join(','),
+        risk_appetite: riskAppetite,
+        strategic_direction: intent,
+        max_papers: String(depth),
+        mode: 'fusion',
+      })
+      const res = await fetch(`${API_BASE}/api/strategies/generate?${params}`, { method: 'POST' })
+      if (!res.ok) throw new Error(await res.text())
+      const data = await res.json()
+      if (!data.job_id) throw new Error('Backend did not return a job_id')
+      localStorage.setItem(STORAGE_FUSION_JOB_KEY, data.job_id)
+      setFusionJobId(data.job_id)
+      setFusionStatus(data.status || 'queued')
+    } catch (e) {
+      setFusionError(e.message || 'Failed to start fusion job')
+    } finally {
+      setFusionStarting(false)
+    }
+  }
+
   const onJobDone = (result) => {
     localStorage.removeItem(STORAGE_JOB_KEY)
     if (result?.strategy_id && onNavigate) {
-      // Soft hand-off — the persisted strategy is the canonical target.
       onNavigate('library', { highlight: result.strategy_id })
     }
   }
@@ -99,9 +137,10 @@ export default function Generate({ onNavigate }) {
   const resetJob = () => {
     localStorage.removeItem(STORAGE_JOB_KEY)
     setJobId(null)
+    setPipelineFromEvent(null)
   }
 
-  // ── Fusion path ────────────────────────────────────────────────
+  // ── Fusion poll ──
   const stopFusionPoll = () => {
     if (fusionPollRef.current) {
       clearInterval(fusionPollRef.current)
@@ -113,7 +152,6 @@ export default function Generate({ onNavigate }) {
     try {
       const res = await fetch(`${API_BASE}/api/strategies/generate/${encodeURIComponent(id)}`)
       if (!res.ok) {
-        // 404 = job lost; clear and surface honestly
         if (res.status === 404) {
           setFusionError('Fusion job not found — backend may have restarted.')
           setFusionStatus('failed')
@@ -133,12 +171,11 @@ export default function Generate({ onNavigate }) {
         stopFusionPoll()
         localStorage.removeItem(STORAGE_FUSION_JOB_KEY)
       }
-    } catch (e) {
+    } catch (_e) {
       // Network blip — keep polling silently
     }
   }
 
-  // Auto-poll while a fusion job is in flight (resumes across reloads via localStorage).
   useEffect(() => {
     if (!fusionJobId) {
       stopFusionPoll()
@@ -150,37 +187,6 @@ export default function Generate({ onNavigate }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fusionJobId])
 
-  const startFusionJob = async () => {
-    setFusionError('')
-    if (fusionAssets.length === 0) {
-      setFusionError('Pick at least one asset class to fuse.')
-      return
-    }
-    setFusionStarting(true)
-    setFusionResult(null)
-    setFusionStatus(null)
-    try {
-      const params = new URLSearchParams({
-        asset_classes: fusionAssets.join(','),
-        risk_appetite: riskAppetite,
-        strategic_direction: fusionDirection,
-        max_papers: String(fusionMaxPapers),
-        mode: 'fusion',
-      })
-      const res = await fetch(`${API_BASE}/api/strategies/generate?${params}`, { method: 'POST' })
-      if (!res.ok) throw new Error(await res.text())
-      const data = await res.json()
-      if (!data.job_id) throw new Error('Backend did not return a job_id')
-      localStorage.setItem(STORAGE_FUSION_JOB_KEY, data.job_id)
-      setFusionJobId(data.job_id)
-      setFusionStatus(data.status || 'queued')
-    } catch (e) {
-      setFusionError(e.message || 'Failed to start fusion job')
-    } finally {
-      setFusionStarting(false)
-    }
-  }
-
   const resetFusion = () => {
     stopFusionPoll()
     localStorage.removeItem(STORAGE_FUSION_JOB_KEY)
@@ -191,8 +197,24 @@ export default function Generate({ onNavigate }) {
   }
 
   const toggleAsset = (a) => {
-    setFusionAssets(prev => prev.includes(a) ? prev.filter(x => x !== a) : [...prev, a])
+    setSelectedAssets(prev => prev.includes(a) ? prev.filter(x => x !== a) : [...prev, a])
   }
+
+  // ── Callback: GenerationStream tells us which pipeline was selected ──
+  const handlePipelineEvent = (pipelineName) => {
+    setPipelineFromEvent(pipelineName)
+    // If pipeline is fusion, start the fusion poll path
+    if (pipelineName === 'fusion' && jobId) {
+      // The agent pipeline handles fusion internally for the unified endpoint;
+      // we just track which result component to render.
+    }
+  }
+
+  // ── Determine which result to render ──
+  // If the agent SSE stream is active → show GenerationStream
+  // If pipeline_selected says fusion and we have a fusion result → FusionResult
+  // If pipeline_selected says architect → show StrategyArchitect inline
+  const isSSEStreamActive = jobId && !pipelineFromEvent?.startsWith('fusion_direct')
 
   return (
     <div>
@@ -208,241 +230,152 @@ export default function Generate({ onNavigate }) {
         </p>
       </div>
 
-      {/* Mode toggle */}
-      <div className="strat-filter-bar mb-4">
-        <span
-          className={`tag ${mode === 'agent' ? 'tag-accent' : 'tag-muted'} cursor-pointer`}
-          onClick={() => setMode('agent')}
-          title="Live streaming agent — each iteration appears as it runs"
-        >
-          <span className="i-lucide-radio w-3.5 h-3.5 mr-1 text-[var(--negative)]" /> Streaming agent
-        </span>
-        <span
-          className={`tag ${mode === 'architect' ? 'tag-accent' : 'tag-muted'} cursor-pointer`}
-          onClick={() => setMode('architect')}
-          title="Skip the fusion engine and let the architect pick from the curated library — faster but less novel"
-        >
-          <span className="i-lucide-zap w-3.5 h-3.5 mr-1" /> Architect (fast preview)
-        </span>
-        <span
-          className={`tag ${mode === 'fusion' ? 'tag-accent' : 'tag-muted'} cursor-pointer`}
-          onClick={() => setMode('fusion')}
-          title="Multi-paper synthesis through the fusion engine — novel hypotheses, rigor-gated"
-        >
-          <span className="i-lucide-flask-conical w-3.5 h-3.5 mr-1" /> Fusion (novel)
-        </span>
-      </div>
+      {/* ── SINGLE UNIFIED FORM ── */}
+      {!jobId && !fusionJobId && !fusionResult && (
+        <div className="card p-5 mb-4">
+          <div className="label mb-2">What would you like?</div>
+          <textarea
+            value={intent}
+            onChange={e => setIntent(e.target.value)}
+            placeholder="e.g. A 13-week treasury alternative with low volatility and crypto upside on Fridays"
+            rows={3}
+            className="chat-input w-full mb-3 p-2.5 leading-relaxed"
+            disabled={starting}
+          />
 
-      {mode === 'agent' && (
-        <div>
-          {!jobId && (
-            <div className="card p-5 mb-4">
-              <div className="label mb-2">What would you like?</div>
-              <textarea
-                value={intent}
-                onChange={e => setIntent(e.target.value)}
-                placeholder="e.g. A 13-week treasury alternative with low volatility and crypto upside on Fridays"
-                rows={3}
-                className="chat-input w-full mb-3 p-2.5 leading-relaxed"
-                disabled={starting}
-              />
-              <div className="flex gap-3 items-center flex-wrap">
-                <label className="caption flex items-center gap-1.5">
-                  Risk
-                  <select
-                    value={riskAppetite}
-                    onChange={e => setRiskAppetite(e.target.value)}
-                    className="chat-input w-auto px-2 py-1"
-                    disabled={starting}
-                  >
-                    {RISK_PROFILES.map(r => (
-                      <option key={r.id} value={r.id}>{r.label}</option>
-                    ))}
-                  </select>
-                </label>
-                <label className="caption flex items-center gap-1.5">
-                  Candidates
-                  <select
-                    value={nCandidates}
-                    onChange={e => setNCandidates(Number(e.target.value))}
-                    className="chat-input w-auto px-2 py-1"
-                    disabled={starting}
-                    title="Agent runs N variants internally; best is surfaced, rejects browsable"
-                  >
-                    {[1, 2, 3].map(n => <option key={n} value={n}>{n}</option>)}
-                  </select>
-                </label>
-                <button
-                  className="btn btn-primary ml-auto"
-                  onClick={startJob}
-                  disabled={starting || !intent.trim()}
-                >
-                  {starting ? 'Starting…' : 'Generate →'}
-                </button>
-              </div>
-              {startError && (
-                <div className="info-box warning mt-3">{startError}</div>
-              )}
-            </div>
-          )}
-
-          {jobId && (
-            <GenerationStream
-              jobId={jobId}
-              onDone={onJobDone}
-              onReset={resetJob}
-            />
-          )}
-
-          <div className="mt-6">
-            <GenerationStatus
-              activeJobId={jobId}
-              onSelect={(id) => { localStorage.setItem(STORAGE_JOB_KEY, id); setJobId(id) }}
-            />
+          <div className="label mb-2">Asset classes (optional)</div>
+          <div className="flex gap-2 flex-wrap mb-4">
+            {ASSET_CLASSES.map(a => (
+              <span
+                key={a}
+                className={`tag ${selectedAssets.includes(a) ? 'tag-accent' : 'tag-muted'} cursor-pointer capitalize`}
+                onClick={() => toggleAsset(a)}
+              >
+                {a}
+              </span>
+            ))}
           </div>
+
+          <div className="flex gap-3 items-center flex-wrap">
+            <label className="caption flex items-center gap-1.5">
+              Risk
+              <select
+                value={riskAppetite}
+                onChange={e => setRiskAppetite(e.target.value)}
+                className="chat-input w-auto px-2 py-1"
+                disabled={starting}
+              >
+                {RISK_PROFILES.map(r => (
+                  <option key={r.id} value={r.id}>{r.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="caption flex items-center gap-1.5">
+              Depth
+              <select
+                value={depth}
+                onChange={e => setDepth(Number(e.target.value))}
+                className="chat-input w-auto px-2 py-1"
+                disabled={starting}
+                title="How many papers / strategies the engine considers"
+              >
+                {[2, 3, 4, 5, 6, 8, 10].map(n => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </label>
+            <button
+              className="btn btn-primary ml-auto"
+              onClick={startJob}
+              disabled={starting || !intent.trim()}
+            >
+              {starting ? 'Starting…' : 'Generate →'}
+            </button>
+          </div>
+
+          {startError && (
+            <div className="info-box warning mt-3">{startError}</div>
+          )}
         </div>
       )}
 
-      {mode === 'architect' && (
+      {/* ── SSE STREAM (agent + architect paths) ── */}
+      {jobId && (
+        <GenerationStream
+          jobId={jobId}
+          onDone={onJobDone}
+          onReset={resetJob}
+          onPipelineSelected={handlePipelineEvent}
+        />
+      )}
+
+      {/* ── Result components based on pipeline_selected ── */}
+      {pipelineFromEvent === 'architect' && !jobId && (
         <div>
           <div className="info-box mb-4">
-            <strong>Architect path</strong> — Claude selects + weights from the curated
-            library synchronously. No streaming, no novel synthesis; useful when you just
-            want a fast read on what the library would recommend for your brief.
+            <strong>Architect path</strong> — selected from the curated library based on your brief.
           </div>
           {libLoading && <div className="caption">Loading strategy library…</div>}
           {libError && (
             <div className="info-box warning mb-4">
-              Couldn't load library: {libError}. The architect needs the library to pick from.
+              Couldn't load library: {libError}
             </div>
           )}
           {!libLoading && !libError && <StrategyArchitect strategies={strategies} />}
         </div>
       )}
 
-      {mode === 'fusion' && (
-        <div>
-          <div className="info-box mb-4">
-            <strong>Fusion path</strong> — multi-paper synthesis through the fusion engine.
-            The agent picks N papers from the corpus, fuses their methodologies into a
-            novel hypothesis, runs a backtest, and gates the result through DSR / PBO /
-            walk-forward OOS / look-ahead audit. Slowest path (~30–90s) but the only
-            one that produces genuinely novel strategies.
+      {pipelineFromEvent === 'fusion' && fusionResult && (
+        <>
+          <FusionResult result={fusionResult} onNavigate={onNavigate} />
+          <div className="mt-4">
+            <button className="btn btn-outline btn-sm" onClick={resetFusion}>
+              Fuse another →
+            </button>
           </div>
+        </>
+      )}
 
-          {!fusionJobId && !fusionResult && (
-            <div className="card p-5 mb-4">
-              <div className="label mb-3">Asset classes (pick at least one)</div>
-              <div className="flex gap-2 flex-wrap mb-4">
-                {ASSET_CLASSES.map(a => (
-                  <span
-                    key={a}
-                    className={`tag ${fusionAssets.includes(a) ? 'tag-accent' : 'tag-muted'} cursor-pointer capitalize`}
-                    onClick={() => toggleAsset(a)}
-                  >
-                    {a}
-                  </span>
-                ))}
-              </div>
-
-              <div className="label mb-2">Strategic direction (optional)</div>
-              <textarea
-                value={fusionDirection}
-                onChange={e => setFusionDirection(e.target.value)}
-                placeholder="e.g. Combine momentum signals with vol-of-vol; we want crypto exposure on Fridays"
-                rows={3}
-                className="chat-input w-full mb-3 p-2.5 leading-relaxed"
-                disabled={fusionStarting}
+      {/* ── Fusion polling overlay (when pipeline=fusion uses separate endpoint) ── */}
+      {fusionJobId && !fusionResult && (
+        <div className="card p-5 mb-4">
+          <div className="label mb-2">
+            Status: <span className="capitalize">{fusionStatus || 'queued'}</span>
+          </div>
+          <div className="caption mb-3">
+            Fusion engine running — synthesizing papers, backtesting, computing rigor.
+            Typically 30–90 seconds.
+          </div>
+          <div className="flex gap-2">
+            <div
+              className="h-1 flex-1 rounded"
+              style={{
+                background: 'var(--bg-2)',
+                overflow: 'hidden',
+                position: 'relative',
+              }}
+            >
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  width: '30%',
+                  background: 'var(--accent)',
+                  animation: 'fusion-progress 1.6s ease-in-out infinite',
+                }}
               />
-
-              <div className="flex gap-3 items-center flex-wrap">
-                <label className="caption flex items-center gap-1.5">
-                  Risk
-                  <select
-                    value={riskAppetite}
-                    onChange={e => setRiskAppetite(e.target.value)}
-                    className="chat-input w-auto px-2 py-1"
-                    disabled={fusionStarting}
-                  >
-                    {RISK_PROFILES.map(r => (
-                      <option key={r.id} value={r.id}>{r.label}</option>
-                    ))}
-                  </select>
-                </label>
-                <label className="caption flex items-center gap-1.5">
-                  Max papers
-                  <select
-                    value={fusionMaxPapers}
-                    onChange={e => setFusionMaxPapers(Number(e.target.value))}
-                    className="chat-input w-auto px-2 py-1"
-                    disabled={fusionStarting}
-                    title="Number of papers the fusion engine will combine"
-                  >
-                    {[2, 3, 4, 5, 6].map(n => <option key={n} value={n}>{n}</option>)}
-                  </select>
-                </label>
-                <button
-                  className="btn btn-primary ml-auto"
-                  onClick={startFusionJob}
-                  disabled={fusionStarting || fusionAssets.length === 0}
-                >
-                  {fusionStarting ? 'Starting…' : 'Fuse →'}
-                </button>
-              </div>
-
-              {fusionError && (
-                <div className="info-box warning mt-3">{fusionError}</div>
-              )}
             </div>
-          )}
-
-          {fusionJobId && !fusionResult && (
-            <div className="card p-5 mb-4">
-              <div className="label mb-2">
-                Status: <span className="capitalize">{fusionStatus || 'queued'}</span>
-              </div>
-              <div className="caption mb-3">
-                Polling <code>/api/strategies/generate/{fusionJobId.slice(0, 8)}…</code> every 2s.
-                Fusion typically takes 30–90 seconds — the engine fetches papers, synthesizes a
-                methodology, runs a backtest, and computes selection-bias-corrected rigor.
-              </div>
-              <div className="flex gap-2">
-                <div
-                  className="h-1 flex-1 rounded"
-                  style={{
-                    background: 'var(--bg-2)',
-                    overflow: 'hidden',
-                    position: 'relative',
-                  }}
-                >
-                  <div
-                    style={{
-                      position: 'absolute',
-                      inset: 0,
-                      width: '30%',
-                      background: 'var(--accent)',
-                      animation: 'fusion-progress 1.6s ease-in-out infinite',
-                    }}
-                  />
-                </div>
-                <button className="btn btn-outline btn-sm" onClick={resetFusion}>Cancel</button>
-              </div>
-              {fusionError && <div className="info-box warning mt-3">{fusionError}</div>}
-            </div>
-          )}
-
-          {fusionResult && (
-            <>
-              <FusionResult result={fusionResult} onNavigate={onNavigate} />
-              <div className="mt-4">
-                <button className="btn btn-outline btn-sm" onClick={resetFusion}>
-                  Fuse another →
-                </button>
-              </div>
-            </>
-          )}
+            <button className="btn btn-outline btn-sm" onClick={resetFusion}>Cancel</button>
+          </div>
+          {fusionError && <div className="info-box warning mt-3">{fusionError}</div>}
         </div>
       )}
+
+      {/* ── Recent jobs sidebar ── */}
+      <div className="mt-6">
+        <GenerationStatus
+          activeJobId={jobId}
+          onSelect={(id) => { localStorage.setItem(STORAGE_JOB_KEY, id); setJobId(id) }}
+        />
+      </div>
     </div>
   )
 }

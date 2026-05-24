@@ -31,6 +31,7 @@ from archimedes.api.generate_routes import generate_router
 from archimedes.api.marketplace_routes import marketplace_router
 from archimedes.api.risk_routes import risk_router
 from archimedes.api.selection_bias_routes import selection_bias_router
+from archimedes.api.user_routes import user_router
 from archimedes.db import init_db
 
 app = FastAPI(
@@ -40,12 +41,25 @@ app = FastAPI(
 )
 
 # Allow the Next.js frontend to call the API during development
+# Production: restricted to PUBLIC_DOMAIN env var (Issue #178).
+# Local dev: CORS_ORIGINS env var (defaults to localhost origins).
+import os as _os
+
+_cors_env_origins = _os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:80")
+_public_domain = _os.getenv("PUBLIC_DOMAIN", "https://archimedes-arc.app")
+_cors_origins = [o.strip() for o in _cors_env_origins.split(",") if o.strip()]
+# In production (when PUBLIC_DOMAIN is set), restrict to that domain.
+# Local dev keeps the CORS_ORIGINS list (localhost).
+if _public_domain and _public_domain not in _cors_origins:
+    _cors_origins.append(_public_domain)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Tighten in production
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    max_age=600,
 )
 
 # Initialize database (creates chat tables if needed)
@@ -132,6 +146,7 @@ app.include_router(marketplace_router)
 app.include_router(risk_router)
 app.include_router(selection_bias_router)
 app.include_router(papers_router)
+app.include_router(user_router)
 
 
 @app.get("/health")

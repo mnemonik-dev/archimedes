@@ -1,9 +1,11 @@
-"""Composes oracle + history data into the /api/explore/assets response.
+"""Composes on-chain oracle + history data into the /api/explore/assets response.
 
-Wraps the existing yfinance-backed history fetch in a 30-second TTL cache
+Primary price source: on-chain ``PriceOracle.getPrice(token)`` via ``chain_client``.
+Fall back to yfinance histories for change windows / vol and as a price
+fallback when the oracle is stale or unavailable.  30-second TTL cache
 (per the Phase 3a spec — page must load <1s without synchronous on-chain
-reads). The plain-English explanations live in this module so the route
-handler stays a thin facade.
+reads on cache hit). The plain-English explanations live in this module so
+the route handler stays a thin facade.
 """
 
 from __future__ import annotations
@@ -27,7 +29,8 @@ logger = logging.getLogger(__name__)
 
 _CACHE_TTL_SECONDS = 30
 _HISTORY_LOOKBACK = "3mo"  # enough for 30d realized vol + change windows
-_STALE_WINDOW_SECONDS = 24 * 3600  # >24h since last bar → "stale"
+_STALE_WINDOW_SECONDS = 5 * 60  # >5 min since oracle push → "stale" (per issue #168)
+_ORACLE_READ_TIMEOUT = 5  # seconds per individual chain read
 
 
 # ── Plain-English explanations ────────────────────────────────────────────
@@ -96,64 +99,148 @@ def _realized_vol_annual(prices: list[float], window: int = 30) -> float | None:
 # ── Service ───────────────────────────────────────────────────────────────
 
 
-class AssetMarketService:
-    """Composes per-synth market stats from histories. 30s TTL cache."""
+    # ── On-chain oracle reads ────────────────────────────────────────────
 
-    def __init__(self) -> None:
-        self._cache: ExploreAssetsResponse | None = None
-        self._cache_ts: float = 0.0
-        self._cache_history: dict[str, ExploreHistoryResponse] = {}
+    async def _read_oracle_prices(
+        self, synth_symbols: list[str],
+    ) -> dict[str, dict[str, Any]]:
+        """Read current prices from on-chain PriceOracle for each synth.
+
+        Returns ``{symbol: {price: float, updated_at: int, stale: bool}}``.
+        Symbols missing from oracle config or failing chain reads are omitted.
+        """
+        try:
+            from archimedes.chain.client import chain_client
+            import json
+            from pathlib import Path
+
+            oracle_addrs = chain_client.settings.oracle_addresses or {}
+            synth_addrs = chain_client.settings.synth_addresses or {}
+            abi_path = Path(chain_client.settings.abi_dir) / "IPriceOracle.json"
+            oracle_abi = json.loads(abi_path.read_text()) if abi_path.exists() else []
+        except Exception as exc:
+            logger.warning("explore: oracle setup failed: %s", exc)
+            return {}
+
+        if not oracle_abi:
+            logger.warning("explore: IPriceOracle ABI not found")
+            return {}
+
+        results: dict[str, dict[str, Any]] = {}
+        now_ts = time.time()
+
+        for symbol in synth_symbols:
+            oracle_addr = oracle_addrs.get(symbol)
+            synth_addr = synth_addrs.get(symbol)
+            # getPrice takes the synth token address, called on the oracle contract
+            if not oracle_addr or not synth_addr:
+                continue
+            try:
+                contract = chain_client.w3.eth.contract(
+                    address=chain_client.to_checksum(oracle_addr),
+                    abi=oracle_abi,
+                )
+                price_raw, updated_at = await asyncio.wait_for(
+                    contract.functions.getPrice(
+                        chain_client.to_checksum(synth_addr)
+                    ).call(),
+                    timeout=_ORACLE_READ_TIMEOUT,
+                )
+                price_usd = float(price_raw) / 1e6  # 6 decimals per PriceOracle.sol
+                stale = (now_ts - updated_at) > _STALE_WINDOW_SECONDS
+                results[symbol] = {
+                    "price": price_usd,
+                    "updated_at": updated_at,
+                    "stale": stale,
+                    "oracle_address": oracle_addr,
+                }
+            except asyncio.TimeoutError:
+                logger.debug("explore: oracle read timeout for %s", symbol)
+            except Exception as exc:
+                logger.debug("explore: oracle read failed for %s: %s", symbol, exc)
+
+        return results
+
+    # ── Main list ─────────────────────────────────────────────────────────
 
     async def list_assets(self) -> ExploreAssetsResponse:
         now = time.time()
         if self._cache and (now - self._cache_ts) < _CACHE_TTL_SECONDS:
             return self._cache
 
-        # Fetch in a thread — yfinance is blocking and slow.
         try:
             from archimedes.services.strategy_signal_evaluator import (
                 DEFAULT_SCAN_UNIVERSE, GLOBAL_ASSETS, _fetch_price_histories,
             )
-            histories = await asyncio.wait_for(
-                asyncio.to_thread(_fetch_price_histories, DEFAULT_SCAN_UNIVERSE, _HISTORY_LOOKBACK),
-                timeout=20.0,
-            )
+        except Exception as exc:
+            logger.warning("explore: import failed: %s", exc)
+            DEFAULT_SCAN_UNIVERSE, GLOBAL_ASSETS, _fetch_price_histories = [], {}, None
+
+        # 1. Read on-chain oracle prices (primary source)
+        oracle_data = await self._read_oracle_prices(DEFAULT_SCAN_UNIVERSE)
+
+        # 2. Fetch yfinance histories for change windows / vol (fallback)
+        histories: dict[str, Any] = {}
+        try:
+            if _fetch_price_histories is not None:
+                histories = await asyncio.wait_for(
+                    asyncio.to_thread(_fetch_price_histories, DEFAULT_SCAN_UNIVERSE, _HISTORY_LOOKBACK),
+                    timeout=20.0,
+                )
         except Exception as exc:
             logger.warning("explore: history fetch failed: %s", exc)
-            histories = {}
 
-        try:
-            from archimedes.chain.client import chain_client
-            oracle_addrs = chain_client.settings.oracle_addresses or {}
-            synth_addrs = chain_client.settings.synth_addresses or {}
-        except Exception:
-            oracle_addrs, synth_addrs = {}, {}
-
+        # Build items: merge oracle price + yfinance change/vol
         items: list[AssetExploreItem] = []
         nowstamp = datetime.now(timezone.utc).isoformat()
-        for synth, hist in histories.items():
-            prices = hist.get("close") if isinstance(hist, dict) else None
-            if not prices:
-                continue
-            current = prices[-1]
+
+        # Use the union of oracle symbols and history symbols so nothing is lost
+        all_symbols = list(dict.fromkeys(
+            list(oracle_data.keys()) + list(histories.keys())
+        ))
+
+        for synth in all_symbols:
+            oracle = oracle_data.get(synth, {})
+            hist = histories.get(synth, {}) if isinstance(histories.get(synth), dict) else {}
+            hist_prices = hist.get("close") or []
+
+            # Current price: oracle primary, yfinance fallback
+            current_price: float | None = oracle.get("price")
+            if current_price is None and hist_prices:
+                current_price = hist_prices[-1]
+
+            # Staleness + last_updated from oracle
+            oracle_stale = oracle.get("stale", True)
+            oracle_updated_at = oracle.get("updated_at")
+            if oracle_updated_at:
+                last_updated = datetime.fromtimestamp(oracle_updated_at, tz=timezone.utc).isoformat()
+            elif hist.get("last_ts"):
+                last_updated = str(hist["last_ts"])
+            else:
+                last_updated = nowstamp
+
+            # If no oracle data at all, mark stale
+            is_stale = oracle_stale if oracle else True
+
+            # Change/vol from yfinance history
             stat_dict: dict[str, Any] = {
-                "current_price": current,
-                "change_24h_pct": _pct_change(prices, 1),
-                "change_7d_pct": _pct_change(prices, 5),
-                "change_30d_pct": _pct_change(prices, 21),
-                "realized_vol_30d": _realized_vol_annual(prices, 30),
+                "current_price": current_price,
+                "change_24h_pct": _pct_change(hist_prices, 1) if hist_prices else None,
+                "change_7d_pct": _pct_change(hist_prices, 5) if hist_prices else None,
+                "change_30d_pct": _pct_change(hist_prices, 21) if hist_prices else None,
+                "realized_vol_30d": _realized_vol_annual(hist_prices, 30) if hist_prices else None,
             }
+
             entry = GLOBAL_ASSETS.get(synth)
             asset_class = entry[2] if entry else "unknown"
             real_ticker = entry[0] if entry else synth.lstrip("s")
-            last_ts = hist.get("last_ts") if isinstance(hist, dict) else None
-            is_stale = bool(last_ts and (time.time() - float(last_ts)) > _STALE_WINDOW_SECONDS)
+
             items.append(AssetExploreItem(
                 symbol=synth,
                 name=f"Synthetic {real_ticker}",
                 asset_class=asset_class,
-                oracle_address=oracle_addrs.get(synth) or synth_addrs.get(synth),
-                last_updated=nowstamp,
+                oracle_address=oracle.get("oracle_address"),
+                last_updated=last_updated,
                 is_stale=is_stale,
                 explanations=_explanations_for(stat_dict),
                 **stat_dict,
@@ -174,12 +261,12 @@ class AssetMarketService:
     async def get_history(self, symbol: str) -> ExploreHistoryResponse:
         if symbol in self._cache_history:
             return self._cache_history[symbol]
+        histories: dict[str, Any] = {}
         try:
             from archimedes.services.strategy_signal_evaluator import _fetch_price_histories
             histories = await asyncio.to_thread(_fetch_price_histories, [symbol], _HISTORY_LOOKBACK)
         except Exception as exc:
             logger.warning("explore: history for %s failed: %s", symbol, exc)
-            histories = {}
         hist = histories.get(symbol) or {}
         prices = hist.get("close") or []
         dates = hist.get("dates") or []

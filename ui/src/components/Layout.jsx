@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import WalletConnect from './WalletConnect'
 import Breadcrumbs from './Breadcrumbs'
+import WelcomeProfileModal from './WelcomeProfileModal'
 import { NEW_CONTRACTS } from '../config'
 
 // Spine per docs/user-stories.md. Reasoning is in nav until the per-page modal
@@ -36,7 +37,41 @@ export const PAGE_LABELS = {
 export default function Layout({ page, setPage, walletAddr, onConnect, onDisconnect, onOpenTour, children }) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [userProfile, setUserProfile] = useState(null)
+  const [showWelcomeModal, setShowWelcomeModal] = useState(false)
   const blockLabel = Object.keys(NEW_CONTRACTS).length ? 'Arc · Testnet live' : 'Arc · Connecting'
+
+  const API_BASE = import.meta.env.VITE_API_BASE ?? ''
+
+  // Fetch profile when wallet connects
+  useEffect(() => {
+    if (!walletAddr) {
+      setUserProfile(null)
+      return
+    }
+    // Check localStorage gate — only show welcome modal once per wallet
+    const seen = localStorage.getItem('archimedes.welcomeProfileSeen.' + walletAddr.toLowerCase())
+    fetch(`${API_BASE}/api/user/profile/${walletAddr}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        setUserProfile(data)
+        // If no profile and not seen, show welcome modal
+        if (!data && !seen) {
+          setShowWelcomeModal(true)
+        }
+      })
+      .catch(() => {
+        // Profile fetch failed — show modal if not seen
+        if (!seen) setShowWelcomeModal(true)
+      })
+  }, [walletAddr])
+
+  const handleWelcomeDone = (profile) => {
+    setShowWelcomeModal(false)
+    if (profile) setUserProfile(profile)
+  }
+
+  const displayName = userProfile?.display_name
 
   const handleNav = (id) => {
     setPage(id)
@@ -132,6 +167,12 @@ export default function Layout({ page, setPage, walletAddr, onConnect, onDisconn
             <Breadcrumbs page={page} setPage={setPage} />
           </div>
           <div className="flex items-center gap-2">
+            {/* Personalized greeting when profile set */}
+            {walletAddr && displayName && (
+              <span className="caption text-[var(--text-3)]" style={{ whiteSpace: 'nowrap' }}>
+                Welcome, <strong className="text-[var(--text-1)]">{displayName}</strong>
+              </span>
+            )}
             {onOpenTour && (
               <button
                 type="button"
@@ -148,6 +189,14 @@ export default function Layout({ page, setPage, walletAddr, onConnect, onDisconn
         </div>
         <main className={`page-content page-${page}`}>{children}</main>
       </div>
+
+      {/* Welcome profile modal — opens once on first wallet connect */}
+      {showWelcomeModal && walletAddr && (
+        <WelcomeProfileModal
+          walletAddr={walletAddr}
+          onDone={handleWelcomeDone}
+        />
+      )}
     </div>
   )
 }

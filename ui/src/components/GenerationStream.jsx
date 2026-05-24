@@ -10,6 +10,7 @@ const API_BASE = import.meta.env.VITE_API_BASE ?? ''
 const EVENT_LABELS = {
   job_queued: 'Job queued',
   brief_validated: 'Brief validated',
+  pipeline_selected: 'Pipeline selected',
   candidates_selected: 'Candidates selected',
   agent_iteration: 'Agent iteration',
   tool_called: 'Tool called',
@@ -66,7 +67,7 @@ function summarizeEvent(name, data) {
   }
 }
 
-export default function GenerationStream({ jobId, onDone, onReset }) {
+export default function GenerationStream({ jobId, onDone, onReset, onPipelineSelected }) {
   const [events, setEvents] = useState([])
   const [terminal, setTerminal] = useState(null)  // 'done' | 'error' | null
   const [strategyId, setStrategyId] = useState(null)
@@ -90,6 +91,9 @@ export default function GenerationStream({ jobId, onDone, onReset }) {
       let data = {}
       try { data = JSON.parse(e.data) } catch { /* keep empty */ }
       setEvents(prev => [...prev, { id: Number(e.lastEventId) || prev.length + 1, name, data }])
+      if (name === 'pipeline_selected' && data?.pipeline) {
+        onPipelineSelected?.(data.pipeline)
+      }
       if (name === 'persisted' && data?.strategy_id) setStrategyId(data.strategy_id)
       if (name === 'done') {
         setTerminal('done')

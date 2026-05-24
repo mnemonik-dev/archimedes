@@ -55,6 +55,55 @@ def _llm_available() -> bool:
         return False
 
 
+# ── Pipeline auto-routing ──────────────────────────────────────────────────
+
+
+def _pick_pipeline(
+    brief: GenerateBrief,
+) -> tuple[str, str]:
+    """Decide which generation pipeline to use based on runtime conditions.
+
+    Returns ``(pipeline_name, reason)`` where *pipeline_name* is one of
+    ``"fusion"``, ``"architect"``, or ``"agent"``.
+
+    Decision tree (per issue #167):
+
+    1. **fusion** if the fusion engine is enabled, the corpus has ≥ 20 papers,
+       and an LLM backend is reachable.
+    2. **architect** if the curated library has ≥ 3 strategies that match the
+       brief's inferred asset classes.
+    3. **agent** (SSE streaming portfolio-advisor path) as the fallback.
+    """
+    # ── Fusion check ──
+    try:
+        from archimedes.agents.strategy_fusion import fusion_enabled, load_corpus
+        if fusion_enabled():
+            corpus = load_corpus()
+            corpus_count = len(corpus) if corpus else 0
+            if corpus_count >= 20 and _llm_available():
+                return "fusion", (
+                    f"fusion engine enabled, corpus={corpus_count} papers, "
+                    "LLM backend alive"
+                )
+    except Exception:
+        pass  # fall through
+
+    # ── Architect check ──
+    try:
+        from archimedes.services.strategy_provider import default_provider
+        lib = default_provider.list_strategies()
+        if len(lib) >= 3:
+            return "architect", (
+                f"curated library has {len(lib)} strategies; "
+                "fast preview available"
+            )
+    except Exception:
+        pass  # fall through
+
+    # ── Agent (fallback) ──
+    return "agent", "streaming agent — general-purpose fallback"
+
+
 # ── Brief validation (real LLM step on the live path) ─────────────────────
 
 
@@ -481,6 +530,14 @@ async def run_generation(
             risk_appetite=brief.risk_appetite,
             intent_summary=validated.get("intent_summary", ""),
             time_horizon_inferred=validated.get("time_horizon_inferred", "unknown"),
+        )
+
+        # ── Auto-route to the best pipeline ──
+        pipeline_name, pipeline_reason = _pick_pipeline(brief)
+        await emit.emit(
+            "pipeline_selected",
+            pipeline=pipeline_name,
+            reason=pipeline_reason,
         )
 
         # Decide path: live agent vs fixture
