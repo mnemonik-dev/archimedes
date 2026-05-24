@@ -29,15 +29,18 @@ Pitch framing locked: Wall Street has the rigor toolkit (DSR/PBO/walk-forward OO
    - [PR disposition + merge order](#23-pr-disposition--merge-order)
    - [Spec writing protocol — machine-grade template](#24-spec-writing-protocol--machine-grade-template)
    - [Verification protocol](#25-verification-protocol)
+   - [Spec elaboration process (hybrid Maestro pattern)](#26-spec-elaboration-process-hybrid-maestro-pattern)
 3. [Pitch frame + architecture](#3-pitch-frame--architecture)
    - [Canonical pitch frame](#31-canonical-pitch-frame)
    - [User journey — directed click-graph](#32-user-journey--directed-click-graph)
    - [Agent architecture — 3 top-level agents × sub-agents × shared memory](#33-agent-architecture)
+   - [Who does what — agent ↔ user interaction model](#331-who-does-what--agent--user-interaction-model)
    - [Shared memory — 5-layer pillar (Linus lineage)](#34-shared-memory--5-layer-pillar-linus-lineage)
    - [Corpus seeding strategy](#35-corpus-seeding-strategy)
 4. [Track A — vault execution path (T1.x)](#4-track-a--vault-execution-path-t1x)
 5. [Track B — UI/UX surface cleanup (T2.x)](#5-track-b--uiux-surface-cleanup-t2x)
-6. [Track C — AWS infrastructure + KB pipeline (T3.x)](#6-track-c--aws-infrastructure--kb-pipeline-t3x)
+6. [Track C — AWS infrastructure + KB pipeline + virality-readiness (T3.x)](#6-track-c--aws-infrastructure--kb-pipeline-t3x)
+   - Includes T3.6 ALB + CloudFront + auto-scaling backend tier
 7. [Security pillar (TS.x)](#7-security-pillar-tsx)
 8. [Manual deliverables (M.x)](#8-manual-deliverables-mx)
 9. [Parallel-track Maestro prompts](#9-parallel-track-maestro-prompts)
@@ -58,13 +61,16 @@ Pitch framing locked: Wall Street has the rigor toolkit (DSR/PBO/walk-forward OO
 | **Generate consolidation** | Single input + single Generate button. Backend `_pick_pipeline()` heuristic auto-routes between Fusion (novel synthesis — default), Architect (fast curated-library preview — fallback), and the agentic SSE pipeline (third). All three result components remain; UI renders whichever the backend picked. |
 | **KB pipeline** | Bot system stands up GPU EC2 + runs SPECTER2 embeddings + HDBSCAN clusters + REBEL/SciSpacy KG over the 10k q-fin corpus + persists artifacts to S3 + DynamoDB + serves via `/api/papers/corpus/graph` + `/kg`. |
 | **Identity** | Wallet = identity. No required signup. Optional `WelcomeProfileModal` on first wallet connect captures display_name + email + interests + attribution + marketing_opt_in. All fields optional; user can Skip. Header shows "Welcome, &lt;name&gt;" when set. |
-| **HTTPS** | Chuan's bots register domain via AWS Route 53 + obtain Let's Encrypt cert via certbot + configure nginx + force HTTP→HTTPS + HSTS. Candidate domains: `archimedes-arc.app` OR `archimedes.hackagora.com`. Chuan's call on which. |
+| **HTTPS + domain** | Chuan's bots register `archimedes-arc.app` via AWS Route 53 + obtain Let's Encrypt cert via certbot + configure nginx + force HTTP→HTTPS + HSTS. The `.app` TLD forces HTTPS via the HSTS preload list. End-to-end bot-provisioned. |
+| **Scalability + load-balancing** | First-class architectural pillar — virality-ready from day one. AWS Application Load Balancer in front of an auto-scaling group of EC2 (min=2, max=4, desired=2) for the backend tier; CloudFront distribution in front of ALB caches static assets at the edge and absorbs cold spikes. Postgres + Redis move to a dedicated database EC2 (v1) — RDS + ElastiCache is the v2 hop. Closes the "we go viral and our single EC2 dies" failure mode that would forfeit traction at the worst possible moment. T3.6 ships this; § 11 confirms the risk is mitigated, not just accepted. |
 | **LLM backend** | GLM-4.7 stays primary (working, tested, free tier). Ship BYOK header support (`X-Anthropic-Api-Key`) so judges + users can self-fund Claude direct. Bedrock spec is filed on-record but **unassigned** to `t2o2`; we activate it only if we choose to deploy. |
 | **Submission deadline** | Hard: Monday 2026-05-25 23:59 ET (Tue 04:59 UTC). Personal target: Sunday 2026-05-24 23:59 CT. Monday is buffer (final video re-record, late docs polish). |
-| **Delivery surface** | Three artifacts: (1) public GitHub repo at `hackagora/archimedes-arcadia`, (2) live HTTPS website at the new domain, (3) ≤ 3-minute demo video. All other docs are supporting evidence. |
+| **Delivery surface** | Three artifacts: (1) public GitHub repo at `a-apin/archimedes-arcadia` (org renamed from `hackagora` 2026-05-23 PM; GitHub auto-redirects old URLs), (2) live HTTPS website at `https://archimedes-arc.app`, (3) ≤ 3-minute demo video. All other docs are supporting evidence. |
+| **RFB alignment** | **Primary: [RFB 04 Adaptive Portfolio Manager](https://luma.com/7i50p2r9)** — direct hit (regime detection, asset allocation, rebalancing, risk management; goal-based PM interface; correlation-based diversification; cross-chain-ready rebalancing infra). **Adjacent: RFB 02 Prediction Market Trader Intelligence** (our Kelly Criterion + risk parity + +EV sizing maps to the "optimal bet sizing" primitive) and **RFB 06 Social Trading Intelligence** (our Tier-1 verified strategy library + paper-anchored passport + DSR/PBO rigor IS the "AI selects, weights, and monitors" pattern applied to strategies-as-traders; the rigor-gated library IS the leaderboard). Every refreshed doc in M.4 makes this alignment explicit. |
 | **Security posture** | First-class pillar (Section 7). Zero-trust, secrets out of `.env` into AWS SSM Parameter Store + IAM instance profile, HTTPS everywhere, security headers, CORS lockdown, rate limits, dependency scanning, secret-leak detection, user-data minimization with KMS encryption. Same rigor as the statistical pipeline. |
-| **AWS account ownership** | Chuan's AWS account. The `t2o2` bot system provisions into it; Chuan absorbs the spend with anti-goals + budget alarms keeping costs bounded. |
+| **AWS account ownership** | Chuan's AWS account. The `t2o2` bot system provisions into it; Chuan absorbs the spend with anti-goals + budget alarms keeping costs bounded (T3.6 daily AWS spend monitor: pause if > $50/day). |
 | **Process: t2o2 assignment** | Claude + subagents **file** every issue but **do not assign** `t2o2`. Dan manually assigns + tracks via the GitHub Kanban board. This gives Dan a review-and-tweak gate before each issue fires; protects against spec ambiguity propagating into bot work. |
+| **Process: spec elaboration** | Hybrid model per § 2.6. Maestro subagents spawn a dedicated audit Explore subagent for the BIG specs (T2.2 / T2.7 / T3.1 / T3.2 / T3.6) — file:line precision, function signatures, exact grep patterns, test names, edge cases. For SMALL specs (T1.4 / T2.4 / T2.5 / TS.4 / TS.5) the Maestro does inline audit with Read + Grep tools. **Filed specs are bot-grade, not seed-grade.** The specs in §§ 4–7 of this plan are SEEDS — Maestros elaborate them against actual code before filing. |
 | **PR ordering** | (1) Daniel R's #144 (UI prep — touches 18 files that collide with our T2.x specs); (2) Dan's #142 (Phase 4 scaffold; bring out of draft + merge); (3) Dan's #143 (Phase 5 runbook doc). Track A specs (T1.x) land after #142 + #143 merge. Track B specs (T2.x) land after #144 merges. |
 
 ---
@@ -76,7 +82,8 @@ Pitch framing locked: Wall Street has the rigor toolkit (DSR/PBO/walk-forward OO
 - **Chuan** = the human teammate (CTO @ Gyld Finance; owner of contracts + on-chain integration + infra).
 - **t2o2** = Chuan's GitHub bot system handle. Assignment of an issue to `t2o2` triggers autonomous execution against `main`.
 - **moonshot** = Chuan's Discord handle in the Archimedes Arcadia server. **Not the same** as the unrelated `moonshot` Discord handle in the Canteen admin server (which is Anuhya, a Canteen admin). Avoid the name "moonshot" in this plan to prevent confusion; we use Chuan and t2o2 instead.
-- **Hackagora** = our GitHub organization (`github.com/hackagora`). Reflected in the domain candidate `archimedes.hackagora.com`.
+- **a-apin** = our GitHub organization (`github.com/a-apin`), renamed from `hackagora` on 2026-05-23 PM. GitHub auto-redirects the old `hackagora/archimedes-arcadia` URL, but every committed reference + the git remote should be updated to the new org name when convenient.
+- **archimedes-arc.app** = our live HTTPS domain (registered via Route 53 in T3.6 / TS.1). All deploy + demo links use this. The IP `13.40.112.220` is the legacy EC2 origin; CloudFront sits in front of the ALB which sits in front of the auto-scaling backend tier.
 
 ### 2.2 Issue lifecycle (manual `t2o2` assignment)
 
@@ -180,6 +187,65 @@ Two modes, chosen by PR size:
 - The PR contains fake/mock/canned data where the spec required real.
 - The PR closes the issue but doesn't satisfy the acceptance criteria.
 
+### 2.6 Spec elaboration process (hybrid Maestro pattern)
+
+**Premise.** The 14 issue specs in §§ 4–7 of this plan are SEEDS, not finished work. A single planning session cannot produce the file:line precision, function signatures, exact grep patterns, edge-case enumerations, and test-name predictions that make a bot-grade spec ironclad. Each Maestro elaborates against the actual code before filing — that's the lever that closes the slop loop.
+
+**Hybrid model.** Each Maestro picks per spec:
+
+| Mode | When | How |
+|---|---|---|
+| **Audit subagent** | Big specs touching > 5 files / multiple subsystems / unfamiliar code. Designated set: **T2.2, T2.7, T3.1, T3.2, T3.6**. Plus the new ALB+CloudFront spec T3.6. | Spawn 1 foreground Explore subagent with the audit prompt template below. Subagent reports back; Maestro folds output into the spec body before `gh issue create`. |
+| **Inline Maestro** | Small specs touching ≤ 3 files / single subsystem / well-understood code. Designated set: **T1.4, T2.4, T2.5, T2.6, TS.3, TS.4, TS.5, TS.7**. | Maestro reads + greps directly; writes elaborated spec inline; files. |
+| **Either** | Specs in between (T1.3, T1.5, T2.1, T2.3, T2.8, T3.3, T3.4, T3.5, TS.1, TS.2, TS.6, TS.8). | Maestro's call based on its current context window depth and familiarity with the surface. |
+
+**Audit-subagent prompt template** (copy + paste; fill in `<...>`):
+
+```
+You're doing a read-only audit of <subsystem> to inform a bot-grade GitHub issue spec.
+The seed spec is below — your job is to make it bot-proof. Do not modify any file.
+
+Seed spec:
+<paste the spec from launch-execution-plan-2026-05-23.md>
+
+Audit deliverables (report in this order, under 800 words total):
+
+1. **Files to ADD / MODIFY / NOT TOUCH** — verified against current code.
+   For each MODIFY entry, list specific function names + line ranges that the bot
+   should touch. For each ADD entry, name the import surface (what other files will
+   import from it).
+
+2. **Acceptance criteria — sharpened to grep-checkable form.**
+   Take each criterion from the seed and rewrite it with: exact regex, exact file
+   path, exact expected output line count, exact pytest test name. No prose.
+
+3. **Anti-goals — discovered, not assumed.** Read the surrounding code; identify
+   patterns that look brittle if the bot blindly extends them. Add an anti-goal
+   for each.
+
+4. **Precedent files — specific.** Name the existing file + function the bot should
+   copy. Not "follow existing patterns" — "copy the shape of
+   backend/archimedes/chain/oracle_updater.py::OracleUpdater._refresh_loop".
+
+5. **Edge cases the seed missed.** Read related tests + recent PRs in this area;
+   what failure modes are documented in test_*.py that the bot must handle?
+
+6. **Dependency reality-check.** Are the libraries the spec assumes actually in
+   requirements.txt / package.json / Cargo.toml? Are they at the version the spec
+   assumes?
+
+7. **Three bot-failure scenarios + how the spec defends against each.** Show your
+   work on slop prevention.
+
+Format: structured markdown sections matching the spec template (Scope / Acceptance /
+Anti-goals / Precedent). Maestro folds your output directly into the seed.
+```
+
+**Rule.** No spec gets filed without at least the inline-Maestro pass. The audit-subagent
+pass is required for the 5 big specs above and recommended for any spec the Maestro feels
+uncertain about. **A 30-minute audit subagent run that catches one bot ambiguity is worth
+3 hours of broken-PR review + follow-up issue cycles.**
+
 ---
 
 ## 3. Pitch frame + architecture
@@ -192,7 +258,11 @@ Two modes, chosen by PR size:
 
 **The wedge.** Rigor as the curation protocol. The November-2025 crisis showed trust-based curation breaks under stress. We prove the method, not the returns. *Win more than you lose, not never lose.*
 
-**The multi-agent narrative.** Fusion (novel synthesis from papers) + Architect (curated library picks) + Portfolio Advisor (Kelly sizing + risk parity) + Stress Engine (six-scenario shock testing). Shared memory primitive borrowed from Linus's 5-layer pillar (Section 3.4). Settlement on Arc with USDC; reasoning traces hashed on-chain via `ReasoningTraceRegistry`.
+**The multi-agent narrative.** Fusion (novel synthesis from papers) + Architect (curated library picks) + Portfolio Advisor (Kelly sizing + risk parity) + Stress Engine (six-scenario shock testing) — three top-level agents with sub-agents apiece, connected by a 5-layer shared memory pillar borrowed from Linus's architecture (§ 3.4). The user's role and the trade-execution boundary are spelled out in § 3.3.1. Settlement on Arc with USDC; reasoning traces hashed on-chain via `ReasoningTraceRegistry`.
+
+**Hackathon RFB alignment.** Archimedes is a direct fit for **[RFB 04 Adaptive Portfolio Manager](https://luma.com/7i50p2r9)** — the only one of the six RFBs that names every primitive we ship (regime detection, asset allocation by regime, rebalancing, risk management via Kelly + risk parity, correlation-based diversification, cross-chain-ready execution). The pitch deck and README lead with RFB 04 alignment. **Adjacent fit:** RFB 02 (Prediction Market Trader Intelligence — our +EV / Kelly sizing primitive maps directly without requiring us to ship prediction markets) and RFB 06 (Social Trading Intelligence — our Tier-1 verified strategy library, paper-anchored passport, and DSR/PBO rigor IS the "AI selects, weights, and monitors" pattern applied to strategies-as-traders; our rigor-gated library IS the leaderboard the RFB describes). Adjacencies are pitched as bonus surface area, not core claims.
+
+**Built for the wave we hope arrives.** The architecture is virality-ready from day one. AWS ALB + CloudFront + auto-scaling-group means a successful demo that goes viral does not break the demo. If 50,000 wallets connect in the hour after the showcase, the system absorbs the load instead of forfeiting traction at the exact moment the market is paying attention. This is a deliberate pitch beat as much as it is an infrastructure decision (§ 11 explains how the risk is mitigated rather than merely flagged).
 
 **Tagline candidates:** *Rigor for the rest of us.* / *Wall Street rigor, without the Wall Street gates.* / *Where the agora reasons with rigor.*
 
@@ -268,7 +338,8 @@ flowchart TB
 
   subgraph SM[Shared Memory — 5-layer pillar]
     direction LR
-    SM_B[B: Redis<br/>per-job event log]
+    SM_A[A: KV cache / LLM context<br/>intra-step latent]
+    SM_B[B: Redis<br/>per-job event log + scratchpad]
     SM_C[C: Postgres<br/>StrategyStore + vaults + traces]
     SM_D[D: Job memory<br/>per-strategy investigation]
     SM_E[E: KB corpus<br/>papers + clusters + KG]
@@ -283,6 +354,7 @@ flowchart TB
   LE -- decision trace --> SM_C
   LE -- on-chain anchor --> ON[Arc / ReasoningTraceRegistry]
 
+  SM_A -.feeds.-> SG_SS
   SM_E -.feeds.-> SG_PR
   SM_B -.feeds.-> SG_SS
   SM_D -.feeds.-> LE_CB
@@ -307,6 +379,73 @@ flowchart TB
 | Shared Memory C (Postgres) | `models/strategy_store.py` + `models/backtest_store.py` | 188 + 165 |
 
 Our architecture is already multi-agent in the TradingAgents / Linus tradition; T2.8 makes it visibly so by reorganizing the files into a `backend/archimedes/agents/` subpackage with a shared `base_agent.py`.
+
+#### 3.3.1 Who does what — agent ↔ user interaction model
+
+The three top-level agents map to three temporal phases of a strategy's life. The user is the only party with custody of funds and the only party that signs trades that move them; the agents make decisions and surface them on-chain, but **the user is always the one who authorizes** the binding actions. This split is what makes Archimedes non-custodial in the strong sense, not just the marketing sense.
+
+```mermaid
+sequenceDiagram
+  participant U as User (wallet)
+  participant SG as Strategy Generation Agent
+  participant PC as Portfolio Construction Agent
+  participant V as Vault contract (Arc)
+  participant LE as Live Execution Agent (agent_runner)
+  participant AMM as AMM + PriceOracle (Arc)
+  participant R as ReasoningTraceRegistry (Arc)
+
+  U->>SG: Describe brief on /generate (intent, risk, asset classes)
+  SG->>SG: Paper retrieval + market context + synthesis + rigor gate
+  SG-->>U: StrategyPassport (paper anchors, DSR/PBO, OOS) on /strategy/:id
+  Note over U,SG: No funds moved. Agent has zero trade authority at this point.
+
+  U->>PC: Click 'Deploy as Vault' (CreateVaultModal)
+  PC->>PC: Asset selection + Kelly sizing + stress test → vault proposal
+  PC-->>U: Vault proposal (target weights, projected behavior, fee model)
+  U->>V: Sign #1 vault.create(strategy_id) via wallet (CreateVaultModal)
+  U->>V: Sign #2 USDC.approve(vault, amount) (DepositFlow stepper)
+  U->>V: Sign #3 vault.deposit(amount, receiver) (DepositFlow stepper)
+  U->>V: Sign #4 vault.setTargetAllocations(tokens, weights_bps) (DepositFlow stepper)
+  Note over U,V: User has now FUNDED + CONFIGURED the vault. Agent gains *rebalance authority only*.
+
+  loop Every agent tick (default 60s; configurable per strategy)
+    LE->>V: Read current vault state (NAV, current weights, USDC balance)
+    LE->>AMM: Read oracle prices + AMM pool liquidity
+    LE->>LE: Signal evaluation (strategy DSL) → drift calc → cost-benefit
+    alt rebalance triggered
+      LE->>V: Submit rebalance tx (Circle signer; agent has approved-router role)
+      V->>AMM: Execute swap(s) per target weights
+      LE->>R: Publish decision trace (canonical hash + paper anchors + reasoning)
+    else hold (no profitable rebalance)
+      LE->>R: Publish 'hold' trace (auditable inactivity)
+    end
+  end
+
+  U->>R: Click 'Verify on-chain' on /reasoning?trace_id=X
+  R-->>U: VERIFIED ✓ (hash matches anchor) + arcscan tx link
+  U->>V: Withdraw (vault.withdraw at any time; agent cannot block)
+```
+
+**Custody + authority boundary (the load-bearing line).** Funds sit in the user's ERC-4626 vault contract. The agent's on-chain capability is bounded to `rebalance(tokens, weights_bps)` and `submitTradeViaRouter(...)` — both gated by the user-signed target allocations. The agent CANNOT call `withdraw`, CANNOT change the vault owner, and CANNOT change the target allocations the user signed. If the agent goes rogue, the worst it can do is rebalance within the user's stated risk envelope; the user retains exit authority at all times. This is the technical claim behind the "non-custodial" pitch beat.
+
+**Per-agent responsibility table (read in order; chase code references for detail):**
+
+| Agent | Inputs | Decision domain | Output | Trade authority |
+|---|---|---|---|---|
+| **Strategy Generation** | User brief (intent, risk, asset classes, depth) + KB corpus + market context | "Is there a paper-grounded strategy that satisfies this brief AND passes our rigor gate?" | StrategyRecord persisted to Postgres; ReasoningTrace anchored on-chain. Surfaced as StrategyPassport at /strategy/:id. | **None.** Pure synthesis + rigor check. |
+| **Portfolio Construction** | StrategyRecord | "Given this strategy and the user's USDC budget, what's the concrete set of assets, weights, and sizing — and what does it look like under our six stress scenarios?" | Vault deployment proposal (target weights in basis points + projected behavior + stress outputs). Persisted to Postgres alongside StrategyRecord. | **None.** Produces the proposal the user signs. |
+| **Live Execution** (agent_runner.py loop) | Deployed vault + signed target allocations + live oracle + AMM state | "Given current drift from target weights and current AMM cost, is it profitable to rebalance NOW vs hold to next tick?" | Either: (a) rebalance tx via Circle signer → AMM swaps + ReasoningTrace; or (b) hold trace. Both are anchored on-chain. | **Bounded.** rebalance + submitTradeViaRouter within user-signed allocations. NEVER withdraw, NEVER change allocations, NEVER change owner. |
+
+**Where each phase lives (where, when, how):**
+
+| Phase | Where it runs | When it runs | How the user sees it |
+|---|---|---|---|
+| Strategy Generation | Backend (`generation_pipeline.py` + LLM call out to GLM-4.7 via z.ai) | On-demand when user submits brief; SSE stream returns live progress | `/generate` shows live SSE updates → `/strategy/:id` renders the passport |
+| Portfolio Construction | Backend (`portfolio_optimizer.py` + `stress_engine.py`) | When user clicks "Deploy as Vault" | `CreateVaultModal` shows the proposal; user approves or cancels |
+| User signing | User's wallet (MetaMask / Coinbase / generic browser wallet via viem) | 4 signatures (vault.create + USDC.approve + vault.deposit + setTargetAllocations) | `CreateVaultModal` + `DepositFlow` stepper components |
+| Live Execution | Backend (`agent_runner.py` loop in dedicated `agent` docker service) — continuous, 60s tick default | Continuously from vault funding until user withdraws | `/portfolio` shows position + recent activity; `/reasoning` shows each decision trace; "Verify on-chain" button confirms anchor |
+
+**The architectural shape Dan asked about.** *Strategy Generation* answers "what should be done"; *Portfolio Construction* answers "how exactly do we do it" (and turns that into a deployable, signable proposal); *Live Execution* answers "given we have a configured vault, what do we do this minute, and how do we make it auditable forever." The user is in the loop only at the two binding moments (passport review + 4 signatures to deploy). After that, the user owns the funds and audits the agent's behavior at will; the agent owns the rebalance loop within tight on-chain rails. This is the pitch beat — "we agent the decisions, you sign the trades."
 
 ### 3.4 Shared memory — 5-layer pillar (Linus lineage)
 
@@ -1306,6 +1445,102 @@ Cross-lane (backend + infra + security). Dan reviews IAM + budget.
 TS.2 (SSM pattern), T3.1 (IAM role to extend)
 ```
 
+### T3.6 — ALB + CloudFront + auto-scaling backend tier (MUST; virality-readiness)
+
+```
+APIN - Infra - AWS ALB + CloudFront + auto-scaling group: virality-ready backend tier
+
+## TLDR
+Replace single-EC2 origin with: AWS Application Load Balancer (HTTPS termination, health
+checks, round-robin to backend tier) + auto-scaling group of EC2 (desired=2, min=2,
+max=4, identical AMI) + CloudFront in front of ALB (edge caching for static assets,
+rate limits at the edge). Postgres + Redis move to a dedicated database EC2 instance
+(v1; RDS + ElastiCache is the v2 hop documented in pitch). Closes the "we go viral and
+single EC2 dies" failure mode.
+
+## Summary
+1. Refactor docker-compose so postgres + redis run on a dedicated DB EC2 (db.archimedes-arc.internal);
+   backend EC2s connect via the AWS-internal network.
+2. Create AMI from current backend EC2 state (after #142 + #143 land).
+3. Provision ALB (Application Load Balancer) with:
+   - Listener 443 → backend target group (TLS via ACM cert for archimedes-arc.app + alt name)
+   - Listener 80 → 301 redirect to 443
+   - Health check: GET /api/health (200 expected)
+   - Sticky sessions OFF (backend is stateless after Postgres + Redis externalization)
+4. Provision auto-scaling group:
+   - Launch template using the backend AMI
+   - min=2, desired=2, max=4
+   - Scale-out trigger: avg CPU > 60% for 2 min OR ALB request count > 1000/min
+   - Scale-in: avg CPU < 25% for 10 min (slow scale-in to avoid flapping)
+5. Provision CloudFront distribution:
+   - Origin: ALB
+   - Cache behaviors: /assets/* + /static/* + *.js + *.css cached 1h at edge; /api/* + /events/* NOT cached (SSE + dynamic); / (HTML) cached 60s with cache-control respect
+   - Origin shield: us-east-1 (cheapest AWS region for ACM)
+   - Rate-limit: 2000 req/min per IP at the edge (defense-in-depth alongside slowapi in TS.5)
+6. Route 53 record for archimedes-arc.app → CloudFront distribution (replaces direct A record to EC2 IP).
+
+## Scope
+Files to ADD:
+- infra/terraform/alb.tf — ALB + target group + listeners + ACM cert + Route53 alias
+- infra/terraform/asg.tf — launch template + ASG + scaling policies
+- infra/terraform/cloudfront.tf — distribution + cache behaviors + origin
+- infra/terraform/db_ec2.tf — dedicated database EC2 (postgres + redis only) + security group allowing only backend ASG ingress
+- infra/scripts/bake-backend-ami.sh — operator-run script that snapshots current backend EC2 + registers AMI
+- docs/runbooks/virality-readiness.md — runbook describing how to scale up + how to monitor
+
+Files to MODIFY:
+- docker-compose.production.yml — backend service no longer launches postgres + redis (they live on db EC2)
+- .env.example — add DATABASE_HOST + REDIS_HOST env vars (default to db.archimedes-arc.internal)
+- backend/archimedes/services/redis_state.py — confirm Redis connection uses REDIS_HOST env, not hardcoded localhost
+- backend/archimedes/db.py — confirm Postgres connection uses DATABASE_HOST + reads from SSM if available
+- infra/nginx/nginx.conf — backend nginx no longer terminates TLS (ALB does); listen 80 internal; trust X-Forwarded-Proto from ALB
+- ui/src/config.js — API base URL = https://archimedes-arc.app (no port)
+
+Files to NOT TOUCH:
+- contracts/, oracle_runner (one canonical oracle, not load-balanced)
+- agent_runner (single instance — its loop is the source of truth for vault state)
+
+## Acceptance
+- [ ] `aws elbv2 describe-load-balancers --query 'LoadBalancers[?LoadBalancerName==`archimedes-prod-alb`]'` → 1 result with State.Code = active
+- [ ] `aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names archimedes-prod-asg --query 'AutoScalingGroups[0].{Desired:DesiredCapacity,Min:MinSize,Max:MaxSize,InService:Instances[?LifecycleState==`InService`] | length(@)}'` → {Desired: 2, Min: 2, Max: 4, InService: 2}
+- [ ] `aws cloudfront list-distributions --query 'DistributionList.Items[?Aliases.Items[?contains(@, `archimedes-arc.app`)]].{Status:Status,DomainName:DomainName}'` → 1 result, Status = Deployed
+- [ ] `curl -sI https://archimedes-arc.app/` returns 200 with `via:` header containing `CloudFront` AND `Strict-Transport-Security` header
+- [ ] `curl -sI https://archimedes-arc.app/assets/<any-file>.js` returns `x-cache: Hit from cloudfront` on second request
+- [ ] `curl -sI https://archimedes-arc.app/api/health` returns 200 WITHOUT `x-cache: Hit` (API path is uncached)
+- [ ] Kill one backend EC2 (manually terminate via AWS console); within 5 min ASG launches a replacement AND site stays up the whole time (no 502s in curl loop)
+- [ ] Load test: `for i in {1..500}; do curl -s https://archimedes-arc.app/api/health & done; wait` → 100% 200 responses; ALB cloudwatch metrics show requests distributed across both backend EC2s
+- [ ] Postgres + Redis ONLY reachable from backend ASG security group (security group rules verified via `aws ec2 describe-security-groups`)
+- [ ] `pytest -q backend/tests` → same pass count as before (no behavioral regression from externalized DB)
+- [ ] Daily AWS cost (CloudWatch billing alarm) confirms < $5/day at idle load (ALB ~$0.80/day + 2x t3.small EC2 + db EC2 + CloudFront ~$0.10/day at low traffic)
+
+## Verify
+aws elbv2 describe-target-health --target-group-arn $(aws elbv2 describe-target-groups --names archimedes-prod-tg --query 'TargetGroups[0].TargetGroupArn' --output text) --query 'TargetHealthDescriptions[*].{Id:Target.Id,Health:TargetHealth.State}'
+# expect both backend EC2s State: healthy
+curl -sI https://archimedes-arc.app/ | grep -E "^(HTTP|Via|X-Cache|Strict-Transport)"
+ab -n 1000 -c 50 https://archimedes-arc.app/api/health  # apache bench; expect 100% success
+
+## Anti-goals
+- DO NOT skip the dedicated DB EC2 step — having postgres on the backend AMI defeats the auto-scaling because each new instance would have an empty database.
+- DO NOT set sticky sessions on the ALB (backend is stateless; sessions live in Redis + Postgres).
+- DO NOT cache /api/* at CloudFront (all API responses are dynamic; caching would surface stale prices + stale traces).
+- DO NOT cache the SSE stream endpoint /api/generate/events/<job_id> (must pass through).
+- DO NOT use WAF this iteration (separate spend; v2 pitch item).
+- DO NOT enable cross-region replication for the DB EC2.
+- DO NOT allow ASG max > 4 in this issue (cost containment; we re-evaluate after demo).
+- DO NOT bake any secrets into the AMI; SSM Parameter Store (TS.2) is the source.
+
+## Precedent
+- Existing infra/terraform/ EC2 setup (see docs/infra-setup.md) — extend with ALB + ASG + CloudFront resources.
+- AWS Well-Architected Framework: Reliability + Performance Efficiency pillars.
+- AWS sample: https://github.com/aws-samples/ec2-spot-workshops (ASG + ALB reference patterns).
+
+## Lane note
+Cross-lane (infra + backend). Chuan reviews ASG + DB EC2 refactor. Dan reviews CloudFront cache behaviors. Big spec — audit subagent REQUIRED per § 2.6 before filing.
+
+## Depends on
+T3.1 (IAM role pattern), TS.1 (ACM cert for archimedes-arc.app)
+```
+
 ---
 
 ## 7. Security pillar (TS.x)
@@ -1335,58 +1570,68 @@ First-class. Same rigor as the statistical pipeline. Zero-trust posture, secrets
 - Incident response runbooks + kill switches (pause oracle, pause agent runner, pause new vault creation)
 - Daily pg_dump → S3 backup (Track D will add as a quick item if time permits)
 
-### TS.1 — Route 53 + HTTPS via Let's Encrypt (bot-provisioned end-to-end)
+### TS.1 — Route 53 + HTTPS via Let's Encrypt for `archimedes-arc.app` (bot-provisioned end-to-end)
 
 ```
-APIN - Infra - Domain registered via Route 53; HTTPS via Let's Encrypt on nginx; HSTS + force-redirect
+APIN - Infra - Register archimedes-arc.app via Route 53; HTTPS via Let's Encrypt on nginx + ACM cert for ALB; HSTS + force-redirect
 
 ## TLDR
 Plain HTTP at http://13.40.112.220/ is the #1 visible security issue for judges. Bot
-system registers the domain via AWS Route 53, creates A record → 13.40.112.220, installs
-certbot, configures nginx for 443 with HTTPS-everywhere + HSTS + auto-renew.
+system registers archimedes-arc.app via AWS Route 53, provisions Let's Encrypt cert via
+certbot for the nginx-on-EC2 path (interim), AND provisions an ACM cert in us-east-1
+for T3.6's CloudFront/ALB (the final production path). The .app TLD forces HTTPS via
+the HSTS preload list — no opt-out, no exceptions.
 
 ## Summary
-Bot proposes a domain name from these candidates (Chuan's call):
-  (a) archimedes-arc.app
-  (b) archimedes.hackagora.com  (requires hackagora.com root domain registration first if not already owned)
-
-Bot registers via Route 53, creates A record to 13.40.112.220, installs certbot on EC2,
-runs `certbot --nginx -d <domain>` with auto-renew cron. Updates nginx config to redirect
-80 → 443. Adds HSTS header (max-age=31536000, includeSubDomains).
+Domain = `archimedes-arc.app` (locked).
+1. Register the domain via AWS Route 53 in Chuan's account.
+2. Create the hosted zone + A record → 13.40.112.220 (interim, until T3.6's CloudFront
+   distribution is up; then this becomes an alias to the CloudFront domain).
+3. Install certbot on the current EC2 origin; run `certbot --nginx -d archimedes-arc.app`
+   with auto-renew cron. nginx config redirects 80 → 443; HSTS header (max-age=31536000,
+   includeSubDomains) on all responses.
+4. Provision an ACM certificate for `archimedes-arc.app` + `*.archimedes-arc.app` in
+   us-east-1 (CloudFront's required region for ACM certs). This is consumed by T3.6.
 
 ## Scope
 Files to ADD:
-- infra/terraform/route53.tf — domain registration + A record
+- infra/terraform/route53.tf — domain registration + hosted zone + A record (or alias)
+- infra/terraform/acm_archimedes_arc_app.tf — ACM cert in us-east-1 for CloudFront/ALB
 - infra/scripts/setup-https.sh — idempotent certbot + nginx + auto-renew script
 - docs/runbooks/https-setup.md — runbook for re-runs
 
 Files to MODIFY:
 - infra/nginx/nginx.conf — add 443 server block + 80 redirect + security headers
-- .env.example — add PUBLIC_DOMAIN env var
-- ui/src/config.js — confirm wallet network config / API base uses HTTPS
+- .env.example — add PUBLIC_DOMAIN env var (default archimedes-arc.app)
+- ui/src/config.js — API base URL → https://archimedes-arc.app
 
 Files to NOT TOUCH: contracts/, frontend wallet code, backend service code.
 
 ## Acceptance
-- [ ] `curl -sI https://<domain>/` returns 200 with Strict-Transport-Security header
-- [ ] `curl -sI http://<domain>/` returns 301 redirect to https://<domain>/
-- [ ] Browser → https://<domain>/ → green padlock; no cert warning
-- [ ] `nginx -t` exits 0
+- [ ] `aws route53domains list-domains --region us-east-1 --query 'Domains[?DomainName==`archimedes-arc.app`]'` → 1 result
+- [ ] `aws route53 list-hosted-zones --query 'HostedZones[?Name==`archimedes-arc.app.`]'` → 1 result
+- [ ] `aws acm list-certificates --region us-east-1 --query 'CertificateSummaryList[?DomainName==`archimedes-arc.app`].Status'` → ["ISSUED"]
+- [ ] `curl -sI https://archimedes-arc.app/` returns 200 with `Strict-Transport-Security: max-age=31536000; includeSubDomains` header
+- [ ] `curl -sI http://archimedes-arc.app/` returns 301 redirect to https://archimedes-arc.app/
+- [ ] Browser → https://archimedes-arc.app/ → green padlock; no cert warning
+- [ ] `nginx -t` (on EC2) exits 0
 - [ ] certbot timer / cron scheduled (verify `systemctl list-timers | grep certbot` OR `crontab -l | grep certbot`)
-- [ ] Route 53 hosted zone exists with A record → 13.40.112.220
+- [ ] `certbot renew --dry-run` exits 0 (renewal pipeline works)
 
 ## Verify
-DOMAIN=<the-domain>
+DOMAIN=archimedes-arc.app
 curl -sI "https://${DOMAIN}/" | grep -E "^(HTTP|Strict-Transport)"
 curl -sI "http://${DOMAIN}/" | grep -E "^(HTTP|Location)"
-aws route53 list-hosted-zones --query 'HostedZones[?Name==`<domain>.`]'
+aws route53 list-hosted-zones --query "HostedZones[?Name==\`${DOMAIN}.\`]"
+aws acm list-certificates --region us-east-1 --query "CertificateSummaryList[?DomainName==\`${DOMAIN}\`]"
 
 ## Anti-goals
 - DO NOT commit any private key or cert file.
 - DO NOT disable HTTP entirely on port 80 (HTTP-01 challenge needs it for renewals).
-- DO NOT use self-signed cert "to save time" — must be real Let's Encrypt.
+- DO NOT use self-signed cert "to save time" — must be real Let's Encrypt for nginx, ACM for CloudFront/ALB.
 - DO NOT change FastAPI internal port (still 8000); only nginx termination changes.
-- DO NOT register .com or .io TLDs without Chuan's approval (cost variance).
+- DO NOT register additional TLDs (.com, .io) — `.app` is locked per § 1.
+- DO NOT provision the ACM cert in any region other than us-east-1 (CloudFront limitation).
 
 ## Precedent
 - Existing nginx config in infra/nginx/
@@ -1541,15 +1786,20 @@ TS.1 (needs 443 server block to exist)
 | **M.10** | **Final repo polish + doc audit** — dedicated subagent does deep + aggressive doc audit; archive/remove intermediate build artifacts; ensure architecture/design/strategy/narrative docs are coherent + consistent; remove stale info; professional polish for public viewing | Claude (Track D) | **Sun afternoon (after T-tracks land)** |
 | **M.11** | **arc-canteen telemetry backfill** — `update-product` calls for last 5 days' worth of merges (Phase 4–9, KB integration, 10-contract deploy, Phase 8/9 UI ship); `update-traction` calls for any user/judge conversations; ongoing for every meaningful ship Sat → Sun | Dan + Claude | Sat AM + ongoing |
 
-**Documents to align in M.4 (each gets refreshed to the canonical pitch frame in Section 3.1):**
+**Documents to align in M.4 (each gets refreshed to the canonical pitch frame in Section 3.1 — including the locked RFB alignment narrative + the virality-readiness architecture beat + the agent-user interaction model from § 3.3.1):**
 
-- `docs/demo-script-pitch-deck-outline.md`
+- `docs/demo-script-pitch-deck-outline.md` — refresh deck outline + open with RFB 04 alignment statement
 - `docs/specs/claude-design-prompts.md` (if exists; create if not, using Appendix C)
-- `docs/competitor-landscape.md` (add rosetta-alpha as the most credible competitor)
-- `docs/judging-rubric-assessment.md` (refresh Day-12 score with TS + Bedrock additions)
-- `docs/anti-features.md` (add security non-claims + BYOK posture)
-- `README.md` (top fold updated; quick-start updated to HTTPS domain)
-- `ARC-OSS-SHOWCASE.md` (add TS pillar as forkable primitives)
+- `docs/competitor-landscape.md` (add rosetta-alpha as the most credible competitor; refresh framing)
+- `docs/judging-rubric-assessment.md` (refresh Day-12 score with TS + T3.6 ALB-CloudFront additions)
+- `docs/anti-features.md` (add security non-claims + BYOK posture + we-don't-promise-returns posture)
+- `README.md` — top fold updated; quick-start updated to `https://archimedes-arc.app`; explicit "Built for [RFB 04 Adaptive Portfolio Manager](https://luma.com/7i50p2r9) with adjacent fit to RFB 02 + RFB 06" badge or statement near the title; org references updated to `a-apin`
+- `ARC-OSS-SHOWCASE.md` — add TS pillar as forkable primitives; add T3.6 scalability architecture as a forkable primitive
+- `CLAUDE.md` (this repo's project context) — verify the team table + the canonical pitch frame match Section 3.1; update HTTPS domain reference; verify RFB 04 + RFB 02 + RFB 06 alignment is named in the Scope section
+
+**RFB-alignment language for the README (drop-in):**
+
+> **Hackathon RFB alignment.** Archimedes is built for **[RFB 04 Adaptive Portfolio Manager](https://luma.com/7i50p2r9)** — constant rebalancing, regime detection, risk management, goal-based portfolio interfaces, correlation-based diversification, cross-chain-ready execution. Our **Strategy Generation → Portfolio Construction → Live Execution** agent loop is the AdaptiveFolio / RegimeShift pattern the RFB describes, made non-custodial (user signs all binding moves; agent has rebalance authority only). **Adjacent fit:** RFB 02 Prediction Market Trader Intelligence (our Kelly Criterion + risk parity + +EV sizing primitive applies directly) and RFB 06 Social Trading Intelligence (our Tier-1 verified strategy library + paper-anchored passport IS the AI-curated leaderboard the RFB calls for).
 
 **M.10 deliverable detail (write the subagent prompt now so we don't lose it).** Sunday afternoon, after all functional work is merged and the app validated, spawn a foreground general-purpose subagent with this prompt:
 
@@ -1607,21 +1857,31 @@ Repo: /Users/dbrowne/Desktop/Programming/GitHub/Agora/archimedes  (branch off ma
 Plan file: docs/specs/launch-execution-plan-2026-05-23.md
 
 Read first:
-- The plan file sections 1, 2.3, 4 (T1.3 / T1.4 / T1.5 specs in full).
+- The plan file sections 1, 2.3, 2.6 (spec elaboration process), 4 (T1.3 / T1.4 / T1.5
+  seed specs in full), and 3.3.1 (user-agent interaction model).
 - docs/specs/phase5-execution-runbook.md (PR #143's planning doc).
 - backend/archimedes/chain/agent_runner.py
 - ui/src/components/CreateVaultModal.jsx (PR #142 ships this).
 
+Spec elaboration protocol per § 2.6:
+- T1.3 (DepositFlow): MEDIUM. Maestro inline audit using Read + Grep. Verify the viem
+  writeContract pattern in WalletConnect.jsx; verify USDC/Vault ABIs are exported from
+  ui/src/config.js; verify CreateVaultModal call site lines after PR #142 lands. Elaborate
+  the seed spec with file:line precision before filing.
+- T1.4 (health/amm + agent runner poll): SMALL. Maestro inline.
+- T1.5 (e2e smoke): SMALL. Maestro inline. Reference bootstrap_vaults.py as precedent.
+
 Execute in order:
 1. WAIT for Dan to merge PR #142 (out of draft) + PR #143. Confirm both on main before proceeding.
-2. Copy T1.3 spec body into a new gh issue. Title prefix "APIN - Frontend -". DO NOT
-   add t2o2 assignee. Note the issue number.
-3. Same for T1.4 ("APIN - Backend - ..."). Mark "Depends on #<T1.3 number>".
+2. Elaborate the T1.3 seed (Maestro inline audit per § 2.6). Then copy the elaborated
+   body into a new gh issue. Title prefix "APIN - Frontend -". DO NOT add t2o2
+   assignee. Note the issue number.
+3. Same flow for T1.4 ("APIN - Backend - ..."). Mark "Depends on #<T1.3 number>".
 4. Dan will assign t2o2 manually. Watch for the bot's PR. When it lands, run the
    Verification Protocol from § 2.5 (Maestro inline or spawn one foreground Explore
    subagent with the template in Appendix B). Approve only if every acceptance command
    passes; reject + file follow-up issue if any fails, pasting the failing command as evidence.
-5. Copy T1.5 spec into an issue (depends on T1.3 + T1.4). UNASSIGNED.
+5. Elaborate + file T1.5 (depends on T1.3 + T1.4). UNASSIGNED.
 6. After T1.5 lands, run the e2e smoke yourself with a fresh testnet wallet. Capture
    arcscan tx links + /api/traces/<id>/verify response. Commit evidence to
    docs/runbooks/arc-testnet-e2e-evidence.md.
@@ -1631,6 +1891,7 @@ Anti-goals:
 - No env-var / docker-compose / terraform changes (Track C owns those).
 - No UI work outside DepositFlow + the existing CreateVaultModal call site.
 - Do NOT assign t2o2 to any issue — Dan does that manually.
+- Do NOT file seed-grade specs — every spec gets elaborated per § 2.6 before filing.
 
 Done = T1.3 + T1.4 + T1.5 merged on main, evidence file committed, end-to-end trade
 visible at testnet.arcscan.app.
@@ -1646,27 +1907,40 @@ Repo: as Track A.
 Plan file: docs/specs/launch-execution-plan-2026-05-23.md
 
 Read first:
-- Sections 1, 2.3, 5 (T2.1 through T2.8 in full).
+- Sections 1, 2.3, 2.6 (spec elaboration), 5 (T2.1 through T2.8 in full), 3.3.1
+  (user-agent interaction model).
 - docs/specs/page-roles-spec.md
 - The 5 UI components that need surgery: ui/src/components/{Landing,Generate,Explore,
   Reasoning,Portfolio}.jsx
-- Snapshot what each page renders today via curl http://13.40.112.220/<route> for
-  context (current code is the source of truth).
+- Snapshot what each page renders today via curl https://archimedes-arc.app/<route>
+  (or the legacy 13.40.112.220 IP if DNS hasn't cut over yet) for context. Current
+  code is the source of truth.
+
+Spec elaboration protocol per § 2.6:
+- T2.2 (Generate UI consolidation): BIG. **Spawn audit Explore subagent.** Verify
+  Generate.jsx mode-picker line numbers post-PR-#144; map every SSE event in
+  generate_schemas.py; confirm strategy_fusion + strategy_architect + portfolio_agent
+  entry points; fold subagent output into spec before filing.
+- T2.7 (WelcomeProfileModal): BIG. **Spawn audit Explore subagent.** Verify chat_routes.py
+  router pattern; verify strategy_store.py ORM pattern; verify OnboardingTour localStorage
+  gate pattern; identify exact Layout.jsx + WalletConnect.jsx integration points.
+- T2.1, T2.3, T2.8: MEDIUM. Maestro inline audit.
+- T2.4, T2.5, T2.6: SMALL. Maestro inline.
 
 Execute in order:
 1. WAIT for Dan to merge Daniel R's PR #144 first — it touches 18 files that collide
    with our T2.x specs. After merge, re-read Landing/Layout/Generate/Portfolio/Reasoning/
    Strategies/OnboardingTour/PortfolioAdvisor/RigorExplainer; confirm specs still match;
    tweak T2.1/T2.2/T2.6/T2.7 if needed.
-2. File T2.1 (Home page sidebar parity + CTA differentiation). UNASSIGNED.
-3. File T2.4 (Corpus polish: Catalog default + plain-English labels). UNASSIGNED. Smallest, ship-fast.
-4. File T2.3 (Explore real prices). UNASSIGNED. Backend route handler is fine (36 lines).
-5. File T2.5 (Reasoning Verify-on-chain). UNASSIGNED. Backend verify endpoint already
-   works (traces_routes.py:252). Frontend-only fix.
-6. File T2.6 (Portfolio activity feed honesty). UNASSIGNED.
-7. File T2.2 (Generate UI consolidation). UNASSIGNED. Biggest backend touch.
-8. File T2.7 (WelcomeProfileModal). UNASSIGNED.
-9. File T2.8 (agents/ subpackage refactor). UNASSIGNED. Depends on T2.1 + T2.2 stability.
+2. Elaborate + file T2.1 (Home page sidebar parity + CTA differentiation). UNASSIGNED.
+3. Elaborate + file T2.4 (Corpus polish: Catalog default + plain-English labels). UNASSIGNED. Smallest, ship-fast.
+4. Elaborate + file T2.3 (Explore real prices). UNASSIGNED. Backend route handler is fine (36 lines).
+5. Elaborate + file T2.5 (Reasoning Verify-on-chain). UNASSIGNED. Backend verify endpoint
+   already works (traces_routes.py:252). Frontend-only fix.
+6. Elaborate + file T2.6 (Portfolio activity feed honesty). UNASSIGNED.
+7. **AUDIT-SUBAGENT + file T2.2** (Generate UI consolidation). UNASSIGNED. Biggest backend touch.
+8. **AUDIT-SUBAGENT + file T2.7** (WelcomeProfileModal). UNASSIGNED.
+9. Elaborate + file T2.8 (agents/ subpackage refactor). UNASSIGNED. Depends on T2.1 + T2.2 stability.
 
 Verification: § 2.5. Reject any PR that introduces TODO / FIXME / placeholder / fake-data
 strings. Reject any PR that removes tests to make CI pass.
@@ -1676,6 +1950,7 @@ Anti-goals:
 - No new routing libraries.
 - No deletion of strategy_fusion / strategy_architect / portfolio_agent.
 - Do NOT assign t2o2 to any issue — Dan does that manually.
+- Do NOT file seed-grade specs — every spec gets elaborated per § 2.6 before filing.
 
 Done = 8 PRs merged, every page passes M.9 visual review pass.
 ```
@@ -1684,45 +1959,67 @@ Done = 8 PRs merged, every page passes M.9 visual review pass.
 
 ```
 You're driving Track C of the Archimedes launch plan. Goal: stand up the production AWS
-substrate (S3, DynamoDB, GPU EC2 for KB pipeline) with least-privilege IAM and budget
-caps.
+substrate (S3, DynamoDB, GPU EC2 for KB pipeline, ALB + CloudFront + auto-scaling
+backend tier) with least-privilege IAM and budget caps.
 
 Repo: as Track A.
 Plan file: docs/specs/launch-execution-plan-2026-05-23.md
 
 Read first:
-- Sections 1, 6 (T3.1 / T3.2 / T3.3 / T3.4 / T3.5) + Section 7 (TS.6 + TS.8).
+- Sections 1, 2.6 (spec elaboration), 6 (T3.1 through T3.6) + Section 7 (TS.6 + TS.8).
 - docs/specs/kb-integration-spec.md
+- docs/infra-setup.md (existing terraform + EC2 patterns)
 - submodules/KnowledgeBase/papers_analysis/ (read-only)
 - backend/archimedes/services/kb_runner.py
+- Current infra/ directory + docker-compose.production.yml
+
+Spec elaboration protocol per § 2.6:
+- T3.1 (S3 + DynamoDB + IAM): BIG. **Spawn audit Explore subagent.** Verify existing
+  infra/terraform patterns; map IAM role naming convention; map current EC2 instance
+  profile; identify exact AWS region.
+- T3.2 (GPU EC2 + KB pipeline): BIG. **Spawn audit Explore subagent.** Read
+  submodules/KnowledgeBase/papers_analysis/ entry points; verify run_kb_pipeline.py
+  current skeleton; identify expected runtime + memory requirements per pipeline stage.
+- T3.6 (ALB + CloudFront + ASG): BIG. **Spawn audit Explore subagent.** Map current
+  docker-compose.production.yml; verify which services share state vs are stateless;
+  identify Postgres + Redis externalization risks; map ACM cert region constraint.
+- T3.3, T3.4: MEDIUM. Maestro inline (depends on T3.2 output format).
+- T3.5 (Bedrock): MEDIUM. Filed but UNASSIGNED.
 
 Execute in order (strict serial due to dependencies):
-1. File T3.1 (S3 + DynamoDB + IAM). UNASSIGNED. Foundation. After Dan assigns + bot lands:
+1. AUDIT-SUBAGENT + file T3.1 (S3 + DynamoDB + IAM). UNASSIGNED. Foundation. After Dan
+   assigns + bot lands:
      aws s3 ls s3://archimedes-corpus-artifacts-prod/
      aws dynamodb describe-table --table-name archimedes-papers-index
-2. File T3.2 (GPU EC2 + KB pipeline). UNASSIGNED. Cold-start expected 4-6h.
-   Anti-goals enforced HARD: g4dn.xlarge maximum; spot if available; teardown confirmed
-   in PR comment.
-3. After T3.2 produces S3 artifact: file T3.3 (corpus graph + KG endpoints). UNASSIGNED.
-4. After T3.3: file T3.4 (CorpusGraph + CorpusKG UI render real data). UNASSIGNED.
-5. T3.5 (Bedrock): file the spec but DO NOT prompt Dan to assign it. It stays on-record
-   only.
+2. AUDIT-SUBAGENT + file T3.2 (GPU EC2 + KB pipeline). UNASSIGNED. Cold-start expected
+   4-6h. Anti-goals enforced HARD: g4dn.xlarge maximum; spot if available; teardown
+   confirmed in PR comment.
+3. **In parallel with T3.2 (independent infra surface):** AUDIT-SUBAGENT + file T3.6
+   (ALB + CloudFront + ASG). UNASSIGNED. Coordinate with Track D's TS.1 (ACM cert needed
+   for ALB). Pitch beat — virality-readiness.
+4. After T3.2 produces S3 artifact: elaborate + file T3.3 (corpus graph + KG endpoints).
+5. After T3.3 + T3.6: elaborate + file T3.4 (CorpusGraph + CorpusKG UI render real data).
+6. T3.5 (Bedrock): elaborate + file the spec but DO NOT prompt Dan to assign it. Stays
+   on-record only.
 
 Daily AWS spend monitor: at end of every Sat-night session,
 `aws ce get-cost-and-usage --time-period Start=<today>,End=<tomorrow> --granularity DAILY --metrics UnblendedCost`
 and post the number. If > $50 in a day, pause and audit.
 
 Anti-goals:
-- DO NOT spin up compute > g4dn.xlarge.
+- DO NOT spin up compute > g4dn.xlarge for GPU job.
 - DO NOT use on-demand if spot capacity exists for the GPU job.
 - DO NOT enable cross-region replication / data transfer for v1.
 - DO NOT make S3 buckets public.
 - DO NOT hardcode AWS account IDs.
 - DO NOT touch contracts/.
+- DO NOT exceed ASG max=4 in T3.6 (cost containment).
 - DO NOT assign t2o2 to any issue — Dan does that manually.
+- DO NOT file seed-grade specs — every spec gets elaborated per § 2.6 before filing.
 
-Done = T3.1 + T3.2 + T3.3 + T3.4 merged; S3 + DynamoDB populated; KB pipeline artifact
-in S3; Corpus Graph + KG tabs render real data on the live site.
+Done = T3.1 + T3.2 + T3.3 + T3.4 + T3.6 merged; S3 + DynamoDB populated; KB pipeline
+artifact in S3; Corpus Graph + KG tabs render real data; archimedes-arc.app serves
+through CloudFront + ALB + ASG; site survives a single-EC2 termination test.
 ```
 
 ### Track D — Security + manual deliverables (TS.x + M.x)
@@ -1740,17 +2037,25 @@ Read first:
 - Section 8 (manual deliverables) in full.
 - Pitch + demo docs to refresh per M.4 list.
 
+Spec elaboration protocol per § 2.6:
+- TS.1 (HTTPS via Route 53): MEDIUM. Maestro inline. Coordinate with T3.6 — the ACM cert
+  TS.1 obtains will be re-used by T3.6's ALB.
+- TS.2 (SSM secrets): MEDIUM. Maestro inline. Audit current secrets surface first.
+- TS.3, TS.4, TS.5, TS.7, TS.8: SMALL. Maestro inline.
+
 Execute in parallel:
 
 SECURITY (TS.x) — all UNASSIGNED:
-1. TS.1 HTTPS via Route 53 — file once T3.1's IAM pattern is approvable.
-2. TS.2 SSM secrets — file after T3.1 lands.
-3. TS.3 security headers — file after TS.1.
-4. TS.4 CORS lockdown — file anytime.
-5. TS.5 rate limiting — file anytime.
-6. TS.6 IAM least-privilege — covered in T3.1 + T3.5 specs.
-7. TS.7 Dependabot + detect-secrets — Dan toggles repo Settings; bot adds
-   .pre-commit-config.yaml + .secrets.baseline.
+1. Elaborate + file TS.1 (HTTPS via Route 53; archimedes-arc.app domain locked) —
+   coordinate with Track C's T3.6 (shared ACM cert).
+2. Elaborate + file TS.2 (SSM secrets) — file after T3.1 lands.
+3. Elaborate + file TS.3 (security headers) — file after TS.1.
+4. Elaborate + file TS.4 (CORS lockdown) — file anytime.
+5. Elaborate + file TS.5 (rate limiting). slowapi at app layer; CloudFront edge rate
+   limit (T3.6) provides defense-in-depth.
+6. TS.6 IAM least-privilege — covered in T3.1 + T3.5 + T3.6 specs; verify in those PRs.
+7. Elaborate + file TS.7 (Dependabot + detect-secrets) — Dan toggles repo Settings; bot
+   adds .pre-commit-config.yaml + .secrets.baseline.
 8. TS.8 user-data minimization — folded into T2.7 PR review.
 
 MANUAL (M.x):
@@ -1822,9 +2127,16 @@ MON 23:59 ET     Hard deadline.
 1. **T3.2 budget overrun.** SPECTER2 + REBEL on 10k papers may take 3-5h on g4dn even with GPU. File T3.2 FIRST so it starts running early.
 2. **T2.2 + T2.7 touch overlapping Layout/header files.** Sequence: T2.1 → T2.7 → T2.2 to avoid conflicts.
 3. **PR #144 conflicts with our specs.** Mitigation: merge #144 FIRST; re-read changed files; tweak T2.1/T2.2/T2.6/T2.7 specs before filing.
-4. **Bot over-engineering T3.1 with cross-region replication / lifecycle policies.** Anti-goals explicitly exclude these.
-5. **AWS spend spike.** Daily Cost Explorer query at end of each session; pause if > $50/day.
+4. **Bot over-engineering T3.1 / T3.6 with cross-region replication / lifecycle policies / WAF.** Anti-goals explicitly exclude these.
+5. **AWS spend spike.** Daily Cost Explorer query at end of each session; pause if > $50/day. T3.6 (ALB + ASG + CloudFront + dedicated DB EC2) is the largest steady-state add; baseline budget assumption ~$5/day idle.
 6. **Recent bot merges may have closed-without-fixing.** M.10 doc audit catches this; Verification Protocol guards forward.
+7. **T3.6 dedicated-DB EC2 is a single point of failure for state.** Backend tier is horizontally scaled but Postgres + Redis still live on one box (v1). Mitigation: nightly pg_dump → S3 (folded into T3.6 acceptance OR a TS follow-up); RDS + ElastiCache documented as v2 hop in pitch.
+
+**Risks that USED to be on this list but are now mitigated by design (not just accepted):**
+
+- **~~Virality kills the demo.~~** A successful demo that goes viral previously meant a single EC2 buckling under the load — forfeiting traction at the exact moment the market was paying attention. T3.6's ALB + CloudFront + auto-scaling group closes this; the system absorbs 50,000 wallet connections by scaling out and edge-caching, not by going down. The architecture pitches viral-readiness as a deliberate beat, not a hope.
+- **~~Plain HTTP red flag for judges.~~** TS.1 (Let's Encrypt cert on nginx — and now T3.6's ACM cert on ALB) closes this; green padlock at archimedes-arc.app from Sunday onward.
+- **~~Secrets in .env on a single EC2.~~** TS.2 moves to AWS SSM Parameter Store + IAM instance profile; the new backend AMI (T3.6) bakes nothing sensitive.
 
 **Graceful degradation (if Sunday goes sideways):**
 
@@ -1837,6 +2149,7 @@ MON 23:59 ET     Hard deadline.
 7. Form submitted with whatever we have.
 
 If KB pipeline doesn't land: hide Graph + KG tabs from /corpus (one PR, minimal change).
+If T3.6 doesn't land in time: revert DNS to direct A record to single EC2 + nginx HTTPS only; lose viral-readiness but keep HTTPS + the demo. Pitch deck still describes the ALB + CloudFront target architecture as "in flight at submission time."
 
 ---
 
