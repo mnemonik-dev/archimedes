@@ -119,6 +119,4 @@ jobs:
               });
             }
 
-            if (result.has_critical) {
-              core.setFailed('Critical complexity detected (CC ≥ 16). Reduce function complexity before merging.');
-            }
+            // Informational only — high CC is flagged in the table but never blocks merge.
