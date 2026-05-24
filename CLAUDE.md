@@ -417,6 +417,27 @@ ruff format .                      # apply formatting (line-length 120)
 The `--unsafe-fixes` flag should be reviewed line-by-line — those fixes need
 human judgment and are not auto-applied in CI or pre-commit.
 
+### Supply-chain scrutiny — dependency hygiene
+
+We don't bring on new dependencies casually, and we re-check the ones we have. Three
+practices:
+
+| Tool | Command | When to run |
+| --- | --- | --- |
+| `pip-audit` | `pip-audit` (whole env) or `pip-audit -r backend/requirements.txt` (declared only) | Before every PR that bumps or adds a Python dep. Once a week as background hygiene. |
+| `npm audit` | `cd ui && npm audit --omit=dev` (prod only) or `npm audit` (full) | Before every PR that bumps a Node dep. Dependabot also alerts asynchronously. |
+| Dependabot | Auto — see open dependabot PRs in the repo | Always-on. Triage promptly; don't let CVE PRs sit. |
+
+Three rules:
+
+- **Pin transitively-vulnerable deps directly when CVEs warrant it.** Example: `starlette>=1.0.1` is in `environment.yml` + `backend/requirements.txt` to close PYSEC-2026-161 (Host-header bypass) even though it would otherwise come transitively from FastAPI. When `pip-audit` flags a CVE in a transitive dep, add a direct pin to the closest `Fix Versions` so a fresh resolution can't regress.
+- **Keep `environment.yml` (local dev) and `backend/requirements.txt` (Docker / CI) aligned.** Drift is the most common source of "works on my machine" + "breaks in CI" — see the `slowapi` and `redis` misalignment that caused 62 user_routes test errors locally on 2026-05-24. Any new pip dep goes in BOTH files in the same PR.
+- **No new dep without a sentence on what it does + why we picked it.** Comments in the requirements / env files are how future readers (us in a week) understand the trust surface. "added by tooling" is not a sentence.
+
+**Frontend**: `npm ci` (used by both `quality-gate.yml` lint-report and local `ui/` setup) verifies `package-lock.json` integrity — that's the lockfile hash check we rely on for transitive integrity. Don't `npm install` (which can mutate the lockfile); always `npm ci`.
+
+**Pre-commit + detect-secrets** are tracked as separate hardening (issue TS.7 / #176-adjacent) — not implemented today.
+
 ### Smoke-test before deploy
 
 Don't push to shared infrastructure without smoke-testing locally first. If the deploy is a
