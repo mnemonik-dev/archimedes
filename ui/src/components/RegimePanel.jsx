@@ -155,9 +155,23 @@ export default function RegimePanel({ regime: regimeProp = null, compact = false
   const transitions = regime.transition_probabilities
   const currentTransitions = transitions?.[r]
   const recommended = regime.recommended_strategies || []
+  const recommendedTitles = regime.recommended_strategy_titles || []
 
-  // VIX score: rough scale — VIX 10=calm, VIX 40=crisis
-  const vixScore = signals.vix_score ?? Math.min((signals.vix_level - 10) / 30, 1)
+  // VIX honesty (red-team 2026-05-24 H2): the agent's VIX feed reports null
+  // when no data is available. VIX is never literally 0 — it's a price-of-
+  // insurance index that floors around 10. So treat 0 (and NaN) as "no data"
+  // and refuse to render a misleading row/bar.
+  const isUsable = v => v != null && Number.isFinite(v)
+  const vixUsable = isUsable(signals.vix_level) && signals.vix_level !== 0
+  const vixRocUsable = isUsable(signals.vix_rate_of_change)
+  const compositeUsable = isUsable(signals.composite_score)
+  const anySignalUsable = vixUsable || vixRocUsable || compositeUsable
+
+  // VIX score: rough scale — VIX 10=calm, VIX 40=crisis. Only meaningful
+  // when vix_level itself is usable.
+  const vixScore = vixUsable
+    ? (signals.vix_score ?? Math.min((signals.vix_level - 10) / 30, 1))
+    : 0
   const vixBarColor = vixScore > 0.7 ? 'var(--negative)' : vixScore > 0.4 ? '#f59e0b' : 'var(--positive)'
 
   return (
@@ -204,7 +218,7 @@ export default function RegimePanel({ regime: regimeProp = null, compact = false
         <div>
           <div className="label mb-3" style={{ fontSize: '0.72rem' }}>Signal Breakdown</div>
 
-          {signals.vix_level != null && (
+          {vixUsable && (
             <div style={{ marginBottom: 10 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
                 <span className="caption">VIX Level</span>
@@ -214,7 +228,7 @@ export default function RegimePanel({ regime: regimeProp = null, compact = false
             </div>
           )}
 
-          {signals.vix_rate_of_change != null && (
+          {vixRocUsable && (
             <div style={{ marginBottom: 10 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
                 <span className="caption">VIX Momentum</span>
@@ -226,13 +240,22 @@ export default function RegimePanel({ regime: regimeProp = null, compact = false
             </div>
           )}
 
-          {signals.composite_score != null && (
+          {compositeUsable && (
             <div style={{ marginBottom: 10 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
                 <span className="caption">Composite Score</span>
                 <span className="mono" style={{ fontSize: '0.8rem' }}>{fmt(signals.composite_score, 2)}</span>
               </div>
               <MiniBar value={signals.composite_score} max={1} color={rColor} />
+            </div>
+          )}
+
+          {!anySignalUsable && (
+            <div
+              className="caption"
+              style={{ color: 'var(--text-4)', marginBottom: 10, fontStyle: 'italic' }}
+            >
+              Signal unavailable — agent feed not connected.
             </div>
           )}
 
@@ -263,20 +286,28 @@ export default function RegimePanel({ regime: regimeProp = null, compact = false
         </div>
       </div>
 
-      {/* Recommended strategies */}
+      {/* Recommended strategies — show paper titles, never raw hashes
+          (red-team 2026-05-24 H3). Fall back to an 8-char id prefix only if
+          the backend didn't return a title for that index. */}
       {recommended.length > 0 && (
         <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
           <span className="caption" style={{ color: 'var(--text-3)', marginRight: 10 }}>Best strategies for this regime:</span>
-          {recommended.map(id => (
-            <span key={id} style={{
-              display: 'inline-block', marginRight: 6, padding: '2px 9px', borderRadius: 4,
-              fontSize: '0.75rem', fontWeight: 600,
-              background: 'rgba(255,255,255,0.07)', color: 'var(--text-2)',
-              border: '1px solid var(--glass-border)',
-            }}>
-              {id.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
-            </span>
-          ))}
+          {recommended.map((id, i) => {
+            const title = recommendedTitles[i]
+            const label = title
+              ? title.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+              : id.slice(0, 8)
+            return (
+              <span key={id} title={title || id} style={{
+                display: 'inline-block', marginRight: 6, padding: '2px 9px', borderRadius: 4,
+                fontSize: '0.75rem', fontWeight: 600,
+                background: 'rgba(255,255,255,0.07)', color: 'var(--text-2)',
+                border: '1px solid var(--glass-border)',
+              }}>
+                {label}
+              </span>
+            )
+          })}
         </div>
       )}
     </div>
