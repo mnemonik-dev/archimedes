@@ -52,7 +52,9 @@ export default function Layout({ page, setPage, walletAddr, onConnect, onDisconn
     }
     // Check localStorage gate — only show welcome modal once per wallet
     const seen = localStorage.getItem('archimedes.welcomeProfileSeen.' + walletAddr.toLowerCase())
-    fetch(`${API_BASE}/api/user/profile/${walletAddr}`)
+    fetch(`${API_BASE}/api/user/profile/${walletAddr}`, {
+        headers: { 'X-Wallet-Address': walletAddr },
+      })
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         setUserProfile(data)
