@@ -145,8 +145,7 @@ class CircleSigner:
                 logger.info("Circle tx submitted: %s", circle_tx_id)
 
             # Poll until terminal state
-            tx_hash = await self._poll_transaction(session, circle_tx_id)
-            return tx_hash
+            return await self._poll_transaction(session, circle_tx_id)
 
     async def sign_and_broadcast(
         self,

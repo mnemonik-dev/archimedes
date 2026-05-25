@@ -99,8 +99,7 @@ class AgentStateStore:
 
     async def get_heartbeat(self) -> str | None:
         r = await self._get_redis()
-        raw = await r.get(KEY_HEARTBEAT)
-        return raw
+        return await r.get(KEY_HEARTBEAT)
 
     # ─── Last rebalance per vault ─────────────────────────────────
 

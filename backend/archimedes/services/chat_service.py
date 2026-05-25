@@ -169,7 +169,7 @@ class ChatService:
         self,
         vault_address: str,
         user_message: str,
-        wallet_address: str,
+        wallet_address: str,  # noqa: ARG002 — accepted for future per-wallet personalization; current body uses vault_address + user_message only
     ) -> dict | None:
         """Generate an AI response using Claude or GLM API."""
         import anthropic

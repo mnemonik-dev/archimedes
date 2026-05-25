@@ -41,7 +41,7 @@ async def list_vaults(
 
 @vaults_router.post("/create", response_model=VaultCreateResponse)
 @limiter.limit("5/minute")
-async def create_vault(req: VaultCreateRequest, request: Request):
+async def create_vault(req: VaultCreateRequest, request: Request):  # noqa: ARG001 — slowapi @limiter.limit inspects param name
     """Deploy a new vault on Arc via VaultFactory."""
     from fastapi import HTTPException
 
@@ -85,7 +85,7 @@ async def get_vault_detail(address: str):
 
 @vaults_router.post("/metadata", response_model=VaultMetadataResponse)
 @limiter.limit("10/minute")
-async def store_vault_metadata(req: VaultMetadataRequest, request: Request):
+async def store_vault_metadata(req: VaultMetadataRequest, request: Request):  # noqa: ARG001 — slowapi @limiter.limit inspects param name
     """Store off-chain vault metadata (strategy associations, display name)."""
     from fastapi import HTTPException
 
@@ -130,7 +130,7 @@ async def get_vault_metadata(address: str):
 
 
 @vaults_router.post("/{address}/derive-allocations", response_model=SetAllocationsResponse)
-async def derive_vault_allocations(address: str, req: SetAllocationsRequest):
+async def derive_vault_allocations(address: str, req: SetAllocationsRequest):  # noqa: ARG001 — path param routes the request; allocation derivation reads strategies, not address
     """Derive target allocations from selected strategies."""
     from archimedes.chain.client import chain_client
     from archimedes.services.strategy_signal_evaluator import strategy_evaluator

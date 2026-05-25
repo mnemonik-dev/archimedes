@@ -291,7 +291,7 @@ class ChainExecutor:
         """Get all vault addresses from VaultFactory."""
         factory = self.loader.vault_factory
         vaults = await factory.functions.getVaults().call()
-        return [v for v in vaults]
+        return list(vaults)
 
     async def get_vault_count(self) -> int:
         factory = self.loader.vault_factory

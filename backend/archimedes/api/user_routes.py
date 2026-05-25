@@ -106,7 +106,7 @@ async def get_profile(wallet: str, request: Request):
 
 @user_router.post("/profile", response_model=UserProfileResponse)
 @limiter.limit("1/minute")
-async def upsert_profile(payload: UserProfileCreate, request: Request, response: Response):
+async def upsert_profile(payload: UserProfileCreate, request: Request, response: Response):  # noqa: ARG001 — response param threaded for downstream cookie/header setting; not used in current body
     """Create or update a wallet's profile. All fields optional except wallet.
 
     Email is encrypted at rest before storage. Caller must supply an

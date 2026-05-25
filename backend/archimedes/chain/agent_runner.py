@@ -906,8 +906,8 @@ class StrategyRunner:
         if EXPLICIT_VAULTS:
             return []
 
-        current = set(chain_client.to_checksum(v) for v in all_vaults)
-        known = set(chain_client.to_checksum(v) for v in self._known_vaults)
+        current = {chain_client.to_checksum(v) for v in all_vaults}
+        known = {chain_client.to_checksum(v) for v in self._known_vaults}
         new = current - known
 
         if new:

@@ -238,7 +238,7 @@ class CannedBackend:
     def available(self) -> bool:
         return False
 
-    def complete(self, system: str, user: str) -> str:
+    def complete(self, system: str, user: str) -> str:  # noqa: ARG002 — Protocol-shaped fallback; signature matches live LLM backends
         return json.dumps(
             {
                 "fallback": True,

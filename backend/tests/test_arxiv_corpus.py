@@ -204,14 +204,14 @@ def test_cache_is_idempotent_on_rerun(tmp_path) -> None:
         call_count["n"] += 1
         return _FAKE_PDF
 
-    kwargs = dict(
-        max_papers=10,
-        out_path=tmp_path / "m.jsonl",
-        pdf_dir=tmp_path / "pdfs",
-        text_dir=tmp_path / "text",
-        search=_search_factory(papers),
-        pdf_downloader=_counting_downloader,
-    )
+    kwargs = {
+        "max_papers": 10,
+        "out_path": tmp_path / "m.jsonl",
+        "pdf_dir": tmp_path / "pdfs",
+        "text_dir": tmp_path / "text",
+        "search": _search_factory(papers),
+        "pdf_downloader": _counting_downloader,
+    }
     build_corpus(**kwargs)
     build_corpus(**kwargs)
     # second run reuses the cached PDF: downloader hit exactly once
