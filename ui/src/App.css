@@ -811,6 +811,17 @@ textarea {
   appearance: none;
 }
 
+/* Restore native checkbox / radio appearance */
+input[type="checkbox"],
+input[type="radio"] {
+  width: auto;
+  padding: 0;
+  -webkit-appearance: checkbox;
+  appearance: checkbox;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+
 input:hover,
 select:hover,
 textarea:hover {
