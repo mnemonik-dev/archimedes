@@ -154,6 +154,20 @@ A **research-grounded strategy-generation instrument**:
 ### Slide 4: Live demo (90s)
 Just "**DEMO**" + the testnet URL. Run the spine above.
 
+**Right-column callouts to land during this slide (both shipped as of 2026-05-25):**
+
+- **Portfolio Advisor banner on /generate** (PR #216) — after a strategy generates,
+  scroll down to the advisor: Kelly-weighted allocations, stress-test matrix, variance
+  decomposition, and a keccak-256 trace anchor. This is the "preview before you deposit"
+  beat. Say: *"Before you commit faucet USDC, the advisor shows you the math — who gets
+  how much, why, and what happens in a 2008 drawdown."*
+
+- **Regime-aware allocation** (PR #217, Ang & Bekaert 2002) — the advisor's risk-aversion
+  coefficient updates with the live regime: 1× in risk-on, 2× in risk-off, 4× in crisis.
+  If the regime panel shows anything other than risk-on, the allocation table will be
+  visibly more conservative. Say: *"The optimizer read the regime and adjusted — not
+  because we coded a rule, but because Ang & Bekaert proved it's the right move."*
+
 ### Slide 5: Competitive landscape (30s) — tiered, from `competitor-landscape.md`
 ```
 TIER 0 — live mainnet infra (vision/TAM, NOT today's competitor)
@@ -169,10 +183,10 @@ layer. We're the proof layer."*
 ### Slide 6: Why we'll score well
 | Criterion | Weight | How we score |
 |---|---|---|
-| Agentic Sophistication | 30% | 3-input fusion, async generation jobs, autonomous rebalance with traces resolving to source papers, on-chain anchoring. |
+| Agentic Sophistication | 30% | 3-input fusion, async generation jobs, autonomous rebalance with traces resolving to source papers, on-chain anchoring. Multi-turn tool-use portfolio agent (up to 12 iterations: `get_asset_stats` → `get_correlation` → `stress_test_portfolio` → finalize). Regime-aware γ scaling: optimizer adapts risk aversion live (1×/2×/4× per Ang & Bekaert 2002) — agent behavior changes with market state, not just user input. |
 | Traction | 30% | arc-canteen telemetry on every ship + user conversation; live testnet; the Corpus Explorer is a tangible, shareable artifact. |
 | Circle Tool Usage | 20% | Circle Wallets oracle signer, USDC settlement, faucet/testnet flow, 10 Arc contracts; Circle Agent Stack alignment tracked. |
-| Innovation | 20% | Proof-based curation (DSR+PBO) vs the Nov-2025 industry failure; memory-first compounding provenance substrate; ~10k-paper research engine. |
+| Innovation | 20% | Proof-based curation (DSR+PBO) vs the Nov-2025 industry failure; memory-first compounding provenance substrate; ~10k-paper research engine. Portfolio Advisor surfaced on /generate as preview-before-deposit: Kelly weights, stress matrix, variance decomposition, keccak trace anchor — visible before a single USDC is committed. |
 See [`judging-rubric-assessment.md`](judging-rubric-assessment.md) for the running self-score.
 
 ### Slide 7: Why now (30s)
@@ -194,7 +208,7 @@ Five people + one-line credentials:
 - **Marten Windler** — Systems Engineering, U. Bremen. (Off-chain ↔ on-chain.)
 - **Daniel Reis dos Santos** — backend/distributed systems. (Frontend ownership.)
 - **Chuan Bai** — CTO @ Gyld Finance; built CoinShares' next-gen trading platform. (Architecture + on-chain.)
-- **Önder Akkaya** — ASA Statistical Insight World Champion; trainee actuary. (Portfolio math + rigor gate.)
+- **Önder Akkaya** — ASA Statistical Insight World Champion; trainee actuary. (Portfolio math + rigor gate. Ships: regime-aware Kelly/MVO optimizer with Ang & Bekaert 2002 adaptive γ; Portfolio Advisor banner on /generate with stress tests + on-chain trace anchor.)
 
 Ask: *"Not funding. (a) Feedback on the strategy passport + provenance trace as a
 candidate open standard; (b) intros to quant researchers to contribute to the corpus;

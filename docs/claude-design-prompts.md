@@ -27,7 +27,7 @@
 > 2007 + Moreira-Muir 2017 — pass all four gates on 22-year SPY); DB-backed
 > 10,000-paper q-fin corpus with the Corpus Explorer UI shipped; "Linus for
 > quantitative finance" framing locked per [`docs/user-stories.md`](user-stories.md);
-> **343 backend tests** + 16 analytics-engine tests green; **2 days to submission**.
+> **576 backend tests** + 16 analytics-engine tests green; **submission day**.
 > UI prompts work as **refinement** prompts against the live UI, not greenfield.
 >
 > **Aligned with [`docs/chuan-architecture-survey.md`](chuan-architecture-survey.md)
@@ -45,9 +45,9 @@
 >     Reasoning lost its Strategies tab (details moved to Library); Generate is
 >     streaming with a mode toggle (Streaming agent vs Architect fast preview);
 >     onboarding tour appears on first visit + via the "?" icon in the topbar.
->   - **Test counts**: 302 → 343 backend tests; 5 t2o2 issues open in the
->     queue ([#129](https://github.com/a-apin/archimedes-arcadia/issues/129)–
->     [#133](https://github.com/a-apin/archimedes-arcadia/issues/133)).
+>   - **Test counts**: 576 backend tests (as of 2026-05-25); t2o2 issues
+>     [#129](https://github.com/a-apin/archimedes-arcadia/issues/129)–
+>     [#133](https://github.com/a-apin/archimedes-arcadia/issues/133) resolved.
 
 ## Quick notes on using Claude Design
 
@@ -330,7 +330,7 @@ RIGHT — Rigor + on-chain
   PriceOracle, ReasoningTraceRegistry. **Vault.sol is now multi-asset NAV** —
   `totalAssets()` prices every holding via the oracle, so the share price is
   honest under mixed-asset allocations
-- Multi-wallet UX (MetaMask / Coinbase / generic). 302 backend tests + 16
+- Multi-wallet UX (MetaMask / Coinbase / generic). 576 backend tests + 16
   analytics-engine tests green.
 
 SLIDE 5 — DEMO
