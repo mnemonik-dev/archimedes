@@ -609,9 +609,13 @@ Hard-won (2026-05-16); ignore at your peril:
 
 ## Architectural primitives we want to get right
 
-These four architectural commitments are load-bearing for the pitch's defensibility.
+These five architectural commitments are load-bearing for the pitch's defensibility.
 Detail in [`docs/architectural-principles.md`](docs/architectural-principles.md); principle
 here.
+
+> **Academic backstops for the architecture (added Day-12, 2026-05-24):**
+> - **Xia et al. 2026 — *Agentic Trading: When LLM Agents Meet Financial Markets*** ([arxiv 2605.19337](https://arxiv.org/abs/2605.19337), ESWA). The audit-grade survey of 19 trading-agent papers: **15/19 are R0** (no code/data artifacts), **0/19 reach R3** (fully replayable with artifact versioning + immutable provenance), **2/19** report time-consistent train/test splits, **1/19** has a transaction-cost model, **1/19** documents universe/survivorship handling. Archimedes is engineered to be the first production trading-agent system to ship at R3 and to implement every named protocol Xia formalizes (Outcome Embargo, Time-Aware Retrieval, Hierarchy of Truth, Source Tracking, `V_check`) as **enforced mechanisms** rather than advisory guidelines. Detail in [`docs/specs/xia-2026-protocols.md`](docs/specs/xia-2026-protocols.md).
+> - **Chen et al. 2026 — *StockBench*** ([arxiv 2510.02209](https://arxiv.org/abs/2510.02209)). The first contamination-free, closed-loop, multi-month trading-agent benchmark. Our primary LLM family (GLM-4.5 → GLM-4.7) ranks #3 globally on the model baseline (behind Kimi-K2 and Qwen3-235B-Instruct; ahead of Claude-4-Sonnet at #7 and GPT-5 at #9). **Honest about the agent result:** when we layer Archimedes' Strategy Generation Agent on top, our `T3.8` harness run lands at #15/15 (Sortino -0.91). That underperformance is itself a load-bearing data point — Xia et al. argue (and StockBench corroborates) that *all* LLM agents underperform passive baselines in many windows, and our pitch surfaces this rather than hides it. Detail in [`docs/benchmarks/stockbench-results.md`](docs/benchmarks/stockbench-results.md).
 
 ### 1. The strategy passport
 
@@ -648,6 +652,36 @@ deltas are surfaced in the passport — never hidden behind an aggregate score. 
 the Day-3 addition that distinguishes Archimedes from the 96 other AI-portfolio
 submissions at the last Arc HackMoney. Detail in
 [`docs/specs/selection-bias-corrections-spec.md`](docs/specs/selection-bias-corrections-spec.md).
+
+### 5. K=1 generation + externalized rigor gate
+
+Codified 2026-05-23 after a Linus-Maestro architecture audit. The generation
+agent emits **one** winner per Generate call (plus a short list of
+considered-rejects with the rationale for rejecting each); the rigor gate
+runs **externally** to the generator and is what the user reviews on the
+strategy passport before deployment. Two reasons this is the right shape:
+
+- **Hosted-LLM budget economics.** K=many generation multiplies LLM cost
+  per Generate; K=1 keeps the demo affordable + responsive. The
+  considered-rejects panel preserves the "what else was on the table"
+  signal without paying for parallel deep generation.
+- **Externally-verifiable provenance.** Shifting provenance enforcement
+  from runtime types to externally-verifiable hashes (the strategy
+  passport's `methodology_hash` + `consulted_paper_hashes` anchored
+  on-chain via `ReasoningTraceRegistry`) is a strict upgrade — anyone
+  can re-derive and verify; the agent cannot lie about what it consulted.
+
+The user-facing surface this implies: **Generate produces a winner →
+the Considered Alternatives panel shows what was rejected and why → the
+rigor gate's verdict is rendered on the passport** before the Deploy
+button enables. This is the pattern judges should look for when reading
+the user journey in [`docs/user-stories.md`](docs/user-stories.md).
+
+Episodic compounding lives on top of this primitive: every fusion
+proposal + every rigor verdict + every user-reject is content-hashed
+and persisted via the `strategy_proposals` table (T-PE.8 / [issue
+#165](https://github.com/a-apin/archimedes-arcadia/issues/165)) so the
+library demonstrably *compounds* rather than restarting per session.
 
 ## Known risks
 
