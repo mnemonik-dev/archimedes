@@ -29,7 +29,10 @@ class GenerateBrief(BaseModel):
 class GenerateStartRequest(BaseModel):
     brief: GenerateBrief
     n_candidates: int = Field(default=1, ge=1, le=5, description="How many candidates to consider internally")
-    mode: str | None = Field(default=None, description="Optional pipeline override: 'fusion', 'architect', or 'agent'. When set, bypasses auto-routing.")
+    mode: str | None = Field(
+        default=None,
+        description="Optional pipeline override: 'fusion', 'architect', or 'agent'. When set, bypasses auto-routing.",
+    )
 
 
 class GenerateStartResponse(BaseModel):
