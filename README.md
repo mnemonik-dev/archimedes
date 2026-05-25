@@ -200,6 +200,10 @@ audit our claims.
 
 **Where else literature is cited.** Every Tier-1 strategy passport (`/library?tab=examples`) links to the paper that backs it. Every reasoning trace anchored on-chain via `ReasoningTraceRegistry` includes a `consulted_paper_hashes` field binding the decision to a specific corpus snapshot. The full implementation is in [`backend/archimedes/services/source_tracker.py`](backend/archimedes/services/source_tracker.py).
 
+## Known Limitations (testnet)
+
+- **AMM liquidity:** Only the sTSLA/USDC pool has reserves ($3.97 USDC). The 4 remaining pools (sNVDA, sSPY, sBTC, sGOLD) are deployed but empty — the synthetic token mint authority (`0x0546…`) is a separate Foundry deployer wallet not accessible to the bootstrap script's Circle signer. The autonomous agent's liquidity guard honestly skips swaps into empty pools and logs the reason on-chain. This is the rigor system working as designed: capital is never exposed to doomed trades.
+
 ## License
 
 [Unlicense](LICENSE) — full public-domain dedication. Use, modify, distribute freely. No warranty.
