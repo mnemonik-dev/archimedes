@@ -49,6 +49,7 @@ class VaultService:
     ) -> VaultListResponse:
         """List all vaults with summary data. Cached 30s to avoid N+1 on-chain reads."""
         import time as _time
+
         now = _time.time()
         if self._vault_list_cache and (now - self._vault_list_cache_ts) < self._VAULT_LIST_CACHE_TTL:
             vaults = list(self._vault_list_cache.vaults)
@@ -56,7 +57,7 @@ class VaultService:
                 vaults = [v for v in vaults if v.tier == tier]
             sort_key = sort_by if sort_by != "return_inception" else "return_inception"
             vaults.sort(key=lambda v: getattr(v, sort_key, 0) or 0, reverse=(order == "desc"))
-            return VaultListResponse(vaults=vaults[offset:offset+limit], total=len(vaults))
+            return VaultListResponse(vaults=vaults[offset : offset + limit], total=len(vaults))
 
         try:
             vault_addresses = await chain_executor.get_all_vaults()
@@ -90,6 +91,7 @@ class VaultService:
 
         # Cache before filtering/sorting
         import time as _time
+
         self._vault_list_cache = VaultListResponse(vaults=list(summaries), total=len(summaries))
         self._vault_list_cache_ts = _time.time()
 
