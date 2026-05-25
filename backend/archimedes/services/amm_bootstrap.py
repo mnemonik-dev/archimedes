@@ -15,9 +15,13 @@ from archimedes.chain.contracts import get_contract_loader
 logger = logging.getLogger(__name__)
 
 
-async def bootstrap_amm_liquidity(usdc_per_pool: float = 3.0) -> dict:
-    """Add liquidity to all AMM pools.
+async def bootstrap_amm_liquidity(usdc_per_pool: float = 1500.0) -> dict:
+    """Add liquidity to all AMM pools that have zero or insufficient reserves.
 
+    Default $1500 per pool clears the MIN_HEALTHY_LIQUIDITY_USDC=$1000
+    threshold from #342 Part 3 with a 50% safety margin.
+
+    Idempotent: skips pools that already have reserves above the target.
     Returns a dict of results per pool.
     """
     if not circle_signer.is_configured:
@@ -44,6 +48,18 @@ async def bootstrap_amm_liquidity(usdc_per_pool: float = 3.0) -> dict:
             if pool_addr == "0x0000000000000000000000000000000000000000":
                 results[symbol] = {"status": "skipped", "reason": "no pool"}
                 continue
+
+            # Idempotent: skip pools that already have sufficient reserves
+            pool_contract = loader.amm_pool(pool_addr)
+            try:
+                r0 = await pool_contract.functions.reserve0().call()
+                r1 = await pool_contract.functions.reserve1().call()
+                existing_usdc = max(r0, r1) / 1e6  # rough — larger reserve is likely USDC
+                if existing_usdc >= usdc_per_pool * 0.5:  # already has meaningful liquidity
+                    results[symbol] = {"status": "skipped", "reason": f"already has ${existing_usdc:.0f} reserve"}
+                    continue
+            except Exception:
+                pass  # can't read reserves — try to add anyway
 
             # Get oracle price
             oracle = loader.oracle_for(symbol)
