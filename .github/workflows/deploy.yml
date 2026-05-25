@@ -60,6 +60,12 @@ jobs:
             # Ensure PUBLIC_DOMAIN is set (gates /docs and email crypto)
             grep -q '^PUBLIC_DOMAIN=' .env || echo 'PUBLIC_DOMAIN=https://archimedes-arc.app' >> .env
 
+            # Inject Circle Modular Wallets client key (Issue #348)
+            # This is a client-side key (safe to embed in bundle); security is
+            # enforced by Circle's Allowed Domain check, not secrecy.
+            sed -i '/^VITE_CIRCLE_CLIENT_KEY=/d' .env
+            echo "VITE_CIRCLE_CLIENT_KEY=${{ secrets.VITE_CIRCLE_CLIENT_KEY }}" >> .env
+
             # Rebuild and restart services (detached)
             docker compose build --no-cache
             docker compose up -d --force-recreate --remove-orphans
