@@ -214,6 +214,7 @@ class _CandidateResult:
     reasoning: str
     rigor_verdict: dict[str, Any]
     passes_rigor: bool
+    regime: str = "neutral"  # "bull", "bear", or "neutral" (Issue #163)
     # Daily portfolio return series, used by the rigor gate. Populated in the
     # live path from the agent's price_histories; the fixture path leaves it
     # empty and supplies a hardcoded verdict.
@@ -341,7 +342,9 @@ class _Emitter:
 # ── Fixture path (deterministic; used in tests + when LLM unavailable) ────
 
 
-async def _run_fixture_candidate(*, candidate_id: str, brief: GenerateBrief, emit: _Emitter) -> _CandidateResult:
+async def _run_fixture_candidate(
+    *, candidate_id: str, brief: GenerateBrief, emit: _Emitter, regime: str = "neutral"
+) -> _CandidateResult:
     """Synthetic generation that exercises every event the live agent emits.
 
     Useful for: tests, demo on a laptop without an API key, smoke-tests.
@@ -373,16 +376,24 @@ async def _run_fixture_candidate(*, candidate_id: str, brief: GenerateBrief, emi
         result_summary="max drawdown −12.4% (2022_inflation)",
     )
 
-    name = f"Synthetic {brief.risk_appetite.title()} Blend"
-    weights = {"sSPY": 0.5, "sGLD": 0.3, "sBTC": 0.2}
+    # Regime-aware fixture names and weights
+    if regime == "bull":
+        name = f"Bull {brief.risk_appetite.title()} Momentum Blend"
+        weights = {"sSPY": 0.55, "sBTC": 0.30, "sGLD": 0.15}
+    elif regime == "bear":
+        name = f"Bear {brief.risk_appetite.title()} Defensive Blend"
+        weights = {"sGLD": 0.45, "sSPY": 0.30, "sBTC": 0.05, "sUSDC": 0.20}
+    else:
+        name = f"Synthetic {brief.risk_appetite.title()} Blend"
+        weights = {"sSPY": 0.5, "sGLD": 0.3, "sBTC": 0.2}
     return _CandidateResult(
         candidate_id=candidate_id,
         strategy_name=name,
-        thesis=f"Fixture-mode generation for brief: {brief.intent[:120]}",
+        thesis=f"Fixture-mode {regime} generation for brief: {brief.intent[:120]}",
         asset_universe=list(weights.keys()),
         source_papers=[],
         weights=weights,
-        reasoning="Fixture path — no LLM call. Weights chosen by deterministic stub.",
+        reasoning=f"Fixture path ({regime} regime) — no LLM call. Weights chosen by deterministic stub.",
         rigor_verdict={
             "dsr": 0.71,
             "pbo": 0.18,
@@ -391,13 +402,35 @@ async def _run_fixture_candidate(*, candidate_id: str, brief: GenerateBrief, emi
             "passing": True,
         },
         passes_rigor=True,
+        regime=regime,
     )
 
 
 # ── Live agent path ───────────────────────────────────────────────────────
 
 
-async def _run_live_candidate(*, candidate_id: str, brief: GenerateBrief, emit: _Emitter) -> _CandidateResult:
+# Regime-specific prompt suffixes that steer the agent's allocation (Issue #163)
+_REGIME_PROMPT_SUFFIX = {
+    "bull": (
+        "\n\nREGIME CONTEXT: You are constructing a BULL-tilted portfolio. "
+        "Favor momentum, trend-following, carry, and risk-on strategies. "
+        "Overweight assets with strong recent momentum and positive trend signals. "
+        "Allocate more to growth-oriented and higher-beta instruments. "
+        "Still respect the risk envelope, but tilt toward upside capture."
+    ),
+    "bear": (
+        "\n\nREGIME CONTEXT: You are constructing a BEAR-tilted / defensive portfolio. "
+        "Favor volatility-managed, minimum-variance, defensive, and mean-reversion strategies. "
+        "Overweight safe-haven assets (gold, treasuries, USDC/stablecoins). "
+        "Prioritize drawdown protection and tail-risk hedging over return maximization. "
+        "The goal is to survive and preserve capital in adverse market conditions."
+    ),
+}
+
+
+async def _run_live_candidate(
+    *, candidate_id: str, brief: GenerateBrief, emit: _Emitter, regime: str = "neutral"
+) -> _CandidateResult:
     """Drive the real ``portfolio_agent`` with per-iteration event emission.
 
     The agent's iteration loop is sync and runs in a thread. The thread uses
@@ -431,12 +464,23 @@ async def _run_live_candidate(*, candidate_id: str, brief: GenerateBrief, emit: 
     market_ranking = strategy_evaluator.rank_market(price_histories, lookback_days=90, top_n=20)
     strategies = default_provider().list_strategies()
 
+    # Map regime to agent regime string + confidence
+    agent_regime = {"bull": "expansion", "bear": "contraction"}.get(regime, "transition")
+    agent_confidence = 0.80 if regime in ("bull", "bear") else 0.65
+
     agent = get_portfolio_agent()
+    # Inject regime suffix into the agent's system prompt via the risk_appetite
+    # string (the agent reads it as context). The suffix is appended to the
+    # user-visible risk profile so the agent sees the regime steer.
+    regime_suffix = _REGIME_PROMPT_SUFFIX.get(regime, "")
+    if regime_suffix:
+        agent._regime_context = regime_suffix  # Consumed by _build_tool_user_prompt if available
+
     portfolio = await asyncio.wait_for(
         asyncio.to_thread(
             agent.propose_portfolio_with_tools,
-            "transition",  # regime; pipeline uses neutral default for v1
-            0.65,  # regime_confidence
+            agent_regime,  # regime: expansion/contraction/transition
+            agent_confidence,  # regime_confidence
             brief.risk_appetite,
             0.30,  # usdc_floor (moderate default)
             0.70,  # synth_budget
@@ -483,7 +527,9 @@ async def _run_live_candidate(*, candidate_id: str, brief: GenerateBrief, emit: 
     # Derive meaningful name + thesis from the brief and agent output (#299)
     top_picks = sorted(weights.items(), key=lambda x: -x[1])[:3]
     pick_summary = " / ".join(t for t, _ in top_picks)
-    strategy_name = f"{brief.risk_appetite.title()} Blend — {brief.intent[:50].strip()}"
+    regime_label = {"bull": "🟢 Bull", "bear": "🔴 Bear"}.get(regime, "")
+    regime_prefix = f"{regime_label} " if regime_label else ""
+    strategy_name = f"{regime_prefix}{brief.risk_appetite.title()} Blend — {brief.intent[:50].strip()}"
     agent_reasoning = getattr(portfolio, "reasoning_text", "") or ""
     thesis = (
         agent_reasoning
@@ -504,6 +550,7 @@ async def _run_live_candidate(*, candidate_id: str, brief: GenerateBrief, emit: 
         reasoning=getattr(portfolio, "reasoning_text", "") or "",
         rigor_verdict=verdict,
         passes_rigor=verdict.get("passing", False),
+        regime=regime,
         return_series=return_series,
     )
 
@@ -518,8 +565,14 @@ async def run_generation(
     n_candidates: int = 1,
     store: JobStore | None = None,
     mode: str | None = None,
+    dual_regime: bool = True,
 ) -> None:
     """Run the full streaming generation pipeline for one job.
+
+    When ``dual_regime=True`` (the default since Issue #163), the pipeline
+    generates BOTH a bull-tilted AND a bear-tilted candidate. Each regime
+    run uses biased paper retrieval + regime-specific reasoning. The user
+    sees both candidates with regime tags and can deploy one, both, or neither.
 
     Designed to be called as a fire-and-forget asyncio task from the route
     handler. Exceptions are caught + emitted as ``error`` events so the SSE
@@ -574,10 +627,17 @@ async def run_generation(
 
         # ── Auto-route to the best pipeline ──
         pipeline_name, pipeline_reason = _pick_pipeline(brief, mode_override=mode)
+
+        # Determine regime plan: dual_regime emits both bull + bear (Issue #163)
+        if dual_regime:
+            regimes: list[str] = ["bull", "bear"]
+        else:
+            regimes = ["neutral"] * n_candidates
         await emit.emit(
             "pipeline_selected",
             pipeline=pipeline_name,
             reason=pipeline_reason,
+            regimes=regimes,
         )
 
         # Decide path: live agent vs fixture
@@ -595,22 +655,29 @@ async def run_generation(
             arxiv_ids = []
         await emit.emit(
             "candidates_selected",
-            candidate_count=n_candidates,
+            candidate_count=len(regimes),
             source_arxiv_ids=arxiv_ids[: brief.max_papers],
+            regimes=regimes,
         )
 
         candidates: list[_CandidateResult] = []
-        for i in range(n_candidates):
-            candidate_id = f"cand_{i + 1}"
+        for i, regime in enumerate(regimes):
+            candidate_id = f"cand_{regime}" if dual_regime else f"cand_{i + 1}"
             try:
-                cand = await runner(candidate_id=candidate_id, brief=brief, emit=emit)
+                cand = await runner(
+                    candidate_id=candidate_id,
+                    brief=brief,
+                    emit=emit,
+                    regime=regime,
+                )
             except Exception as exc:
-                logger.exception("candidate %s failed: %s", candidate_id, exc)
+                logger.exception("candidate %s (%s) failed: %s", candidate_id, regime, exc)
                 await emit.emit(
-                    "error",
-                    message=f"candidate {candidate_id} failed: {exc}",
-                    recoverable=(i < n_candidates - 1),
-                    code="CANDIDATE_FAILED",
+                    "candidate_failed",
+                    candidate_id=candidate_id,
+                    regime=regime,
+                    error=str(exc),
+                    message=f"No {regime} candidate available — your brief may be structurally one-sided.",
                 )
                 continue
 
@@ -619,11 +686,13 @@ async def run_generation(
                 candidate_id=cand.candidate_id,
                 strategy_name=cand.strategy_name,
                 weights_preview=cand.weights,
+                regime=regime,
             )
             await emit.emit(
                 "candidate_evaluated",
                 candidate_id=cand.candidate_id,
                 rigor_verdict=cand.rigor_verdict,
+                regime=regime,
             )
             candidates.append(cand)
 
@@ -657,14 +726,27 @@ async def run_generation(
             considered_count=len(candidates),
         )
 
-        # Persist as a StrategyRecord and emit trace_hashed + persisted.
-        strategy_id, trace_hash = await _persist_candidate(best, brief)
-        await emit.emit("trace_hashed", trace_hash=trace_hash)
-        await emit.emit(
-            "persisted",
-            strategy_id=strategy_id,
-            redirect_url=f"/library?highlight={strategy_id}",
-        )
+        # Persist ALL candidates (both regimes) as StrategyRecords.
+        # Each gets its own strategy_id and trace_hash. The "best" is still
+        # highlighted but both are navigable from the library.
+        strategy_ids: dict[str, str] = {}  # candidate_id → strategy_id
+        for c in candidates:
+            sid, thash = await _persist_candidate(c, brief)
+            strategy_ids[c.candidate_id] = sid
+            await emit.emit(
+                "trace_hashed",
+                trace_hash=thash,
+                candidate_id=c.candidate_id,
+                regime=c.regime,
+            )
+            await emit.emit(
+                "persisted",
+                strategy_id=sid,
+                candidate_id=c.candidate_id,
+                regime=c.regime,
+                redirect_url=f"/library?highlight={sid}",
+            )
+        strategy_id = strategy_ids.get(best.candidate_id, "")
 
         # ── Persist all candidates to episodic memory (T-PE.8) ──
         try:
@@ -698,17 +780,18 @@ async def run_generation(
                 "candidates": [
                     {
                         "candidate_id": c.candidate_id,
-                        "strategy_id": strategy_id if c is best else None,
+                        "strategy_id": strategy_ids.get(c.candidate_id),
                         "strategy_name": c.strategy_name,
                         "rigor_verdict": c.rigor_verdict,
                         "passes_rigor": c.passes_rigor,
                         "selected": c is best,
+                        "regime": c.regime,
                     }
                     for c in candidates
                 ],
             },
         )
-        await emit.emit("done", strategy_id=strategy_id)
+        await emit.emit("done", strategy_id=strategy_id, all_strategy_ids=strategy_ids)
 
     except asyncio.CancelledError:
         await emit.emit("error", message="job cancelled", recoverable=False, code="CANCELLED")
@@ -769,13 +852,16 @@ async def _persist_candidate(c: _CandidateResult, brief: GenerateBrief) -> tuple
                 papers = [
                     PaperRef(arxiv_id=p.get("arxiv_id"), title=p.get("title", "")) for p in (c.source_papers or [])
                 ]
+                # Map candidate regime to passport regime_tag
+                _regime_tag_map = {"bull": "bull", "bear": "bear"}
+                _regime_tag = _regime_tag_map.get(c.regime, "regime_neutral")
                 passport = StrategyPassport(
                     id=record.id,
                     papers=papers,
                     methodology_summary=c.thesis or "",
                     asset_universe=c.asset_universe or [],
                     status=StrategyStatus(record.status) if record.status else StrategyStatus.CANDIDATE,
-                    regime_tag="regime_neutral",
+                    regime_tag=_regime_tag,
                     passes_rigor_gate=bool(c.rigor_verdict.get("passing", False)) if c.rigor_verdict else False,
                     deflated_sharpe_ratio=c.rigor_verdict.get("dsr") if c.rigor_verdict else None,
                     pbo_score=c.rigor_verdict.get("pbo") if c.rigor_verdict else None,

@@ -85,6 +85,49 @@ _ASSET_SYNONYMS: dict[str, tuple[str, ...]] = {
     "macro": ("macro", "regime", "business cycle", "monetary", "inflation"),
 }
 
+# ── Regime-biased keyword sets for bull/bear paper retrieval (Issue #163) ──
+_REGIME_BIAS_TERMS: dict[str, tuple[str, ...]] = {
+    "bull": (
+        "momentum",
+        "trend",
+        "trend-following",
+        "risk-on",
+        "carry",
+        "growth",
+        "breakout",
+        "relative strength",
+        "cross-section",
+        "factor",
+        "alpha",
+        "long",
+        "bull",
+        "expansion",
+        "recovery",
+        "upside",
+    ),
+    "bear": (
+        "volatility",
+        "vol-managed",
+        "defensive",
+        "hedge",
+        "tail risk",
+        "drawdown",
+        "inverse",
+        "mean-reversion",
+        "safe haven",
+        "flight to quality",
+        "risk-off",
+        "bear",
+        "contraction",
+        "recession",
+        "downside",
+        "protection",
+        "minimum variance",
+        "low volatility",
+        "short",
+    ),
+}
+
 
 # ── Fusion-specific canned fallback ──────────────────────────────
 
@@ -299,22 +342,37 @@ def _asset_terms(asset_classes: list[str]) -> list[str]:
     return terms
 
 
-def select_candidates(brief: FusionBrief, corpus: list[CorpusPaper]) -> list[CorpusPaper]:
+def select_candidates(
+    brief: FusionBrief,
+    corpus: list[CorpusPaper],
+    regime_bias: str | None = None,
+) -> list[CorpusPaper]:
     """Deterministic, explainable, pre-LLM. The model never widens this set.
 
     1. Asset-class overlap filter (skipped if no asset_classes given).
-    2. Rank by strategic_direction keyword hits, then recency (newer first
-       — alpha decay favours fresher results), then arxiv_id for total order.
+    2. Rank by strategic_direction keyword hits + regime bias hits, then
+       recency (newer first — alpha decay favours fresher results), then
+       arxiv_id for total order.
     3. Semantic rerank via paper_rag (defense-in-depth: keyword + semantic).
     4. Take top `paper_budget`.
+
+    Args:
+        regime_bias: "bull" or "bear" — biases retrieval toward momentum/trend
+            (bull) or vol-managed/defensive (bear) papers. None = no bias.
     """
     terms = _asset_terms(brief.asset_classes)
     filtered = [p for p in corpus if any(t in p.haystack for t in terms)] if terms else list(corpus)
 
     direction_kws = list(re.findall(r"[a-z]{3,}", brief.strategic_direction.lower()))
+    # Add regime-biased keywords to boost papers matching the regime
+    regime_kws: list[str] = []
+    if regime_bias and regime_bias in _REGIME_BIAS_TERMS:
+        regime_kws = list(_REGIME_BIAS_TERMS[regime_bias])
 
     def score(p: CorpusPaper) -> tuple[int, str, str]:
         hits = sum(1 for kw in direction_kws if kw in p.haystack)
+        # Regime bias adds extra weight for papers matching the regime
+        hits += sum(2 for kw in regime_kws if kw in p.haystack)
         # Negative hits → higher hits sort first; published desc → newer
         # first; arxiv_id asc as the final deterministic tiebreak.
         return (-hits, _recency_key(p.published), p.arxiv_id)

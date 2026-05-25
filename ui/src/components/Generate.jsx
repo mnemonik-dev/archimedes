@@ -105,11 +105,10 @@ export default function Generate({ onNavigate }) {
   }
 
 
-  const onJobDone = (result) => {
-    localStorage.removeItem(STORAGE_JOB_KEY)
-    if (result?.strategy_id && onNavigate) {
-      onNavigate('library', { highlight: result.strategy_id })
-    }
+  const onJobDone = (_result) => {
+    // Don't auto-navigate — let user see both bull/bear candidates first.
+    // They can click "View in Library" on either card.
+    // GenerationStream stays mounted showing the dual-regime result cards.
   }
 
   const resetJob = () => {
