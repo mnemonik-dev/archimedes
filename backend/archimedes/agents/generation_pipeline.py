@@ -63,6 +63,7 @@ def _llm_available() -> bool:
 
 def _pick_pipeline(
     brief: GenerateBrief,  # noqa: ARG001 — accepted for forward-compat brief-aware routing; current heuristic uses env/corpus only
+    mode_override: str | None = None,
 ) -> tuple[str, str]:
     """Decide which generation pipeline to use based on runtime conditions.
 
@@ -77,6 +78,10 @@ def _pick_pipeline(
        brief's inferred asset classes.
     3. **agent** (SSE streaming portfolio-advisor path) as the fallback.
     """
+    # ── User-selected mode override (#290) ──
+    if mode_override and mode_override in ("fusion", "architect", "agent"):
+        return mode_override, f"user selected {mode_override} mode"
+
     # ── Fusion check ──
     try:
         from archimedes.agents.strategy_fusion import fusion_enabled, load_corpus
@@ -512,6 +517,7 @@ async def run_generation(
     brief: GenerateBrief,
     n_candidates: int = 1,
     store: JobStore | None = None,
+    mode: str | None = None,
 ) -> None:
     """Run the full streaming generation pipeline for one job.
 
@@ -567,7 +573,7 @@ async def run_generation(
         )
 
         # ── Auto-route to the best pipeline ──
-        pipeline_name, pipeline_reason = _pick_pipeline(brief)
+        pipeline_name, pipeline_reason = _pick_pipeline(brief, mode_override=mode)
         await emit.emit(
             "pipeline_selected",
             pipeline=pipeline_name,

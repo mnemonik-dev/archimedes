@@ -66,7 +66,7 @@ async def start_generation(req: GenerateStartRequest, request: Request, response
 
     # Fire-and-forget the pipeline. The route doesn't await it; the SSE stream
     # below tails the event log written by the pipeline as it runs.
-    task = asyncio.create_task(_run_with_cleanup(job_id, req.brief, req.n_candidates))
+    task = asyncio.create_task(_run_with_cleanup(job_id, req.brief, req.n_candidates, req.mode))
     _register_task(job_id, task)
 
     return GenerateStartResponse(
@@ -76,9 +76,9 @@ async def start_generation(req: GenerateStartRequest, request: Request, response
     )
 
 
-async def _run_with_cleanup(job_id: str, brief: GenerateBrief, n_candidates: int) -> None:
+async def _run_with_cleanup(job_id: str, brief: GenerateBrief, n_candidates: int, mode: str | None = None) -> None:
     try:
-        await run_generation(job_id=job_id, brief=brief, n_candidates=n_candidates)
+        await run_generation(job_id=job_id, brief=brief, n_candidates=n_candidates, mode=mode)
     except asyncio.CancelledError:
         raise
     except Exception:  # safety net — run_generation already emits error events
