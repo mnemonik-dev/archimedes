@@ -81,7 +81,10 @@ export function hasStoredPasskey() {
 // Throws standard WebAuthn DOMException errors on user cancellation
 // (NotAllowedError) or domain mismatch (SecurityError) — caller should
 // catch and surface a friendly message.
-export async function connectCirclePasskey({ mode = 'auto', username = 'Archimedes user' } = {}) {
+// Username constraint per Circle API: 5-50 chars, [a-zA-Z0-9_@.:+-]+ only.
+// Spaces are rejected; 'Archimedes user' (the old default) failed every
+// first-time signup with "The username is invalid."
+export async function connectCirclePasskey({ mode = 'auto', username = 'archimedes' } = {}) {
   if (!circlePasskeyEnabled()) {
     throw new Error('Circle passkey wallet is not configured (missing VITE_CIRCLE_CLIENT_KEY).')
   }
