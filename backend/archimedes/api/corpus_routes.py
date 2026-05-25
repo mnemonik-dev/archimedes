@@ -276,10 +276,12 @@ async def corpus_graph() -> dict[str, Any]:
 
 @corpus_router.get("/kg/entities")
 async def kg_search_entities(q: str = Query(..., min_length=2, max_length=120)) -> dict[str, Any]:
-    """Search KG entities by canonical name."""
+    """Search KG entities by canonical name, including connected relations."""
+    rows = []
+    relations = []
     try:
         from archimedes.db import get_session
-        from archimedes.models.kg import KGEntity
+        from archimedes.models.kg import KGEntity, KGRelation
 
         with get_session() as session:
             rows = (
@@ -289,15 +291,40 @@ async def kg_search_entities(q: str = Query(..., min_length=2, max_length=120)) 
                 .limit(50)
                 .all()
             )
+            # Gather relations connected to matched entities (Issue #345)
+            if rows:
+                entity_ids = [r.id for r in rows]
+                rel_rows = (
+                    session.query(KGRelation)
+                    .filter((KGRelation.subject_id.in_(entity_ids)) | (KGRelation.object_id.in_(entity_ids)))
+                    .limit(200)
+                    .all()
+                )
+                # Also fetch object entities so the graph can label them
+                obj_ids = {r.object_id for r in rel_rows} | {r.subject_id for r in rel_rows}
+                extra_ids = obj_ids - set(entity_ids)
+                if extra_ids:
+                    extra_entities = session.query(KGEntity).filter(KGEntity.id.in_(extra_ids)).all()
+                    rows = list(rows) + extra_entities
+                relations = [
+                    {
+                        "subject_id": r.subject_id,
+                        "object_id": r.object_id,
+                        "relation": r.relation,
+                        "confidence": r.confidence,
+                        "paper_arxiv_id": r.paper_arxiv_id,
+                    }
+                    for r in rel_rows
+                ]
     except Exception as exc:
         logger.warning("kg search failed: %s", exc)
-        rows = []
     return {
         "query": q,
         "entities": [
             {"id": r.id, "canonical_name": r.canonical_name, "entity_type": r.entity_type, "paper_count": r.paper_count}
             for r in rows
         ],
+        "relations": relations,
     }
 
 

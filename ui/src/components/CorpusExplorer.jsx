@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import CustomSelect from './CustomSelect'
 import CorpusGraph from './CorpusGraph'
+import CorpusKG from './CorpusKG'
 import { cleanLatex } from '../utils/latex'
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? ''
@@ -11,20 +12,13 @@ async function apiGet(path) {
   return res.json()
 }
 
-const TABS = ['catalog', 'overview', 'graph']
+const TABS = ['catalog', 'overview', 'graph', 'knowledge-graph']
 
-// Friendly tab labels. The "knowledge-graph" tab (rendered by CorpusKG) was
-// cut on 2026-05-25: REBEL #293 produced real multi-predicate triples in the
-// kg_relations table, but the /api/corpus/kg/entities endpoint returns only
-// entities (no relations), and the CorpusKG component reads `e.type` /
-// `r.predicate` while the backend persists `entity_type` / `relation` — so
-// the surface displayed "N entities, 0 relations" even when REBEL had run.
-// CorpusKG.jsx is kept in the tree for whoever wires up a proper KG viewer
-// once the endpoint round-trip is fixed. See follow-up issue.
 const TAB_LABELS = {
   catalog: 'Catalog',
   overview: 'Overview',
   graph: 'Graph',
+  'knowledge-graph': 'Knowledge Graph',
 }
 
 export default function CorpusExplorer() {
@@ -110,6 +104,11 @@ export default function CorpusExplorer() {
       {tab === 'graph' && (
         <div className="corpus-graph-container" style={{ padding: '8px 0' }}>
           <CorpusGraph />
+        </div>
+      )}
+      {tab === 'knowledge-graph' && (
+        <div style={{ padding: '8px 0' }}>
+          <CorpusKG />
         </div>
       )}
     </div>

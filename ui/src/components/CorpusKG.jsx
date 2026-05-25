@@ -44,7 +44,20 @@ export default function CorpusKG({ onOpenPaper }) {
       const res = await fetch(`${API_BASE}/api/corpus/kg/entities?q=${encodeURIComponent(searchTerm)}`)
       if (res.status === 503) throw new Error('KB pipeline still running — first artifact pending')
       if (!res.ok) throw new Error(res.statusText)
-      setData(await res.json())
+      const raw = await res.json()
+      // Normalize backend field names to frontend conventions (Issue #345)
+      if (raw.entities) {
+        raw.entities = raw.entities.map(e => ({ ...e, type: e.entity_type || e.type }))
+      }
+      if (raw.relations) {
+        raw.relations = raw.relations.map(r => ({
+          ...r,
+          source: r.subject_id ?? r.source,
+          target: r.object_id ?? r.target,
+          predicate: r.relation ?? r.predicate,
+        }))
+      }
+      setData(raw)
     } catch (e) {
       setError(e.message || 'Failed to load topic clusters')
     } finally {
