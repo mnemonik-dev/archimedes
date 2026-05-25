@@ -23,8 +23,10 @@ from archimedes.models.portfolio import (
 logger = logging.getLogger(__name__)
 
 # Minimum USDC-equivalent reserve a pool must hold for the executor to submit
-# a swap through it. Prevents doomed trades on thinly-seeded testnet pools.
-MIN_HEALTHY_LIQUIDITY_USDC = 1000.0
+# a swap through it. Prevents doomed trades on completely empty pools.
+# Set to $5 for testnet (wallet balance is limited by faucet rate).
+# Production would raise this to $1000+.
+MIN_HEALTHY_LIQUIDITY_USDC = 5.0
 
 
 class InsufficientLiquidityError(RuntimeError):

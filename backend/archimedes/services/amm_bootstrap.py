@@ -15,11 +15,13 @@ from archimedes.chain.contracts import get_contract_loader
 logger = logging.getLogger(__name__)
 
 
-async def bootstrap_amm_liquidity(usdc_per_pool: float = 1500.0) -> dict:
+async def bootstrap_amm_liquidity(usdc_per_pool: float | None = None) -> dict:
     """Add liquidity to all AMM pools that have zero or insufficient reserves.
 
-    Default $1500 per pool clears the MIN_HEALTHY_LIQUIDITY_USDC=$1000
-    threshold from #342 Part 3 with a 50% safety margin.
+    If usdc_per_pool is None (default), auto-calculates from the operator
+    wallet's USDC balance divided by the number of empty pools. This
+    ensures we use whatever funds are available rather than failing when
+    the wallet has less than the ideal $1500.
 
     Idempotent: skips pools that already have reserves above the target.
     Returns a dict of results per pool.
@@ -31,6 +33,45 @@ async def bootstrap_amm_liquidity(usdc_per_pool: float = 1500.0) -> dict:
     router = loader.amm_router
     usdc_address = chain_client.settings.usdc_address
     synth_addresses = chain_client.settings.synth_addresses
+
+    # Auto-calculate usdc_per_pool from wallet balance if not specified
+    if usdc_per_pool is None:
+        try:
+            usdc_contract = loader.usdc()
+            wallet_addr = chain_client.to_checksum("0xc221dcd6fe7d81ff741f94c08e61f52bea1f9ac9")
+            balance_raw = await usdc_contract.functions.balanceOf(wallet_addr).call()
+            wallet_usdc = balance_raw / 1e6
+            # Count empty pools
+            empty_count = 0
+            for sym, addr in synth_addresses.items():
+                if not addr:
+                    continue
+                try:
+                    pool_addr = await router.functions.getPool(
+                        chain_client.to_checksum(usdc_address), chain_client.to_checksum(addr)
+                    ).call()
+                    if pool_addr != "0x" + "0" * 40:
+                        pool = loader.amm_pool(pool_addr)
+                        r0 = await pool.functions.reserve0().call()
+                        if r0 == 0:
+                            empty_count += 1
+                except Exception:
+                    empty_count += 1
+            if empty_count > 0 and wallet_usdc > 2.0:
+                # Reserve $2 for gas, split rest across empty pools
+                usdc_per_pool = (wallet_usdc - 2.0) / empty_count
+                logger.info(
+                    "Auto-calculated $%.2f per pool (%d empty, $%.2f available)",
+                    usdc_per_pool,
+                    empty_count,
+                    wallet_usdc,
+                )
+            else:
+                usdc_per_pool = 5.0  # minimum fallback
+                logger.info("Fallback: $%.2f per pool (wallet: $%.2f)", usdc_per_pool, wallet_usdc)
+        except Exception as exc:
+            logger.warning("Balance check failed, using $5/pool fallback: %s", exc)
+            usdc_per_pool = 5.0
 
     results = {}
 
