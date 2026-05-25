@@ -583,6 +583,33 @@ export const VAULT_FACTORY_ABI = [
 
 export const USDC = "0x3600000000000000000000000000000000000000"
 
+// USDC on Arc testnet uses 6 decimals (verified via
+// `eth_call decimals() at 0x3600...`). Used by getUsdcBalance() below.
+export const USDC_DECIMALS = 6
+
+// Read the USDC balance for an arbitrary address (the wallet menu uses
+// this to show the user how many test USDC they have). Returns a Number
+// in USDC units (already divided by 10^USDC_DECIMALS); returns null on
+// any failure so the caller can fall back to a placeholder rather than
+// crash the menu render.
+export async function getUsdcBalance(address) {
+  if (!address) return null
+  try {
+    const raw = await publicClient.readContract({
+      address: USDC,
+      abi: [
+        { name: 'balanceOf', type: 'function', stateMutability: 'view',
+          inputs: [{ type: 'address' }], outputs: [{ type: 'uint256' }] },
+      ],
+      functionName: 'balanceOf',
+      args: [address],
+    })
+    return Number(raw) / 10 ** USDC_DECIMALS
+  } catch {
+    return null
+  }
+}
+
 export const ASSETS = [
   { id: 'TSLA',   name: 'Tesla',      sym: 'sTSLA',   icon: 'i-simple-icons-tesla',          oracle: '0xe1c9f2b11be97097223a66a188fca541e07873a6', vault: '0xf0356600e26c6c403ec4f5b36b0e3380bb0609ab', token: '0xd514cd27baf762c650536765cde9b61c876abacd' },
   { id: 'NVDA',   name: 'Nvidia',     sym: 'sNVDA',   icon: 'i-simple-icons-nvidia',          oracle: '0xeb36acf88e739dd312de8278985262146a017374', vault: '0x4c3cdc2bf44195ad8a4d201c8afbd453949a8781', token: '0x805e75019a1291a598dfc134ad2519121a35fb11' },
