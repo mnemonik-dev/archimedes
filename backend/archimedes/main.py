@@ -18,6 +18,12 @@ from slowapi.errors import RateLimitExceeded
 load_dotenv("../.env", override=True)  # Project root .env first (has real secrets)
 load_dotenv(".env", override=False)  # Backend-local .env fills in any missing (no override)
 
+# Load secrets from AWS SSM Parameter Store (production).
+# No-op when AWS_SSM_PATH_PREFIX is unset (local dev). Must run BEFORE
+# any service imports that read os.environ for API keys / secrets.
+from archimedes.services.secrets_service import load_ssm_secrets  # noqa: E402
+load_ssm_secrets()
+
 # Shared rate limiter (Redis-backed, falls back to in-memory).
 # Defined in a separate module to avoid circular imports with route modules.
 from archimedes.api.chat_routes import chat_router
