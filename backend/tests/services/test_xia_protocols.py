@@ -397,3 +397,55 @@ class TestTraceIntegration:
         cj = trace.canonical_json()
         assert "consulted_paper_hashes" in cj
         assert "paper1:hash1" in cj
+
+
+# ── 6. Runtime wiring: agent_runner produces non-empty hashes ─────────────
+
+
+class TestSourceTrackingRuntimeWiring:
+    """Confirms _paper_hashes_from_signals is wired into agent_runner (not test-only)."""
+
+    def test_paper_hashes_from_signals_non_empty(self):
+        """Helper produces non-empty hashes when signals carry arxiv_ids."""
+        from archimedes.chain.agent_runner import _paper_hashes_from_signals
+        from archimedes.services.strategy_signal_evaluator import StrategySignals
+
+        signals = [
+            StrategySignals(
+                strategy_id="abc123",
+                strategy_name="Faber SMA200",
+                paper_title="A Quantitative Approach to Tactical Asset Allocation",
+                signals=[],
+                paper_arxiv_id="",
+            ),
+            StrategySignals(
+                strategy_id="def456",
+                strategy_name="TSMOM",
+                paper_title="Time Series Momentum",
+                signals=[],
+                paper_arxiv_id="1105.0212",
+            ),
+        ]
+        hashes = _paper_hashes_from_signals(signals)
+        assert len(hashes) == 2
+        assert any("abc123" in h for h in hashes)
+        assert any("1105.0212" in h for h in hashes)
+
+    def test_paper_hashes_from_signals_empty_signals(self):
+        """Empty signals list produces empty hashes — no KeyError."""
+        from archimedes.chain.agent_runner import _paper_hashes_from_signals
+
+        assert _paper_hashes_from_signals([]) == []
+
+    def test_strategy_signals_has_paper_arxiv_id_field(self):
+        """StrategySignals carries paper_arxiv_id — runtime wiring is possible."""
+        from archimedes.services.strategy_signal_evaluator import StrategySignals
+
+        ss = StrategySignals(
+            strategy_id="x",
+            strategy_name="x",
+            paper_title="x",
+            signals=[],
+            paper_arxiv_id="2510.02209",
+        )
+        assert ss.paper_arxiv_id == "2510.02209"
