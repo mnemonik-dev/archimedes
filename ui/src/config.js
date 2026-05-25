@@ -467,8 +467,18 @@ if (typeof window !== 'undefined' && window.ethereum) {
       window.dispatchEvent(new CustomEvent('wallet-changed', { detail: { address: _address } }))
     }
   })
-  window.ethereum.on?.('chainChanged', () => {
-    window.location.reload()
+  // Coinbase Wallet (Chrome) re-emits chainChanged on internal lifecycle
+  // events — tab sync, popup re-open, multi-tab state sync — even when
+  // the chain hasn't changed. The previous handler reloaded on every
+  // emit, which produced an infinite reload loop on Chrome + Coinbase.
+  // Track the last-seen chain id and only react to actual transitions.
+  // viem clients are pinned to arcTestnet at construction so we don't
+  // need to rebuild them; just notify any consumer that wants to know.
+  let _lastChainId = null
+  window.ethereum.on?.('chainChanged', (newChainId) => {
+    if (newChainId === _lastChainId) return
+    _lastChainId = newChainId
+    window.dispatchEvent(new CustomEvent('wallet-chain-changed', { detail: { chainId: newChainId } }))
   })
 }
 
