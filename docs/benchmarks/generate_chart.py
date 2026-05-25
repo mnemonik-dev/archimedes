@@ -7,9 +7,9 @@ Produces docs/benchmarks/stockbench-vs-baselines.png
 import matplotlib
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import numpy as np
 from pathlib import Path
+
+import matplotlib.pyplot as plt
 
 # Data from Chen et al. 2026 + our run
 agents = [
@@ -55,7 +55,7 @@ ax.set_title(
 )
 
 # Add value labels
-for i, (v, agent) in enumerate(zip(sortino, agents)):
+for i, (v, agent) in enumerate(zip(sortino, agents, strict=True)):
     offset = 0.08 if v >= 0 else -0.08
     ha = "left" if v >= 0 else "right"
     ax.text(
@@ -79,7 +79,7 @@ ax.annotate(
     fontsize=8,
     fontstyle="italic",
     color="#d4a853",
-    arrowprops=dict(arrowstyle="->", color="#d4a853", lw=1.2),
+    arrowprops={"arrowstyle": "->", "color": "#d4a853", "lw": 1.2},
 )
 
 # Style

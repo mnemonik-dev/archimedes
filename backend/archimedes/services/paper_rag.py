@@ -208,7 +208,7 @@ def semantic_rerank(
     query: str,
     papers: list[dict[str, Any]],
     *,
-    use_paperqa: bool = False,
+    use_paperqa: bool = False,  # noqa: ARG001 — opt-in toggle for the PaperQA backend; wiring is in flight, kept declared so callers can pass it
 ) -> list[tuple[dict[str, Any], float]]:
     """Rerank papers by semantic similarity to ``query``.
 

@@ -171,7 +171,7 @@ def _utc_now_iso() -> str:
 # ── 1. Search (injectable seam) ─────────────────────────────────
 
 
-def _default_search(categories: Iterable[str], limit: int) -> Iterator[CorpusPaper]:
+def _default_search(categories: Iterable[str], limit: int) -> Iterator[CorpusPaper]:  # noqa: ARG001 — categories scoped via the per-category loop inside the body; declared for forward-compat filter
     """Live arXiv search, recency-first, across the category union.
 
     arXiv's API caps a single boolean OR query well below what we need and

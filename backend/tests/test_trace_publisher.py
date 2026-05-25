@@ -14,15 +14,15 @@ from archimedes.models.trace import DecisionType, ReasoningTrace
 
 def _make_trace(**overrides) -> ReasoningTrace:
     """Create a test trace with defaults."""
-    defaults = dict(
-        id="test-trace-001",
-        vault_address="0x1234567890abcdef1234567890abcdef12345678",
-        decision_type=DecisionType.REBALANCE,
-        trigger="strategy_signal_drift",
-        timestamp=datetime.now(UTC),
-        reasoning="Test trace for unit testing",
-        confidence=0.85,
-    )
+    defaults = {
+        "id": "test-trace-001",
+        "vault_address": "0x1234567890abcdef1234567890abcdef12345678",
+        "decision_type": DecisionType.REBALANCE,
+        "trigger": "strategy_signal_drift",
+        "timestamp": datetime.now(UTC),
+        "reasoning": "Test trace for unit testing",
+        "confidence": 0.85,
+    }
     defaults.update(overrides)
     return ReasoningTrace(**defaults)
 

@@ -21,7 +21,7 @@ load_dotenv(".env", override=False)  # Backend-local .env fills in any missing (
 # Load secrets from AWS SSM Parameter Store (production).
 # No-op when AWS_SSM_PATH_PREFIX is unset (local dev). Must run BEFORE
 # any service imports that read os.environ for API keys / secrets.
-from archimedes.services.secrets_service import load_ssm_secrets  # noqa: E402
+from archimedes.services.secrets_service import load_ssm_secrets
 
 load_ssm_secrets()
 
@@ -63,7 +63,7 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Custom handler returns JSON 429 with rate-limit headers
 @app.exception_handler(RateLimitExceeded)
-async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
+async def rate_limit_handler(request: Request, exc: RateLimitExceeded):  # noqa: ARG001 — FastAPI exception_handler signature requires request
     """Return 429 JSON with X-RateLimit-* headers."""
     response = JSONResponse(
         status_code=429,

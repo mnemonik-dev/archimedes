@@ -231,9 +231,8 @@ class TestListSsmParameters:
 
     @patch("boto3.client")
     def test_returns_empty_on_error(self, mock_boto3):
-        from botocore.exceptions import ClientError
-
         from archimedes.services.secrets_service import list_ssm_parameters
+        from botocore.exceptions import ClientError
 
         mock_boto3.return_value.get_parameters_by_path.side_effect = ClientError(
             {"Error": {"Code": "InternalError", "Message": "oops"}},

@@ -253,8 +253,8 @@ async def compute_pbo_endpoint(req: PBORequest):
 
 def _synthetic_returns_from_stub(
     sharpe: float,
-    cagr: float | None = None,
-    max_dd: float | None = None,
+    cagr: float | None = None,  # noqa: ARG001 — accepted for forward-compat; current stub only needs sharpe
+    max_dd: float | None = None,  # noqa: ARG001 — accepted for forward-compat; current stub only needs sharpe
     T: int = 504,  # ~2 years of daily data
 ) -> list[float]:
     """Generate synthetic daily returns matching stub Sharpe.
@@ -271,8 +271,7 @@ def _synthetic_returns_from_stub(
     # Target daily mean from annualized Sharpe
     daily_mean = sharpe * daily_vol / np.sqrt(252)
 
-    returns = rng.normal(daily_mean, daily_vol, size=T).tolist()
-    return returns
+    return rng.normal(daily_mean, daily_vol, size=T).tolist()
 
 
 def _load_strategy_code(code_path: str) -> str | None:

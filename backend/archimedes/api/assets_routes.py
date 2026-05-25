@@ -20,7 +20,7 @@ async def list_assets():
 async def get_asset_price_history(
     symbol: str,
     interval: str = Query("1d", pattern="^(1h|1d|1w)$"),
-    limit: int = Query(30, ge=1, le=365),
+    limit: int = Query(30, ge=1, le=365),  # noqa: ARG001 — declared for OpenAPI schema; histories not wired yet
 ):
     """Get historical prices for an asset (for charting)."""
     return AssetPriceHistoryResponse(

@@ -84,8 +84,7 @@ def get_daily_returns(session: Session, strategy_id: str) -> list[float]:
         import numpy as np
 
         ec = np.array(result.equity_curve)
-        returns = ((ec[1:] - ec[:-1]) / ec[:-1]).tolist()
-        return returns
+        return ((ec[1:] - ec[:-1]) / ec[:-1]).tolist()
 
     return []
 
@@ -152,7 +151,7 @@ def latest_backtests_by_strategy(
     strategy_ids: Iterable[str],
 ) -> dict[str, BacktestResultRecord]:
     """Fetch latest row per strategy_id."""
-    ids = [sid for sid in strategy_ids]
+    ids = list(strategy_ids)
     if not ids:
         return {}
 

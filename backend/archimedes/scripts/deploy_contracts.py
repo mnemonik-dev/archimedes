@@ -145,12 +145,11 @@ async def call_contract(contract_address: str, abi: list, function: str, args: l
         else:
             circle_params.append(arg)
 
-    tx_hash = await circle_signer.execute_contract(
+    return await circle_signer.execute_contract(
         contract_address=contract_address,
         abi_function=fn,
         abi_params=circle_params,
     )
-    return tx_hash
 
 
 async def main():
@@ -302,7 +301,7 @@ async def main():
 
     # Set oracle addresses on the vault (THE KEY FIX)
     print("\n  🔮 Setting token oracles on vault...")
-    oracle_tokens = [t for t in synth_tokens[:5]]  # first 5 synthetics
+    oracle_tokens = list(synth_tokens[:5])  # first 5 synthetics
     oracle_addrs = synth_oracles[:5]
     await call_contract(
         vault_addr,

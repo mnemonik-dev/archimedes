@@ -78,7 +78,7 @@ async def get_circle_integration_status():
 
 @agent_router.get("/health/amm", response_model=AMMHealthResponse)
 @limiter.exempt
-async def get_amm_health(request: Request):
+async def get_amm_health(request: Request):  # noqa: ARG001 — slowapi @limiter.exempt inspects param name
     """Report per-pool AMM liquidity status.
 
     Checks each synthetic token's AMM pool (synth/USDC pair) reserves

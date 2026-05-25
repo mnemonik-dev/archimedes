@@ -215,7 +215,7 @@ async def get_corpus_overview():
 @papers_router.get("/corpus/graph")
 async def get_corpus_graph(
     sample: int = 500,
-    lod: int = 1,
+    lod: int = 1,  # noqa: ARG001 — level-of-detail toggle declared for OpenAPI; KB-artifact LOD not yet wired
 ):
     """SPECTER2-similarity 2D scatter backed by KB pipeline artifacts.
 

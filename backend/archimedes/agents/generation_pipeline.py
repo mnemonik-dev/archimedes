@@ -62,7 +62,7 @@ def _llm_available() -> bool:
 
 
 def _pick_pipeline(
-    brief: GenerateBrief,
+    brief: GenerateBrief,  # noqa: ARG001 — accepted for forward-compat brief-aware routing; current heuristic uses env/corpus only
 ) -> tuple[str, str]:
     """Decide which generation pipeline to use based on runtime conditions.
 

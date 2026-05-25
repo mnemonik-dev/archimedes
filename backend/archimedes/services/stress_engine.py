@@ -345,7 +345,7 @@ def _resolve_asset_class(symbol: str) -> str | None:
 def stress_one(
     allocations: list[dict],
     scenario_id: str,
-    usdc_weight: float = 0.0,
+    usdc_weight: float = 0.0,  # noqa: ARG001 — accepted for API symmetry with stress_all; USDC is treated as zero-impact in single-scenario apply
 ) -> StressResult:
     """Apply a single scenario to a portfolio.
 

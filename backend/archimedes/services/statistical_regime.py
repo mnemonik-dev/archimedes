@@ -320,7 +320,7 @@ class StatisticalRegimeDetector:
             return Regime.RISK_OFF
         return Regime.CRISIS
 
-    def _compute_confidence(self, composite: float, vix: float) -> float:
+    def _compute_confidence(self, composite: float, vix: float) -> float:  # noqa: ARG002 — vix declared for future regime-conditional confidence weighting; current heuristic uses composite only
         """Compute confidence from the distance to regime boundaries.
 
         Confidence is higher when the composite score is far from
@@ -449,7 +449,7 @@ class StatisticalRegimeDetector:
 
 def create_regime_detector(
     previous_regime: Regime | None = None,
-    statistical: bool = True,
+    statistical: bool = True,  # noqa: ARG001 — accepted for the v1/v2-toggle plan in chuan-architecture-survey gap #2; both detectors currently coexist
 ) -> StatisticalRegimeDetector:
     """Factory for creating the regime detector.
 

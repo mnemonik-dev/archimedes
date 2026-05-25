@@ -61,7 +61,7 @@ class ArchitectCannedBackend:
     def available(self) -> bool:
         return False
 
-    def complete(self, system: str, user: str) -> str:
+    def complete(self, system: str, user: str) -> str:  # noqa: ARG002 — Protocol-shaped offline placeholder; signature matches live LLM backends
         ids = re.findall(r'"strategy_id"\s*:\s*"([0-9a-f]+)"', user)
         if not ids:
             ids = re.findall(r"\bid=([0-9a-f]{8,})", user)

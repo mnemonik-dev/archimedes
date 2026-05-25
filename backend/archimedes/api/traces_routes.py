@@ -258,7 +258,7 @@ async def publish_trace(req: TracePublishRequest, _: None = Depends(require_inte
 
 @traces_router.get("/{trace_id}/verify", response_model=TraceVerifyResponse)
 @limiter.exempt
-async def verify_trace(trace_id: str, request: Request):
+async def verify_trace(trace_id: str, request: Request):  # noqa: ARG001 — slowapi @limiter.exempt inspects param name
     """Verify a reasoning trace against its on-chain anchor."""
     from fastapi import HTTPException
 

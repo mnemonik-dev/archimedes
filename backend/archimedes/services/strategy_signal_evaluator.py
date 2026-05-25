@@ -685,7 +685,7 @@ def _52w_high_signal(
 def _buy_hold_signal(
     strategy_id: str,
     asset: str,
-    prices: pd.Series,
+    prices: pd.Series,  # noqa: ARG001 — signature symmetry with other signal generators; buy-and-hold is always-on, no price input needed
 ) -> AssetSignal:
     """Buy-and-hold baseline — always fully invested."""
     return AssetSignal(

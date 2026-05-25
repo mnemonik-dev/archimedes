@@ -105,7 +105,7 @@ class FusionCannedBackend:
     def available(self) -> bool:
         return False
 
-    def complete(self, system: str, user: str) -> str:
+    def complete(self, system: str, user: str) -> str:  # noqa: ARG002 — Protocol-shaped offline placeholder; signature matches live LLM backends
         ids = re.findall(r'"arxiv_id"\s*:\s*"([^"]+)"', user)
         ids = ids[:FUSION_MAX_PAPERS] or ["__none__"]
         return json.dumps(
@@ -311,7 +311,7 @@ def select_candidates(brief: FusionBrief, corpus: list[CorpusPaper]) -> list[Cor
     terms = _asset_terms(brief.asset_classes)
     filtered = [p for p in corpus if any(t in p.haystack for t in terms)] if terms else list(corpus)
 
-    direction_kws = [w for w in re.findall(r"[a-z]{3,}", brief.strategic_direction.lower())]
+    direction_kws = list(re.findall(r"[a-z]{3,}", brief.strategic_direction.lower()))
 
     def score(p: CorpusPaper) -> tuple[int, str, str]:
         hits = sum(1 for kw in direction_kws if kw in p.haystack)

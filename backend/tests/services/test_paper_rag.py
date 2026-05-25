@@ -211,7 +211,7 @@ class TestAugmentCandidateScores:
         assert len(result) == 3
         # At least one score should differ from another
         scores = [s for _c, s in result]
-        assert len(set(f"{s:.4f}" for s in scores)) > 1 or len(papers) <= 1
+        assert len({f"{s:.4f}" for s in scores}) > 1 or len(papers) <= 1
 
     def test_preserves_all_candidates(self, monkeypatch):
         """No candidates are dropped — only reordered."""

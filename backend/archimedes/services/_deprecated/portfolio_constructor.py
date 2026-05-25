@@ -65,7 +65,7 @@ class PortfolioConstructor:
 
     def construct(
         self,
-        current: Portfolio,
+        current: Portfolio,  # noqa: ARG002 — deprecated module; signature symmetry preserved for the canonical constructor decision tree
         strategies: list[Strategy],
         regime: RegimeClassification,
         risk_profile: RiskProfile = RiskProfile.MODERATE,

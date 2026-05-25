@@ -56,7 +56,7 @@ def _register_task(job_id: str, task: asyncio.Task) -> None:
 
 @generate_router.post("/start", response_model=GenerateStartResponse, status_code=202)
 @limiter.limit("5/minute")
-async def start_generation(req: GenerateStartRequest, request: Request) -> GenerateStartResponse:
+async def start_generation(req: GenerateStartRequest, request: Request) -> GenerateStartResponse:  # noqa: ARG001 — slowapi @limiter.limit inspects param name
     """Create a generation job and start the pipeline in the background."""
     store = get_job_store()
     job_id = await store.enqueue(

@@ -77,7 +77,7 @@ def _infer_category(methodology: str, risk_profiles: list[str]) -> Category:
 
 def _infer_risk_level(
     max_dd: float | None,
-    sharpe: float | None,
+    sharpe: float | None,  # noqa: ARG001 — accepted for future composite scoring; current heuristic uses max_dd + methodology only
     methodology: str,
 ) -> RiskLevel:
     """Infer risk level from backtest metrics and methodology."""
@@ -100,7 +100,7 @@ def _infer_risk_level(
 
 def _strategy_to_detail(
     strategy,
-    provider: LocalStrategyProvider,
+    provider: LocalStrategyProvider,  # noqa: ARG001 — accepted for future provider-side enrichment; current body reads strategy directly
 ) -> MarketplaceStrategyDetail:
     """Convert a Strategy model to a MarketplaceStrategyDetail."""
     methodology = strategy.methodology_summary or ""

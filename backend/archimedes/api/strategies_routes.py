@@ -444,7 +444,7 @@ async def get_portfolio_advisor(
     async def _build_and_anchor_trace(
         allocations_for_trace: list[dict],
         thesis_for_trace: str,
-        agent_obj,
+        agent_obj,  # noqa: ARG001 — accepted for symmetry with caller; closure captures rather than reads
     ) -> dict:
         import uuid
 
