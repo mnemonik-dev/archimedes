@@ -66,10 +66,10 @@ async def test_health_amm_200_when_pools_active():
 
     # Mock the pool contract
     mock_pool = MagicMock()
-    mock_pool.functions.tokenA.return_value.call = AsyncMock(return_value="0xAAA")
-    mock_pool.functions.tokenB.return_value.call = AsyncMock(return_value="0xBBB")
-    mock_pool.functions.reserveA.return_value.call = AsyncMock(return_value=1000000)
-    mock_pool.functions.reserveB.return_value.call = AsyncMock(return_value=2000000)
+    mock_pool.functions.token0.return_value.call = AsyncMock(return_value="0xAAA")
+    mock_pool.functions.token1.return_value.call = AsyncMock(return_value="0xBBB")
+    mock_pool.functions.reserve0.return_value.call = AsyncMock(return_value=1000000)
+    mock_pool.functions.reserve1.return_value.call = AsyncMock(return_value=2000000)
 
     # Mock the router
     mock_router = MagicMock()

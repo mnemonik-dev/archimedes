@@ -361,21 +361,21 @@ async def health_amm():
             pool_info = {"address": addr}
             try:
                 pool_contract = loader.amm_pool(addr)
-                # Try to read token addresses and reserves
-                token_a = await pool_contract.functions.tokenA().call()
-                token_b = await pool_contract.functions.tokenB().call()
-                reserve_a = await pool_contract.functions.reserveA().call()
-                reserve_b = await pool_contract.functions.reserveB().call()
+                # ABI uses UniswapV2-style names: token0/token1/reserve0/reserve1
+                t0 = await pool_contract.functions.token0().call()
+                t1 = await pool_contract.functions.token1().call()
+                r0 = await pool_contract.functions.reserve0().call()
+                r1 = await pool_contract.functions.reserve1().call()
                 pool_info.update(
                     {
-                        "token_a": token_a,
-                        "token_b": token_b,
-                        "reserve_a": reserve_a,
-                        "reserve_b": reserve_b,
+                        "token0": t0,
+                        "token1": t1,
+                        "reserve0": r0,
+                        "reserve1": r1,
                     }
                 )
-            except Exception:
-                pool_info["error"] = "failed to read pool state"
+            except Exception as exc:
+                pool_info["error"] = f"failed to read pool state: {type(exc).__name__}: {exc}"
             pools.append(pool_info)
 
         return {
