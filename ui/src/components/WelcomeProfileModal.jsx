@@ -62,7 +62,10 @@ export default function WelcomeProfileModal({ walletAddr, onDone, mode = 'welcom
       }
       const res = await fetch(`${API_BASE}/api/user/profile`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Wallet-Address': walletAddr,
+        },
         body: JSON.stringify(payload),
       })
       if (!res.ok) {
