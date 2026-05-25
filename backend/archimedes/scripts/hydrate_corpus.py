@@ -52,6 +52,20 @@ def _resolve_manifest() -> Path | None:
     return None
 
 
+def _is_writable(path: Path) -> bool:
+    """Probe whether ``path`` accepts a tiny write. Catches read-only mounts on
+    EC2 that previously caused this script to iterate the entire 10K-paper
+    manifest at one OSError-per-paper, blowing the SSH deploy timeout."""
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+        probe = path / ".hydrate_writable_probe"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink(missing_ok=True)
+        return True
+    except OSError:
+        return False
+
+
 def hydrate(
     manifest_path: Path | None = None,
     text_dir: Path | None = None,
@@ -65,8 +79,20 @@ def hydrate(
     text_dir = text_dir or Path(os.getenv("ARCHIMEDES_TEXT_DIR", str(DEFAULT_TEXT_DIR)))
     pdf_dir = pdf_dir or Path(os.getenv("ARCHIMEDES_PDF_DIR", str(DEFAULT_PDF_DIR)))
 
-    text_dir.mkdir(parents=True, exist_ok=True)
-    pdf_dir.mkdir(parents=True, exist_ok=True)
+    if not _is_writable(pdf_dir) or not _is_writable(text_dir):
+        logger.warning(
+            "hydrate: pdf_dir=%s or text_dir=%s is read-only; nothing to do",
+            pdf_dir,
+            text_dir,
+        )
+        return {
+            "manifest_found": True,
+            "manifest_path": str(manifest_path),
+            "papers": 0,
+            "hydrated": 0,
+            "skipped": 0,
+            "skipped_reason": "read_only_filesystem",
+        }
 
     papers: list[dict] = []
     with manifest_path.open(encoding="utf-8") as fh:
