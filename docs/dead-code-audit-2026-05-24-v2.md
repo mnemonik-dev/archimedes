@@ -1,10 +1,20 @@
-# Dead-Code Audit v2 — 2026-05-24 (refreshed 2026-05-25)
+# Dead-Code Audit v2 — 2026-05-24 (refreshed 2026-05-25 — submission day)
 
-> **Refresh 2026-05-25:** main moved by ~80 commits / 90+ files after the v2
-> baseline. Three v2 findings have been **resolved** by intermediate merges; no
-> new dead-code surfaced. The headline ("zero files safe to delete now")
-> is unchanged. New baseline: `main` @ `2195417` (Merge PR #263, 2026-05-25).
-> See § "Refresh delta" near the bottom of this doc.
+> **Refresh 2 (2026-05-25, submission day):** Pivots the doc from "what's safe
+> to delete" to **"what's still stub vs shipped, and where the plan gaps are"** —
+> the question that matters for the final submission window. The original audit's
+> headline ("zero files safe to delete now") still holds; the new value is the
+> **§ "Work Remaining Inventory"** near the bottom, which catalogs every
+> currently-stubbed file against the plan that protects it and what would
+> constitute "shipped." Baseline: `main` @ `2195417` (Merge PR #263, 2026-05-25)
+> — same as Refresh 1; no main commits have landed in the intervening hours
+> (the run of 5 dbrowneup PRs + 1 workflow PR Dan's session merged are all on
+> origin/main at this SHA already).
+>
+> **Refresh 1 (earlier 2026-05-25):** main moved by ~80 commits / 90+ files after
+> the v2 baseline. Three v2 findings were **resolved** by intermediate merges
+> (test_user_profile_privacy moved, source_tracker wired, StressScenarioPanel
+> wired); no new dead-code surfaced. See § "Refresh delta — 2026-05-25" mid-doc.
 
 > **Supersedes:** the earlier same-day v1 audit, which was retracted as unsound.
 > v1 ran against a static snapshot of `main` and treated "no current importer" as
@@ -377,6 +387,123 @@ prerequisite PRs haven't shipped.
   `test_amm_bootstrap.py`, etc.). None of those flip an audit verdict — they
   add tests for files that were already LIVE-via-entrypoint or
   PLAN-PROTECTED.
+
+---
+
+---
+
+## Work Remaining Inventory (2026-05-25, submission day)
+
+This section is the audit's primary deliverable for the final-window decision
+making. For each currently-stubbed file or planned-but-not-shipped surface,
+state precisely: **what exists today, what the plan says is supposed to exist,
+what would constitute "shipped," and who owns the gap.** This is *not* a delete
+list — it is a build list (and an honest "deferred" list).
+
+The aim of organizing it this way is to make it trivially clear to a reader (or
+to a `t2o2` issue author) what work is still on the table vs. what's done — and
+to surface the gaps that don't have an owner yet.
+
+### Closed since Refresh 1 (today) — confirmation
+
+These issues / PRs landed today and need to be reflected in any prior reading
+of the audit. Most were referenced as protection sources in v2:
+
+| Closed | What | Status of the protected file(s) |
+|---|---|---|
+| **#147** | AWS S3 + DynamoDB for paper artifacts + IAM | Infrastructure complete; `services/s3_artifact_store.py` + `services/dynamodb_paper_index.py` are foundation code (still zero runtime importers) — see below. |
+| **#151** | GPU EC2 + KB pipeline on 10k corpus → S3 / DynamoDB | Infrastructure complete; runtime wiring of pipeline output into the `/api/corpus/*` 503-or-real-data surface still needs to be exercised against the live KB artifacts. |
+| **#173** | `agents/` subpackage with shared `base.py` | Subpackage created; `AgentLike` Protocol exists at `agents/base.py` (36 LOC); **no runtime adopter has imported it yet.** Sequel issues #163 + #164 carry the adoption work. |
+| **#218** | StockBench harness (Önder) | Adapter consolidated to `evaluation/stockbench/adapter.py` (PR #239 Option C). LIVE via `__main__.py` entrypoint. |
+| **#219** | Xia 2026 named protocols | `source_tracker.py` wired into `chain/agent_runner.py:40` (PR #235); `purged_kfold` + other protocols enumerated in [`docs/specs/xia-2026-protocols.md`](specs/xia-2026-protocols.md). |
+
+### Still-stub files (zero runtime importers as of `2195417`)
+
+For each: the runtime importer count (excluding tests + self-import), test
+importer count, the plan that protects it, and what "shipped" looks like.
+
+Verified by `grep -rE '(from|import) <module>( |$|\.)' backend/ scripts/
+analytics-engine/` on 2026-05-25.
+
+| File | LOC | runtime / test importers | Protecting plan | What "shipped" looks like | Owner |
+|---|---:|---:|---|---|---|
+| `backend/archimedes/agents/base.py` | 36 | 0 / 0 | Closed #173 (subpackage created), open #163 + #164 (concrete adopters) | A Strategy Generation Agent + Portfolio Construction Agent both declare `AgentLike` and the `services/` callsites switch to importing from `agents/` rather than `services/`. Until then the Protocol is genuinely unreferenced. | Önder (#163), Daniel R. / Önder (#164) |
+| `backend/archimedes/services/regime_detector.py` | 111 | 0 / 1 | `docs/chuan-architecture-survey.md` gap #2 (regime consolidation); component-interfaces-spec | Önder reviews v1 (`regime_detector.py`) vs v2 (`statistical_regime.py`), picks one, deletes the other, and the surviving file is imported by `RegimePanel`'s data path. No issue filed yet. | Önder (architecture call) |
+| `backend/archimedes/services/statistical_regime.py` | 466 | 0 / 1 | Same as above (gap #2) | Same as above — consolidation picks one or the other. | Önder |
+| `backend/archimedes/services/_deprecated/portfolio_constructor.py` | 282 | 0 / 0 | `docs/specs/portfolio-constructor-decision-tree.md` retirement step | The decision tree's "retirement step" gets ticked (the surviving constructor(s) cover all callsites in `services/strategy_fusion.py` + the rebalance path) and the `_deprecated/` directory is deleted. | Önder (decision-tree owner) |
+| `backend/archimedes/services/_deprecated/kelly_portfolio.py` | 523 | 0 / 1 | Same retirement step | Same as above. | Önder |
+| `backend/archimedes/services/arxiv_corpus.py` | 478 | 0 / 1 | `docs/specs/spine-plus-v2-plan.md:909` (Phase 7 dedup #4) marked **Defer**; corpus-architecture.md as the canonical seed/intake path | Spine-plus-v2's "#4 Arxiv intake paths" consolidation PR ships, picking one of: `arxiv_corpus.py`, `corpus_service.py`, or `scripts/bulk_ingest_arxiv.py` as canonical. Currently deferred pending Dan's KB pipeline stabilization. | Dan |
+| `backend/archimedes/chain/strategy_publisher.py` | 190 | 0 / 6 | `docs/archive/launch-execution-plan-2026-05-23.md` (publishes Strategy Passport metadata on-chain via `StrategyRegistry` contract) | `StrategyPublisher` gets called from the strategy-deploy path (post-passport-creation) so passports anchor on-chain alongside reasoning traces. Today only the trace half is wired (`source_tracker` → `ReasoningTraceRegistry`); passport half is stub. | Chuan / Marten |
+| `backend/archimedes/services/dynamodb_paper_index.py` | NEW since v2 | 0 / 1 | `docs/archive/launch-execution-plan-2026-05-23.md`; closed #147 + #151 | KB pipeline output (paper-level metadata + cluster ID + embedding pointer) actually writes to DynamoDB on a pipeline run, and `corpus_routes.py` reads from it for the Explorer. Today: code exists, integration tested with mocks, no live KB artifact has been written yet. | Dan (KB pipeline), Chuan (infra glue) |
+| `backend/archimedes/services/s3_artifact_store.py` | NEW since v2 | 0 / 1 | Same as above | KB pipeline output (artifact JSON / pickled topic model / SPECTER2 embeddings) actually writes to S3 and `corpus_routes.py` resolves artifact pointers when serving the Explorer. Same status as DynamoDB — code exists, no live KB artifact yet. | Dan + Chuan |
+| `contracts/src/interfaces/IPriceOracle.sol` | 36 | n/a (Solidity interface) | `docs/specs/component-interfaces-spec.md`, `docs/specs/ecosystem-design-spec.md` | An off-chain consumer (e.g. a future external indexer or third-party oracle client) imports the interface ABI. **Today the interface is referenced by the spec but not implemented against by any external party** — keeping it is correct (it's a published contract); deleting would break the spec promise. | Chuan |
+
+**Aggregate count:** **10 stub files** carrying ~2,706 LOC, all protected by an
+active plan or interface promise. Zero are deletable today. Each row's "what
+shipped looks like" answers Dan's question literally — these are the gaps.
+
+### Plan gaps — work spec'd but not built (Phase 4 + Phase 5 + 3c + 9)
+
+The `docs/specs/spine-plus-v2-plan.md` phase status snapshot as of `2195417`:
+
+| Phase | Status | What's missing |
+|---|---|---|
+| **Phase 0** — Architectural Specs | ✅ LANDED | — |
+| **Phase 1** — Junk extermination + UX fixes | ✅ LANDED | — |
+| **Phase 2** — Streaming Generate on `portfolio_agent.py` | ✅ LANDED | — |
+| **Phase 3a + 3b** — Real Explore + Corpus depth | ✅ LANDED | — |
+| **Phase 3c** — KB integration | 🟡 SKELETON ONLY | Production pipeline body deferred pending Dan's Linus-side iteration. `services/kb_runner.py` + `services/kb_artifacts.py` + `scripts/run_kb_pipeline.py` exist as the runtime hooks; the pipeline has not been *run* end-to-end against the 10k corpus on the GPU EC2 host. `/api/corpus/*` returns **503 "kb_artifact_not_found"** until a real artifact lands. **Closed #151 means infra is ready; the artifact run is the remaining step.** |
+| **Phase 4** — Vault encapsulation (1:1, time-bound) | 🟠 PARTIAL | `vaults_routes.py` exists (7 endpoints incl. `/create`, `/{addr}/metadata`, `/{addr}/derive-allocations`), `CreateVaultModal.jsx` + `StrategyPassport.jsx` + `DepositFlow.jsx` exist on the frontend. **MISSING:** `services/vault_lifecycle.py` — no PENDING → ACTIVE → COMPLETED state machine; `vault_service.py` has the data layer but no time-bound trade-window enforcement. The flow today is "create vault → deposit → agent rebalances perpetually." The 1:1 time-bound model is unimplemented. **Pending Chuan + Marten alignment on the 5 open questions in the phase spec.** |
+| **Phase 5** — Real testnet trade execution | 🟠 CODE-COMPLETE / UNVERIFIED | `DepositFlow.jsx` issues approve + deposit + setTargetAllocations; `chain/executor.py:143` calls `vault.rebalance(tokens_in, amounts_in, tokens_out, amounts_out)`; `chain/agent_runner.py:446` records the rebalance. The path *exists* in code. What's missing is the end-to-end verification: one signed execution from a real wallet that results in (a) USDC deposited, (b) vault holds synth tokens, (c) on-chain trace anchored, (d) Portfolio reflects state. **No runbook documents this has actually happened on Arc testnet from the live UI.** |
+| **Phase 6** — Onboarding tour | ✅ LANDED | PR #134; Phase 8 polish (#262) also landed. |
+| **Phase 7** — Consolidation & dedup via t2o2 | ✅ LANDED | All 6 issues (#128–#133) closed. |
+| **Phase 8** — Landing polish | ✅ LANDED | #262 + #263 today. |
+| **Phase 9** — Fusion engine UI surface (third Generate mode toggle) | 🟠 NOT STARTED | `phase8-9-landing-and-fusion-spec.md` spec exists but no Generate-mode toggle UI ships. Backend `POST /api/strategies/generate?mode=fusion` is referenced in the spec; verify whether the endpoint exists and whether the UI exposes it. |
+
+### Open issues with build work remaining
+
+| Issue | Title | What it adds | Status as of `2195417` |
+|---|---|---|---|
+| **#163** | APIN - Backend - Strategy Generation Agent emits BOTH a bull-tilted AND a bear-tilted candidate per Generate call | Adopts `AgentLike` Protocol (would activate `agents/base.py`); changes Generate UX to surface considered-alternatives panel against current K=1 | OPEN — Önder |
+| **#164** | APIN - Backend - Portfolio Construction Agent reads regime + applies bull/bear weight schedule | Second adopter of `AgentLike` Protocol; reads from regime detector output | OPEN — depends on #163's regime read |
+| **#160** | APIN - Backend - Unify file-based + StrategyRecord ORM into ONE `strategy_passports` Postgres table | Migration consolidating two strategy persistence layers | OPEN |
+| **#155** | APIN - Infra - AWS ALB + CloudFront + ASG: virality-ready backend tier | Production-scale infra; **post-hackathon** | OPEN, low priority for submission |
+| **#154** | APIN - Backend+Security - [OPTIONAL] AWS Bedrock as primary LLM with IAM auth | Optional second LLM provider | OPEN, optional |
+| **#212** | [security] Supply-chain hardening roadmap | pip-audit promoted to CI gate + SBOM + Dependabot triage | OPEN |
+| **#43, #41** | Platform - Registration Page / User Management | Multi-user onboarding | OPEN, not for MVP |
+| **#16** | APIN - DEMO - Final delivery (hackathon) | The submission itself | OPEN — closed when submitted |
+
+### Summary — what to brief judges on if they ask "what's not built"
+
+The honest, defensible answer (works because each item has a *named* plan and
+owner):
+
+1. **Vault lifecycle states (PENDING / ACTIVE / COMPLETED with a trade window):**
+   spec'd in Phase 4; vault contract supports the data, but the off-chain
+   state-machine worker (`vault_lifecycle.py`) and the time-bound enforcement
+   are not built yet. Today vaults are "always Active."
+2. **End-to-end testnet execution verified from the live UI:** code-complete
+   (Phase 5), unverified. We have the path; we don't have a recorded runbook
+   showing one signed execution from a real wallet results in the full
+   USDC→synth→trace anchor cycle. Demo includes the path; production "we ran
+   it twice" is the missing bit.
+3. **KB pipeline production run:** infrastructure shipped today (#147, #151).
+   The first end-to-end artifact run hasn't happened yet — Corpus Explorer
+   returns 503 "first artifact pending" until it does.
+4. **Two-agent generation (bull + bear candidates):** spec'd via #163; would
+   activate the `agents/` subpackage. Current Generate is single-candidate K=1
+   per the [`CLAUDE.md` § 5](../CLAUDE.md) architectural decision.
+5. **Strategy passport on-chain anchoring (`strategy_publisher.py`):** code
+   complete with 6 tests; not yet invoked from the deploy path. The trace half
+   of "on-chain provenance" ships today; the passport half is the next hop.
+6. **Three regime detectors / portfolio constructors / arxiv intake paths
+   coexist** because consolidation decisions need a quiet hour Önder + Dan
+   haven't had yet. None of the duplicates hurt correctness; they're style
+   debt with a known cleanup path.
+
+None of these are surprises; all six are documented; none affect what judges
+see in the live demo. The discipline is in *naming them as gaps* rather than
+hiding them behind aggregate scoring.
 
 ---
 
