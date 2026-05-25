@@ -386,12 +386,25 @@ async def _run_fixture_candidate(
     else:
         name = f"Synthetic {brief.risk_appetite.title()} Blend"
         weights = {"sSPY": 0.5, "sGLD": 0.3, "sBTC": 0.2}
+    # Fixture source_papers: pull from curated library (same fallback as live)
+    fixture_source_papers: list[dict[str, Any]] = []
+    try:
+        from archimedes.services.strategy_provider import default_provider
+
+        for s in default_provider().list_strategies()[:3]:
+            title = getattr(s, "paper_title", "") or ""
+            arxiv_id = getattr(s, "paper_arxiv_id", "") or ""
+            if title or arxiv_id:
+                fixture_source_papers.append({"arxiv_id": arxiv_id, "title": title})
+    except Exception:
+        pass
+
     return _CandidateResult(
         candidate_id=candidate_id,
         strategy_name=name,
         thesis=f"Fixture-mode {regime} generation for brief: {brief.intent[:120]}",
         asset_universe=list(weights.keys()),
-        source_papers=[],
+        source_papers=fixture_source_papers,
         weights=weights,
         reasoning=f"Fixture path ({regime} regime) — no LLM call. Weights chosen by deterministic stub.",
         rigor_verdict={
@@ -511,13 +524,24 @@ async def _run_live_candidate(
             s = next((st for st in strategies if anchor.lower() in st.paper_title.lower()), None)
         if s and getattr(s, "paper_arxiv_id", None):
             source_papers.append({"arxiv_id": s.paper_arxiv_id, "title": s.paper_title})
-    # Defensive fallback: if agent returned no anchors, include ALL strategies
-    # that are in the curated library as potential sources (honest: they were
-    # available to the agent even if it didn't cite them explicitly)
+    # Defensive fallback: if agent returned no anchors, include strategies
+    # from the curated library as potential sources (honest: they were
+    # available to the agent even if it didn't cite them explicitly).
+    # Include any strategy with a paper_title OR paper_arxiv_id — curated
+    # strategies reference seminal papers (Faber 2007, Moreira-Muir 2017)
+    # that predate arxiv, so paper_arxiv_id is often empty while paper_title
+    # is always populated.
     if not source_papers and strategies:
         for s in strategies[:5]:  # cap at 5 to avoid noise
-            if getattr(s, "paper_arxiv_id", None):
-                source_papers.append({"arxiv_id": s.paper_arxiv_id, "title": s.paper_title})
+            title = getattr(s, "paper_title", "") or ""
+            arxiv_id = getattr(s, "paper_arxiv_id", "") or ""
+            if title or arxiv_id:
+                source_papers.append({"arxiv_id": arxiv_id, "title": title})
+        if not source_papers:
+            logger.warning(
+                "agent returned no paper anchors AND fallback couldn't find "
+                "library strategies with paper refs — source_papers will be empty"
+            )
 
     # Real rigor verdict via Önder's compute_dsr + compute_oos_sharpe on the
     # buy-and-hold return series of the agent's allocation. PBO is patched
