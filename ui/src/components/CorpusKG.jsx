@@ -22,7 +22,7 @@ const TYPE_ICONS = {
 /**
  * Knowledge Graph viewer.
  *
- * Fetches from ``/api/papers/corpus/kg?entity=<q>`` and renders entities
+ * Fetches from ``/api/corpus/kg/entities?q=<q>`` and renders entities
  * + relations as an SVG graph. Entity search filters the KG. Falls back
  * gracefully on 503 or empty data.
  */
@@ -38,8 +38,8 @@ export default function CorpusKG({ onOpenPaper }) {
     setLoading(true)
     setError('')
     try {
-      const params = q ? `?entity=${encodeURIComponent(q)}` : ''
-      const res = await fetch(`${API_BASE}/api/papers/corpus/kg${params}`)
+      if (!q) { setData(null); setLoading(false); return }
+      const res = await fetch(`${API_BASE}/api/corpus/kg/entities?q=${encodeURIComponent(q)}`)
       if (res.status === 503) throw new Error('KB pipeline still running — first artifact pending')
       if (!res.ok) throw new Error(res.statusText)
       setData(await res.json())

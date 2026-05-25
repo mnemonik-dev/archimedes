@@ -13,7 +13,7 @@ const CLUSTER_PALETTE = [
 /**
  * SPECTER2 similarity force-directed graph.
  *
- * Fetches from ``/api/papers/corpus/graph`` and renders an interactive
+ * Fetches from ``/api/corpus/graph`` and renders an interactive
  * force-directed layout. Nodes are colored by ``cluster_id`` (or category
  * as fallback). Node size is driven by edge count (degree). Hover shows
  * arxiv_id + title tooltip.
@@ -31,7 +31,7 @@ export default function CorpusGraph() {
   useEffect(() => {
     let cancelled = false
     setLoading(true)
-    fetch(`${API_BASE}/api/papers/corpus/graph?sample=1000&lod=1`)
+    fetch(`${API_BASE}/api/corpus/graph?sample=1000&lod=1`)
       .then(r => {
         if (r.status === 503) throw new Error('KB pipeline still running — first artifact pending')
         if (!r.ok) throw new Error(r.statusText)
@@ -45,36 +45,42 @@ export default function CorpusGraph() {
 
   // Build a lookup for cluster → color
   const clusterColorMap = useMemo(() => {
-    if (!data?.nodes) return {}
-    const clusters = [...new Set(data.nodes.map(n => n.cluster || 'default'))]
+    // New API returns {points: [{cluster_id}]}, old returned {nodes: [{cluster}]}
+    const items = data?.points || data?.nodes || []
+    const clusters = [...new Set(items.map(n => n.cluster_id || n.cluster || 'default'))]
     const map = {}
     clusters.forEach((c, i) => { map[c] = CLUSTER_PALETTE[i % CLUSTER_PALETTE.length] })
     return map
   }, [data])
 
-  // Build adjacency for degree calculation
-  const degreeMap = useMemo(() => {
-    const deg = {}
-    if (data?.nodes) data.nodes.forEach(n => { deg[n.id] = 0 })
-    if (data?.edges) data.edges.forEach(e => {
-      deg[e.source] = (deg[e.source] || 0) + 1
-      deg[e.target] = (deg[e.target] || 0) + 1
-    })
-    return deg
-  }, [data])
-
   // Transform data for react-force-graph-2d
+  // New /api/corpus/graph returns {points: [{arxiv_id, x, y, cluster_id}]} (UMAP coords)
+  // Legacy endpoint returned {nodes, edges}
   const graphData = useMemo(() => {
+    if (data?.points) {
+      // New API: points with pre-computed UMAP x,y
+      return {
+        nodes: data.points.map(p => ({
+          id: p.arxiv_id,
+          label: p.arxiv_id,
+          cluster: p.cluster_id || 'default',
+          val: 2,
+          color: clusterColorMap[p.cluster_id || 'default'] || CLUSTER_PALETTE[0],
+          fx: p.x * 50,  // scale UMAP coords for display
+          fy: p.y * 50,
+        })),
+        links: [],
+      }
+    }
+    // Legacy fallback
     if (!data?.nodes) return { nodes: [], links: [] }
-    const maxDeg = Math.max(1, ...Object.values(degreeMap))
     return {
       nodes: data.nodes.map(n => ({
         id: n.id,
         label: n.title || n.id,
         cluster: n.cluster || 'default',
-        val: 1 + (degreeMap[n.id] || 0) / maxDeg * 4,  // node size 1–5
+        val: 2,
         color: clusterColorMap[n.cluster || 'default'] || CLUSTER_PALETTE[0],
-        categories: n.categories || [],
       })),
       links: (data.edges || []).map(e => ({
         source: e.source,
@@ -82,7 +88,7 @@ export default function CorpusGraph() {
         value: e.weight || 1,
       })),
     }
-  }, [data, clusterColorMap, degreeMap])
+  }, [data, clusterColorMap])
 
   // Custom node painting
   const nodeCanvasObject = useCallback((node, ctx, globalScale) => {
@@ -151,9 +157,9 @@ export default function CorpusGraph() {
       )}
 
       <div className="corpus-graph-stats flex gap-2 flex-wrap mb-2" style={{ padding: '0 12px' }}>
-        <span className="tag tag-muted">{data.sampled || data.nodes.length} nodes</span>
-        <span className="tag tag-muted">{data.edges?.length || 0} edges</span>
-        <span className="tag tag-muted">{data.total_papers?.toLocaleString()} total papers</span>
+        <span className="tag tag-muted">{data.point_count || data.points?.length || data.nodes?.length || 0} points</span>
+        <span className="tag tag-muted">{data.cluster_count || 0} clusters</span>
+        <span className="tag tag-muted">{data.total_papers?.toLocaleString() || ''} total papers</span>
       </div>
 
       {/* Force graph */}
