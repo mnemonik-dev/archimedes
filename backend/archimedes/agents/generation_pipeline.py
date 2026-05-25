@@ -377,14 +377,17 @@ async def _run_fixture_candidate(
     )
 
     # Regime-aware fixture names and weights
+    # Include the user's brief intent in the name so each generation
+    # produces a distinct, meaningful title (Issue #336).
+    intent_snippet = brief.intent[:50].strip() if brief.intent else "Multi-Asset"
     if regime == "bull":
-        name = f"Bull {brief.risk_appetite.title()} Momentum Blend"
+        name = f"🟢 Bull {brief.risk_appetite.title()} — {intent_snippet}"
         weights = {"sSPY": 0.55, "sBTC": 0.30, "sGLD": 0.15}
     elif regime == "bear":
-        name = f"Bear {brief.risk_appetite.title()} Defensive Blend"
+        name = f"🔴 Bear {brief.risk_appetite.title()} — {intent_snippet}"
         weights = {"sGLD": 0.45, "sSPY": 0.30, "sBTC": 0.05, "sUSDC": 0.20}
     else:
-        name = f"Synthetic {brief.risk_appetite.title()} Blend"
+        name = f"{brief.risk_appetite.title()} Blend — {intent_snippet}"
         weights = {"sSPY": 0.5, "sGLD": 0.3, "sBTC": 0.2}
     # Fixture source_papers: pull from curated library (same fallback as live)
     fixture_source_papers: list[dict[str, Any]] = []
