@@ -36,6 +36,13 @@ services:
     build:
       context: .
       dockerfile: nginx/Dockerfile
+      args:
+        # VITE_* vars embed into the JS bundle at build time (Vite reads
+        # them during `npm run build`). Sourced from the host .env file;
+        # empty defaults so the build still succeeds when unconfigured.
+        VITE_CIRCLE_CLIENT_KEY: ${VITE_CIRCLE_CLIENT_KEY:-}
+        VITE_CIRCLE_CLIENT_URL: ${VITE_CIRCLE_CLIENT_URL:-https://modular-sdk.circle.com/v1/rpc/w3s/buidl}
+        VITE_API_BASE: ${VITE_API_BASE:-}
     restart: unless-stopped
     ports:
       - "80:8080"

@@ -1,6 +1,19 @@
 # Stage 1: build the React app
 FROM node:22-alpine AS ui-build
 WORKDIR /app
+
+# Vite embeds VITE_* env vars into the bundle at build time. The values
+# need to be available BEFORE `npm run build` runs — hence build-args
+# (passed via docker-compose `args:`) rather than runtime env. Empty
+# defaults so the build still succeeds when a key is unset (the app
+# gracefully hides features that require missing config).
+ARG VITE_CIRCLE_CLIENT_KEY=""
+ARG VITE_CIRCLE_CLIENT_URL=""
+ARG VITE_API_BASE=""
+ENV VITE_CIRCLE_CLIENT_KEY=${VITE_CIRCLE_CLIENT_KEY}
+ENV VITE_CIRCLE_CLIENT_URL=${VITE_CIRCLE_CLIENT_URL}
+ENV VITE_API_BASE=${VITE_API_BASE}
+
 COPY ui/package.json ui/package-lock.json ./
 RUN npm ci
 COPY ui/ .
