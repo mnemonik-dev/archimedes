@@ -30,7 +30,7 @@ aiohttp>=3.10
 backtrader>=1.9.78
 
 # LLM
-anthropic>=0.40
+anthropic>=0.104.1
 
 # On-chain / Web3
 web3>=7.0
