@@ -26,6 +26,8 @@
 
 ## Comparison with published baselines (Chen et al. 2026)
 
+![StockBench — Sortino Ratio comparison](./stockbench-vs-baselines.png)
+
 | Agent | Sortino | Return % | Max DD % |
 |-------|---------|----------|----------|
 | Kimi-K2 (Moonshot) | 2.41 | +18.7 | -8.2 |
