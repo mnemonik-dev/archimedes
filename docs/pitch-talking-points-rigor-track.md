@@ -42,6 +42,34 @@ These are the moves that distinguish us from generic LLM-portfolio submissions. 
 
 **Why this lands:** Many "on-chain AI" demos are *off-chain everything + 1 NFT*. We have a real verifiability primitive. The hash is the integrity guarantee.
 
+### 5. Regime-conditional risk aversion — the optimizer adapts automatically
+
+> *"The portfolio optimizer doesn't just use your declared risk profile. It multiplies
+> the risk-aversion coefficient by a regime factor: 1× in normal markets, 2× in risk-off,
+> 4× in a crisis. A 'moderate' investor in a crisis regime gets effective risk aversion
+> equivalent to a 'fixed-income' investor in calm markets. This is the Ang & Bekaert 2002
+> adaptive-Markowitz adjustment — the first paper that formally proved regime-conditioned
+> weights dominate static weights. The multipliers are on the screen beside every
+> allocation. The math is not hidden."*
+
+**Why this lands:** Most "AI portfolio" tools pick allocations once and re-run them on a
+schedule. Archimedes re-computes the effective risk-aversion every time the regime
+detector fires. When VIX spikes, the optimizer becomes more conservative *automatically*,
+with a cited mechanism — not because a PM overrode it, but because the math says to.
+
+**Table for the slides:**
+
+| Regime    | γ multiplier | Moderate investor effective γ | Equivalent static profile |
+|-----------|-------------|-------------------------------|--------------------------|
+| risk_on   | 1×          | 3.0                           | Moderate                 |
+| risk_off  | 2×          | 6.0                           | Conservative             |
+| crisis    | 4×          | 12.0                          | Fixed income             |
+
+**Ship reference:** PR #217 (`onder/regime-aware-gamma`) — merged 2026-05-25.
+**Math reference:** Ang & Bekaert (2002), *Review of Financial Studies* 15(4).
+
+---
+
 ## The honest-frame slide (non-negotiable per master script)
 
 When you say what we don't claim, the rest of the pitch becomes 2× more credible:

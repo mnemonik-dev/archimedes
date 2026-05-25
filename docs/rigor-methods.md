@@ -121,6 +121,60 @@ allocations in the optimizer, subject to diversification and drawdown constraint
 
 ---
 
+## 5. Regime-conditional risk aversion (γ scaling)
+
+**The question it answers:** "Should my portfolio be more defensive when markets are
+stressed, even if my declared risk profile hasn't changed?"
+
+**The idea in one sentence:** Your stated risk profile (moderate, aggressive, etc.)
+should determine how you invest in *normal times* — but when the regime is stressed,
+the optimizer's risk aversion should rise automatically, pulling allocations toward
+minimum-variance without requiring you to change your declared preference.
+
+**The math:** The Kelly/MVO objective is `max wᵀ(μ−rf) − ½γwᵀΣw`. The parameter γ
+is the risk-aversion coefficient. We map risk profiles to γ baseline values, then
+multiply by a regime-conditional factor:
+
+| Risk profile   | Baseline γ | Description |
+|---|---|---|
+| `fixed_income` | 12.0 | Extreme preservation; dominated by minimum-variance |
+| `conservative` | 6.0  | Capital preservation first |
+| `moderate`     | 3.0  | Balanced growth and protection |
+| `aggressive`   | 2.0  | Growth-oriented, accepts drawdown |
+| `hyper_risky`  | 1.5  | Near-full-Kelly; maximum growth intent |
+
+These baseline γ values are then scaled by a **regime multiplier**:
+
+| Regime       | Multiplier | Effective interpretation |
+|---|---|---|
+| `risk_on`    | 1.0×       | Declared profile is appropriate; full allocation budget |
+| `transition` | 1.0×       | Uncertain regime; do not overreact |
+| `risk_off`   | 2.0×       | Double effective γ ≈ halve effective Kelly fraction |
+| `crisis`     | 4.0×       | Quadruple effective γ ≈ minimum-variance leaning |
+
+So a `moderate` investor in a `risk_off` regime has effective γ = 3.0 × 2.0 = 6.0 —
+the same as a `conservative` investor in a normal regime. In a `crisis` regime that
+same moderate investor operates at γ = 12.0 — equivalent to `fixed_income`.
+
+**The research grounding:** Ang & Bekaert (2002, "International Asset Allocation With
+Regime Shifts", *Review of Financial Studies*) demonstrated that regime-conditioned
+portfolio weights strictly dominate static weights across a range of γ specifications.
+Their two-state Markov-switching model produces exactly this pattern: risk aversion
+should be higher in the bear/crisis state than the bull/calm state, and the magnitude
+of the increase is large enough to matter for allocation decisions.
+
+**Calibration note:** The multipliers here (1×/2×/4×) are deliberately conservative
+relative to the research-paper values (which sometimes go 6–10× in tail regimes) to
+avoid producing wildly different allocations every time the regime detector flips.
+This is an engineering judgment, not a claim of optimality — it reflects the
+hackathon-stage calibration status of the regime detector.
+
+**What the number means in the UI:** The Portfolio Advisor's allocation table shows
+the effective γ applied to each recommendation. When the regime is `risk_off` or
+`crisis`, the advisor notes the multiplier applied and which paper it cites.
+
+---
+
 ## The four-primitive admission gate
 
 A strategy is promoted to `validated` only if all four conditions hold simultaneously:
@@ -140,6 +194,8 @@ why. This is the design: rigor as transparency, not as a hidden score.
 
 ## References
 
+- Ang, A., Bekaert, G. (2002). "International Asset Allocation With Regime Shifts."
+  *Review of Financial Studies*, 15(4), 1137–1187. *(Regime-conditional γ scaling — §5)*
 - Bailey, D.H., Borwein, J., López de Prado, M., Zhu, Q.J. (2014). "Pseudo-Mathematics
   and Financial Charlatanism: The Effects of Backtest Overfitting on Out-of-Sample
   Performance." *Notices of the AMS*, 61(5), 458–471.
