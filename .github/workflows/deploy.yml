@@ -63,8 +63,12 @@ jobs:
             # Seed backtest results into DB from pre-computed artifacts (idempotent)
             docker compose exec -T backend python -m archimedes.scripts.seed_backtests_from_artifacts || echo "⚠️ Backtest seeding skipped (non-fatal)"
 
-            # Hydrate arXiv corpus text from manifest-keyed PDFs (idempotent)
-            docker compose exec -T backend python -m archimedes.scripts.hydrate_corpus || echo "⚠️ Corpus hydration skipped (non-fatal)"
+            # Hydrate arXiv corpus text from manifest-keyed PDFs (idempotent).
+            # Backgrounded (-d) so a 10K-paper iteration cannot blow the SSH
+            # `command_timeout: 10m` and cancel the deploy before the health
+            # checks below run. The script itself also short-circuits if the
+            # PDF/text dirs are read-only on this host.
+            docker compose exec -dT backend python -m archimedes.scripts.hydrate_corpus || echo "⚠️ Corpus hydration kickoff skipped (non-fatal)"
 
             # Verify services are healthy
             sleep 10
