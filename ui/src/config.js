@@ -42,16 +42,40 @@ if (typeof window !== 'undefined') {
 
 // Known wallets we ship icons + curated names for. Any EIP-6963 wallet not in
 // this list still surfaces via discoverEip6963Wallets() with the wallet's own
-// self-declared name + icon.
+// self-declared name + icon. rdns lists are intentionally permissive —
+// wallets sometimes ship multiple identifiers across versions / variants.
 const KNOWN_WALLET_RDNS = {
-  metamask: ['io.metamask', 'io.metamask.flask'],
-  coinbase: ['com.coinbase.wallet'],
+  metamask: ['io.metamask', 'io.metamask.flask', 'io.metamask.mobile'],
+  coinbase: [
+    'com.coinbase.wallet',     // legacy extension rdns
+    'com.coinbase.smartwallet', // Smart Wallet (popup auth)
+    'com.coinbase.cbwallet',    // older variant
+    'org.coinbase.wallet',      // some forks
+    'com.coinbase',             // shortened
+  ],
 }
 
-function findEip6963Provider(rdnsList) {
+// Heuristic name-based fallback for wallets whose rdns drifts between versions.
+// EIP-6963's `info.name` is human-readable but reasonably stable; case-insensitive
+// substring match catches "Coinbase Wallet", "Coinbase Smart Wallet", etc.
+const KNOWN_WALLET_NAME_PATTERNS = {
+  metamask: /\bmetamask\b/i,
+  coinbase: /\bcoinbase\b/i,
+}
+
+function findEip6963Provider(rdnsList, namePattern = null) {
+  // 1. Exact rdns match (preferred — most specific).
   for (const rdns of rdnsList) {
     const entry = eip6963Providers.get(rdns)
     if (entry) return entry.provider
+  }
+  // 2. Name-based fallback for rdns drift. Last resort because it's fuzzy.
+  if (namePattern) {
+    for (const entry of eip6963Providers.values()) {
+      if (entry.info?.name && namePattern.test(entry.info.name)) {
+        return entry.provider
+      }
+    }
   }
   return null
 }
@@ -62,8 +86,12 @@ export const WALLET_PROVIDERS = [
     name: 'MetaMask',
     icon: 'i-token-branded-metamask',
     detect: () => {
-      // EIP-6963 first (modern MetaMask)
-      const announced = findEip6963Provider(KNOWN_WALLET_RDNS.metamask)
+      // EIP-6963 first (modern MetaMask) — try known rdns, then fall back
+      // to a name-based match in case the rdns drifted between versions.
+      const announced = findEip6963Provider(
+        KNOWN_WALLET_RDNS.metamask,
+        KNOWN_WALLET_NAME_PATTERNS.metamask,
+      )
       if (announced) return announced
       // Legacy: window.ethereum.isMetaMask
       if (!window.ethereum) return null
@@ -80,8 +108,14 @@ export const WALLET_PROVIDERS = [
     name: 'Coinbase Wallet',
     icon: 'i-simple-icons-coinbase',
     detect: () => {
-      // EIP-6963 first (modern Coinbase Wallet extension)
-      const announced = findEip6963Provider(KNOWN_WALLET_RDNS.coinbase)
+      // EIP-6963 first (modern Coinbase Wallet extension). Coinbase has
+      // shipped multiple rdns variants — try the known list, then fall
+      // back to matching `info.name` for any future variant we haven't
+      // hardcoded.
+      const announced = findEip6963Provider(
+        KNOWN_WALLET_RDNS.coinbase,
+        KNOWN_WALLET_NAME_PATTERNS.coinbase,
+      )
       if (announced) return announced
       // Legacy patterns (older versions)
       if (window.ethereum?.isCoinbaseWallet) return window.ethereum
@@ -106,11 +140,18 @@ export const WALLET_PROVIDERS = [
 // Returns EIP-6963 wallets that aren't in our curated WALLET_PROVIDERS list —
 // e.g. Rabby, Brave, Phantom EVM. Each entry shape matches WALLET_PROVIDERS so
 // the modal can render them with the wallet's self-declared name + icon.
+// Excludes wallets matched by the curated rdns list AND by the curated name
+// patterns — otherwise a Coinbase variant with a novel rdns would show up
+// twice (once curated via the name-pattern fallback, once dynamic here).
 export function discoverEip6963Wallets() {
   const knownRdns = new Set(Object.values(KNOWN_WALLET_RDNS).flat())
+  const namePatterns = Object.values(KNOWN_WALLET_NAME_PATTERNS)
+  const matchesKnownName = (name) =>
+    typeof name === 'string' && namePatterns.some(p => p.test(name))
   const wallets = []
   for (const [rdns, entry] of eip6963Providers) {
     if (knownRdns.has(rdns)) continue
+    if (matchesKnownName(entry.info?.name)) continue
     wallets.push({
       id: `eip6963:${rdns}`,
       name: entry.info.name || rdns,
