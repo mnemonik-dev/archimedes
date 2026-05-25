@@ -23,8 +23,15 @@ const RISK_PROFILES = [
 ]
 const ASSET_CLASSES = ['equities', 'bonds', 'commodities', 'crypto', 'fx']
 
+const MODES = [
+  { id: 'agent', label: '🤖 Agent', desc: 'LLM portfolio agent with real-time market signals' },
+  { id: 'fusion', label: '🧪 Fusion (novel)', desc: 'Synthesize new strategies from multiple papers' },
+  { id: 'architect', label: '🏗️ Architect', desc: 'Select + weight from curated library' },
+]
+
 export default function Generate({ onNavigate }) {
   // ── Unified form state ──
+  const [mode, setMode] = useState('agent')
   const [intent, setIntent] = useState('')
   const [riskAppetite, setRiskAppetite] = useState('moderate')
   const [selectedAssets, setSelectedAssets] = useState([])
@@ -83,6 +90,7 @@ export default function Generate({ onNavigate }) {
             asset_classes: selectedAssets.length > 0 ? selectedAssets : undefined,
             max_papers: depth,
           },
+          mode: mode !== 'agent' ? mode : undefined,
         }),
       })
       if (!res.ok) throw new Error(await res.text())
@@ -202,6 +210,24 @@ export default function Generate({ onNavigate }) {
       {/* ── SINGLE UNIFIED FORM ── */}
       {!jobId && !fusionJobId && !fusionResult && (
         <div className="card p-5 mb-4">
+          {/* Mode toggle strip */}
+          <div className="flex gap-2 flex-wrap mb-4">
+            {MODES.map(m => (
+              <button
+                key={m.id}
+                className={`tag cursor-pointer ${mode === m.id ? 'tag-accent' : 'tag-muted'}`}
+                onClick={() => setMode(m.id)}
+                title={m.desc}
+                style={{ border: 'none', padding: '6px 14px', fontSize: '0.85rem' }}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+          <p className="caption mb-3 text-[var(--text-3)]">
+            {MODES.find(m => m.id === mode)?.desc}
+          </p>
+
           <div className="label mb-2">What would you like?</div>
           <textarea
             value={intent}
