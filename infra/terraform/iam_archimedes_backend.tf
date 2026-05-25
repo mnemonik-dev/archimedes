@@ -29,6 +29,27 @@ resource "aws_iam_role_policy" "backend_s3_dynamodb" {
     Version = "2012-10-17"
     Statement = [
       {
+        Sid    = "SSMSecretsAccess"
+        Effect = "Allow"
+        Action = [
+          "ssm:GetParametersByPath",
+          "ssm:GetParameters",
+          "ssm:GetParameter",
+        ]
+        Resource = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/archimedes/prod/*"
+      },
+      {
+        Sid    = "KMSDecrypt"
+        Effect = "Allow"
+        Action = ["kms:Decrypt"]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "kms:ViaService" = "ssm.${var.aws_region}.amazonaws.com"
+          }
+        }
+      },
+      {
         Sid    = "S3CorpusAccess"
         Effect = "Allow"
         Action = [
