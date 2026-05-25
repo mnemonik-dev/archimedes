@@ -205,7 +205,11 @@ class ChatService:
                 messages=[
                     {
                         "role": "user",
-                        "content": f"Vault: {vault_address}\nRecent chat:\n{context}\n\nUser asks: {user_message}",
+                        "content": (
+                            f"Vault: {vault_address}\n"
+                            f"<chat_history>\n{context}\n</chat_history>\n\n"
+                            f"<user_message>{user_message}</user_message>"
+                        ),
                     }
                 ],
             )
