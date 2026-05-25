@@ -13,6 +13,8 @@
 
 Describe what you want; Archimedes fuses your intent with live market data and a 10,000-paper quantitative-finance research library into novel strategies, gates them through selection-bias rigor (Deflated Sharpe, Probability of Backtest Overfitting), and lets you execute them into non-custodial vaults on Arc testnet — every reasoning step traceable to a source paper and anchored on-chain.
 
+**Hackathon RFB alignment.** Archimedes is built against **[RFB 04 — Adaptive Portfolio Manager](https://luma.com/7i50p2r9)** — the only one of the six Agora Request-For-Builds whose primitives map one-to-one onto what we ship (regime detection, asset allocation by regime, autonomous rebalancing, Kelly + risk-parity sizing, correlation-based diversification, cross-chain-ready execution). **Adjacent fit:** RFB 02 (Prediction Market Trader Intelligence — our +EV / Kelly primitive maps without requiring us to ship prediction markets) and RFB 06 (Social Trading Intelligence — our Tier-1 verified library + paper-anchored passport + DSR/PBO rigor *is* the "AI selects, weights, monitors" leaderboard pattern the RFB describes). RFB 04 is the core claim; the others are bonus surface area.
+
 ### Run it locally in three commands
 
 ```bash
@@ -176,6 +178,22 @@ See [`CLAUDE.md`](CLAUDE.md) for full conventions. Headline points:
 ## Contributing
 
 Fork, branch (`<your-handle>/<short-name>`), PR to `main`. One logical change per PR. Never force-push `main`. Never commit secrets. See [`CLAUDE.md`](CLAUDE.md) for full conventions.
+
+## Cited literature
+
+The deck, the rigor gate, and the pitch all rest on a specific reading of the academic
+record. The four papers below are load-bearing and worth reading first if you want to
+audit our claims.
+
+| Citation | What it gives us |
+|---|---|
+| **Xia et al. 2026** — *Agentic Trading: When LLM Agents Meet Financial Markets*. ESWA. [arxiv 2605.19337](https://arxiv.org/abs/2605.19337) | The audit-grade survey our R3 reproducibility target is built against (**15/19 trading-agent papers are R0**, **0/19 reach R3**). We implement all five named protocols Xia formalizes (Outcome Embargo, Time-Aware Retrieval, Hierarchy of Truth, Source Tracking, `V_check`) as enforced mechanisms — see [`docs/specs/xia-2026-protocols.md`](docs/specs/xia-2026-protocols.md). |
+| **Chen et al. 2026** — *StockBench: A Contamination-Free, Closed-Loop Trading Agent Benchmark*. [arxiv 2510.02209](https://arxiv.org/abs/2510.02209) | The empirical proof-point our LLM family ranks #3 globally on (GLM-4.5, behind Kimi-K2 and Qwen3-235B; ahead of Claude-4-Sonnet #7 and GPT-5 #9). Our own Strategy Generation Agent layered on top ran the harness and landed #15/15 (Sortino -0.91) — surfaced honestly in [`docs/benchmarks/stockbench-results.md`](docs/benchmarks/stockbench-results.md) rather than hidden. |
+| **Bailey & López de Prado 2014** — *The Deflated Sharpe Ratio*. Journal of Portfolio Management. | The first of the four selection-bias controls every Tier-1 strategy must pass before admission to the library. Detail in [`docs/specs/selection-bias-corrections-spec.md`](docs/specs/selection-bias-corrections-spec.md). |
+| **Bailey, Borwein, López de Prado & Zhu 2014** — *Pseudo-Mathematics and Financial Charlatanism*. Notices of the AMS. | The CSCV-PBO procedure (Probability of Backtest Overfitting) — Tier-1 admission control #2. Our `fusion_evaluator` computes real CSCV PBO over the parameter-variant grid generated per strategy. |
+| **Ang & Bekaert 2002** — *International Asset Allocation with Regime Shifts*. Review of Financial Studies. | Empirical basis for the regime-conditional risk-aversion γ scaling in the Kelly optimizer — γ widens in `risk_off` / `crisis` regimes so a single strategy generates regime-appropriate sizing without needing two parallel agents. |
+
+**Where else literature is cited.** Every Tier-1 strategy passport (`/library?tab=examples`) links to the paper that backs it. Every reasoning trace anchored on-chain via `ReasoningTraceRegistry` includes a `consulted_paper_hashes` field binding the decision to a specific corpus snapshot. The full implementation is in [`backend/archimedes/services/source_tracker.py`](backend/archimedes/services/source_tracker.py).
 
 ## License
 
