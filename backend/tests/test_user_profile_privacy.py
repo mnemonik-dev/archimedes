@@ -177,6 +177,9 @@ class TestUpsertEncryption:
             from starlette.responses import Response as StarletteResponse
 
             mock_req = _MagicMock(spec=StarletteRequest)
+            # upsert_profile rejects writes where X-Wallet-Address header doesn't
+            # match payload.wallet_address. Match the payload so the auth check passes.
+            mock_req.headers = {"X-Wallet-Address": "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"}
             mock_resp = _MagicMock(spec=StarletteResponse)
             asyncio.get_event_loop().run_until_complete(upsert_profile(payload, request=mock_req, response=mock_resp))
 
