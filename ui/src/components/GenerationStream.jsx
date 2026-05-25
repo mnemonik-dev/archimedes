@@ -53,7 +53,7 @@ function summarizeEvent(name, data) {
       if (v.dsr != null) bits.push(`DSR ${v.dsr}`)
       if (v.pbo != null) bits.push(`PBO ${v.pbo}`)
       if (v.oos_sharpe != null) bits.push(`OOS ${v.oos_sharpe}`)
-      return `${data?.candidate_id} — ${bits.join(' · ') || 'no metrics'}`
+      return `${data?.candidate_id}${bits.length ? ' — ' + bits.join(' · ') : ''}`
     }
     case 'best_selected':
       return `Picked ${data?.best_candidate_id} from ${data?.considered_count}`

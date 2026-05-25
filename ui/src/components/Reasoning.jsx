@@ -136,9 +136,11 @@ function OnChainTraces({ onNavigate, highlightTraceId }) {
         to jump to the source strategy and its full passport.
       </p>
 
-      {/* Filter chips */}
+      {/* Filter chips — hide types with zero traces (Issue #338 item 3) */}
       <div className="flex gap-2 flex-wrap mb-3">
-        {['all', 'rebalance', 'construction', 'skip'].map(f => (
+        {['all', 'rebalance', 'construction', 'skip']
+          .filter(f => f === 'all' || traces.some(t => t.decision_type === f))
+          .map(f => (
           <button
             key={f}
             className={`tag cursor-pointer ${filter === f ? 'tag-accent' : 'tag-muted'}`}

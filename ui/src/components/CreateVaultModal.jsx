@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import DepositFlow from './DepositFlow'
 
@@ -19,6 +19,13 @@ function nowPlusDays(days) {
 }
 
 export default function CreateVaultModal({ strategy, walletAddr, onClose, onDeployed }) {
+  // Esc closes modal (Issue #338)
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape' && onClose) onClose() }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [onClose])
+
   const defaultName = strategy?.paper_title
     ? strategy.paper_title.slice(0, 48).replace(/\s+$/, '')
     : 'My Strategy Vault'

@@ -45,6 +45,14 @@ export default function WalletConnect({ address, displayName, onConnect, onDisco
     return () => window.removeEventListener('open-wallet-modal', open)
   }, [])
 
+  // Esc closes the wallet-connect modal (Issue #338 item 1)
+  useEffect(() => {
+    if (!showModal) return undefined
+    const onKey = (e) => { if (e.key === 'Escape') setShowModal(false) }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [showModal])
+
   // Close the connected-wallet dropdown on outside click or Escape.
   useEffect(() => {
     if (!menuOpen) return undefined
