@@ -1,0 +1,313 @@
+# Dead-Code Audit v2 — 2026-05-24
+
+> **Supersedes:** the earlier same-day v1 audit, which was retracted as unsound.
+> v1 ran against a static snapshot of `main` and treated "no current importer" as
+> "dead." That missed (a) intentional stubs in active plans, (b) files about to
+> be re-wired by an in-flight PR, and (c) entrypoints invoked by `docker-compose`
+> / `python -m` / `forge script` that have no Python-level import edges.
+>
+> **Audit baseline:** `main` @ `d6afdca` (Merge PR #225 from
+> `dbrowneup/pr-eip6963-wallet-discovery`, 2026-05-24).
+> **Methodology v2 (3-phase):**
+> 1. Build a **protected-files set** FIRST from every active plan, spec, open PR,
+>    and open issue. Treat any file mentioned in any active artifact as off-limits
+>    by default. (135 files protected at audit time.)
+> 2. Inventory + importer map against current `main` (one-pass: `grep -rEn 'from
+>    archimedes' …` cached, then parsed with python to handle both `from … import
+>    X` and `import … .X` forms).
+> 3. For every zero-importer candidate, MANDATORY cross-check against the
+>    protected set + entrypoint heuristics (`if __name__`, docker-compose service,
+>    `python -m`, `forge script`) before flagging anything as dead.
+>
+> **No deletions performed.** This is a manifest. **No file changes anywhere.**
+> Delivered in chat + committed (not pushed) on branch
+> `dbrowneup/dead-code-audit-v2-wt` inside `.claude/worktrees/audit-v2/`.
+
+---
+
+## TL;DR
+
+| Bucket | Files | Action |
+|---|---:|---|
+| **Fully dead — safe to delete now** | **0** | nothing |
+| Test-only (no runtime, no protection) | 1 | flag for decision, don't act unilaterally |
+| Plan-protected zero-importer (intentional stubs) | 3 | leave alone, named in active plans |
+| Operator-only entrypoints (docker-compose, `python -m`, forge) | 8 + 3 Forge | leave alone, intended |
+| Orphaned test (wrong directory) | 1 | **move** not delete |
+| JSX/TSX zero-importer (all protected or entrypoint) | 0 actionable | none |
+| Solidity zero-importer (all Forge scripts or protected) | 0 actionable | none |
+
+**Bottom line:** every candidate the v1 audit listed as "fully dead" turns out
+to be protected by an active plan, an in-flight PR (`PortfolioAdvisor.jsx`
+re-wired by #216), an entrypoint, or a deliberate stub for upcoming work. The
+correct number of files to delete right now is **zero**. The audit's value is
+making explicit *why* — and identifying which removals become safe **after**
+which specific plans land.
+
+---
+
+## Phase 0 — What changed under main since v1 ran (~3 hours ago)
+
+21 commits landed on `main` after v1's baseline (`409cc0f`). The ones that
+invalidated v1's findings:
+
+| Merge | What it changed | v1 finding it invalidated |
+|---|---|---|
+| **PR #215** — prune historical artifacts to `docs/archive/` | Moved active plans into `docs/archive/` (a docs reorg, not a retirement signal — `archive/` here means "moved out of the top-level browsing surface," not "no longer active"). | v1's grep didn't consult `docs/archive/`, so it missed protection signals like the launch plan's `AgentLike` reference. |
+| **PR #216** — resurrect `PortfolioAdvisor` on `/generate` (closes #210) | `ui/src/components/Generate.jsx:6` now `import PortfolioAdvisor from './PortfolioAdvisor'`; rendered on `Generate.jsx:297,312`. | v1 flagged `PortfolioAdvisor.jsx` as zero-importer and recommended deletion. It is now LIVE. |
+| **PR #220** — kill fake Library Correlation matrix | Removed the `<CorrelationMatrix>` render from `Strategies.jsx` but **explicitly kept the component file** ("kept for potential re-use once we persist real daily series"). Reasoning.jsx still imports it. | Would have been flagged by a naive v2 too without reading PR body. |
+| **PR #222** — regime-honest | Touched `RegimePanel.jsx`, `chain/agent_runner.py`, regime routes. | Confirms regime detection is being actively reshaped — both `regime_detector.py` and `statistical_regime.py` are in flux, not "dead." |
+| **PR #223** — ruff Tier 1 + autofixes | Touched 105 files mechanically. | v1's importer map ran against pre-autofix code; v2 ran post-autofix. |
+
+---
+
+## Phase 1 — Protected set construction
+
+### Sources (in priority order)
+
+| Source | What we extracted | Count of unique file refs |
+|---|---|---|
+| `docs/archive/*.md` (15 files) | Every file path / dotted module mentioned | included |
+| `docs/specs/*.md` (20 files) | Same | included |
+| `docs/*.md` top-level (19 files) | Same | included |
+| `gh pr diff` for open PRs #199, #214, #225 | All files those PRs touch (about to land) | 22 files |
+| `gh issue view` for open issues #218, #219, #163, #164, #160, #155, #154, #151, #148, #147, #212, #176 | Files named in issue bodies | 46 files |
+| **Union, dedupe, filter to existing-on-disk** | | **135 files** |
+
+Stored at `/tmp/audit-v2/protected_existing.txt` (135 lines, all confirmed to
+exist on the audit-baseline tree).
+
+### Key protections worth calling out
+
+These are the files v1 wrongly targeted; each is now demonstrably protected:
+
+- **`backend/archimedes/agents/base.py`** (36 lines) — `AgentLike(Protocol)`
+  defined as an intentional stub. Named in:
+  - `docs/archive/launch-execution-plan-2026-05-23.md:1148` ("Protocol for AgentLike + shared utilities")
+  - `docs/archive/launch-execution-plan-2026-05-23.md:1172` (literal acceptance check: `python -c "from archimedes.agents.base import AgentLike"` → succeeds)
+  - Closed Issue #173 ("Refactor agentic services into agents/ subpackage with shared base.py") — closed, but Issues #163 + #164 (Strategy Generation Agent + Portfolio Construction Agent) carry the work forward.
+- **`backend/archimedes/services/regime_detector.py`** (111 lines) — old v1 detector.
+  Named in `docs/specs/component-interfaces-spec.md`, `docs/chuan-architecture-survey.md`,
+  `docs/judging-rubric-assessment.md`. Survey marks it as "superseded but coexists"
+  pending Önder's read.
+- **`backend/archimedes/services/statistical_regime.py`** (466 lines) — v2 GMM detector.
+  Named in `docs/chuan-architecture-survey.md` + others. Survey gap #2: regime
+  detection consolidation is deferred ("needs Önder's read on which is wired to
+  `RegimePanel` before specing").
+- **`backend/archimedes/services/_deprecated/portfolio_constructor.py`** (282 lines)
+  + **`_deprecated/kelly_portfolio.py`** (523 lines) — named in
+  `docs/specs/portfolio-constructor-decision-tree.md` (the canonical decision tree)
+  + Issue tracker references. The `_deprecated/` location is the *plan*; deletion
+  is pending the retirement step in the decision tree.
+- **`backend/archimedes/services/source_tracker.py`** (86 lines) — Xia 2026 § 4.3
+  Source Tracking protocol. Named in `docs/specs/xia-2026-protocols.md` and
+  `docs/archive/launch-execution-plan-2026-05-23.md`. Issue #219 (Önder driving,
+  T3.7 Xia 2026 named protocols) finishes the wiring; deletion would be the wrong
+  direction.
+- **`backend/archimedes/chain/strategy_publisher.py`** (190 lines) — `StrategyPublisher`
+  class. Named in `docs/archive/launch-execution-plan-2026-05-23.md`. The wiring
+  into the runtime path is pending (not yet imported anywhere outside tests).
+- **`backend/archimedes/chain/agent_runner.py`** (923 lines) — `StrategyRunner`.
+  Test-only at the Python-import level, BUT a `docker-compose` service entrypoint
+  (`python -m archimedes.chain.agent_runner`). Live.
+- **`backend/archimedes/scripts/run_kb_pipeline.py`** (115 lines) — **v1 audit
+  error.** Looked orphaned but `services/kb_runner.py:102` does `from
+  archimedes.scripts.run_kb_pipeline import run_pipeline` inside its tick loop,
+  AND `api/corpus_routes.py:151` instructs users to invoke it directly. v2
+  catches this via the "entrypoints + reverse-import" check.
+- **`ui/src/components/PortfolioAdvisor.jsx`** (480 lines) — LIVE via PR #216,
+  `Generate.jsx:297,312`.
+- **`ui/src/components/StressScenarioPanel.jsx`** (131 lines) — named in
+  `docs/specs/spine-plus-v2-plan.md`, `docs/archive/phase5-execution-runbook.md`,
+  `docs/archive/afternoon-execution-plan-2026-05-24.md`. Planned for re-wire.
+- **`ui/src/components/CorrelationMatrix.jsx`** (176 lines) — PR #220's body
+  explicitly says "`CorrelationMatrix.jsx` is **not** deleted — kept for
+  potential re-use once we persist real daily series." Also imported by
+  `Reasoning.jsx` (my JSX importer regex missed the `.jsx` extension; manual
+  verification confirmed the live import).
+- **`contracts/src/interfaces/IPriceOracle.sol`** (36 lines) — named in
+  `docs/specs/component-interfaces-spec.md` and `docs/specs/ecosystem-design-spec.md`.
+  Currently no Solidity-level import or cast, but the interface is part of the
+  ecosystem spec contract.
+
+---
+
+## Phase 2 — Importer map (current `main` @ `d6afdca`)
+
+Inventory: 116 Python modules under `backend/archimedes/`, 34 JSX/JS under `ui/src/`,
+23 Solidity files under `contracts/src` + `contracts/script`.
+
+### Python — ZERO IMPORTERS (12 modules)
+
+After classifying each by entrypoint role and protection:
+
+| File | Lines | Why it's zero-importer | Bucket |
+|---|---:|---|---|
+| `backend/archimedes/agents/base.py` | 36 | Intentional stub | **PLAN-PROTECTED** |
+| `backend/archimedes/services/regime_detector.py` | 111 | v1 detector kept pending Önder's consolidation read | **PLAN-PROTECTED** |
+| `backend/archimedes/services/_deprecated/portfolio_constructor.py` | 282 | Deprecated, kept pending decision-tree retirement step | **PLAN-PROTECTED** |
+| `backend/archimedes/chain/oracle_runner.py` | 52 | `docker-compose` service via `python -m` | **OPERATOR ENTRYPOINT** |
+| `backend/archimedes/services/kb_runner.py` | 115 | `docker-compose` service via `python -m` | **OPERATOR ENTRYPOINT** |
+| `backend/archimedes/evaluation/stockbench/__main__.py` | 88 | `python -m archimedes.evaluation.stockbench` entrypoint | **OPERATOR ENTRYPOINT** |
+| `backend/archimedes/scripts/bootstrap_vaults.py` | 575 | `python -m …` operator script (in plan) | **OPERATOR ENTRYPOINT** |
+| `backend/archimedes/scripts/deploy_contracts.py` | 365 | `python -m …` operator script | **OPERATOR ENTRYPOINT** |
+| `backend/archimedes/scripts/hydrate_corpus.py` | 154 | `python -m …` operator script | **OPERATOR ENTRYPOINT** |
+| `backend/archimedes/scripts/seed_backtests_from_artifacts.py` | 118 | `python -m …` operator script | **OPERATOR ENTRYPOINT** |
+| `backend/archimedes/scripts/verify_arc_e2e.py` | 635 | `python -m …` operator script (in plan) | **OPERATOR ENTRYPOINT** |
+| `backend/archimedes/tests/test_user_profile_privacy.py` | 186 | Wrong directory; `pytest.ini` doesn't collect `backend/archimedes/tests/` | **ORPHANED TEST — MOVE** |
+
+**Truly safe-to-delete count after cross-check: 0.**
+
+The orphaned test (`test_user_profile_privacy.py`) should be **moved** to
+`backend/tests/test_user_profile_privacy.py` where pytest will collect it (this
+restores Issue #181 privacy test coverage on live `email_crypto`/`log_scrubber`
+code in `api/user_routes.py`).
+
+### Python — TEST-ONLY (runtime=0, scripts=0, tests>0) (9 modules)
+
+| File | Lines | Test importer | Disposition |
+|---|---:|---|---|
+| `backend/archimedes/main.py` | 275 | 4 tests | LIVE (uvicorn entrypoint) |
+| `backend/archimedes/chain/agent_runner.py` | 923 | 2 tests | LIVE (docker-compose service) |
+| `backend/archimedes/chain/strategy_publisher.py` | 190 | 6 tests | **PLAN-PROTECTED** (launch plan) |
+| `backend/archimedes/evaluation/stockbench/adapter.py` | 656 | 2 tests | LIVE via `stockbench/__main__.py:13` import |
+| `backend/archimedes/scripts/run_backtests.py` | 174 | 1 test | LIVE (`__main__` operator script) |
+| `backend/archimedes/services/_deprecated/kelly_portfolio.py` | 523 | 1 test | **PLAN-PROTECTED** (decision tree) |
+| `backend/archimedes/services/source_tracker.py` | 86 | 7 tests | **PLAN-PROTECTED** (Issue #219, Xia spec) |
+| `backend/archimedes/services/statistical_regime.py` | 466 | 1 test | **PLAN-PROTECTED** (survey gap #2) |
+| `backend/archimedes/services/arxiv_corpus.py` | 478 | 1 test | **PLAN-PROTECTED** (named in `docs/specs/spine-plus-v2-plan.md:909` as "#4 Arxiv intake paths" consolidation work) |
+
+All 9 are accounted for. **None recommended for unilateral deletion.**
+
+`arxiv_corpus.py` is the closest thing to a candidate — it's flagged in
+spine-plus-v2 as one of three parallel intake paths to consolidate, but the
+consolidation itself hasn't shipped. Wait for that consolidation PR before
+acting.
+
+### JSX/JS — ZERO IMPORTERS (regex-checked + manually verified)
+
+| File | Lines | True status |
+|---|---:|---|
+| `ui/src/main.jsx` | 11 | LIVE (Vite entrypoint, not imported) |
+| `ui/src/App.jsx` | 234 | LIVE (`main.jsx:5: import App from './App.jsx'` — my regex missed the `.jsx` extension) |
+| `ui/src/components/CorrelationMatrix.jsx` | 176 | LIVE (`Reasoning.jsx` imports it) AND **PLAN-PROTECTED** (PR #220 explicitly kept it + `docs/specs/evening-execution-plan-2026-05-24.md`) |
+| `ui/src/components/StressScenarioPanel.jsx` | 131 | **PLAN-PROTECTED** (3 plans reference it for re-wire) |
+
+**Truly safe-to-delete count: 0.**
+
+### Solidity — ZERO IMPORTERS
+
+| File | Lines | True status |
+|---|---:|---|
+| `contracts/script/Deploy.s.sol` | 204 | LIVE (`forge script` entrypoint) |
+| `contracts/script/DeployInfra.s.sol` | 53 | LIVE (`forge script` entrypoint; referenced in launch plan) |
+| `contracts/script/DeployStrategyRegistry.s.sol` | 34 | LIVE (`forge script` entrypoint; referenced in launch plan) |
+| `contracts/src/interfaces/IPriceOracle.sol` | 36 | **PLAN-PROTECTED** (component-interfaces-spec + ecosystem-design-spec) |
+
+**Truly safe-to-delete count: 0.**
+
+---
+
+## Phase 3 — Cross-check methodology (the v1 → v2 fix)
+
+For each candidate, the gate is:
+
+```
+candidate is SAFE-TO-DELETE only if:
+    candidate not in protected_existing.txt                           AND
+    candidate does NOT contain `if __name__ == "__main__"`            AND
+    candidate is NOT a docker-compose service                         AND
+    candidate is NOT loaded dynamically (importlib, exec, eval)       AND
+    candidate is NOT a Forge script (.s.sol, contracts/script/)       AND
+    candidate is NOT a Vite entry (main.jsx, App.jsx, vite.config*)   AND
+    candidate file is NOT mentioned by name (with or without path)
+        in ANY plan/spec/issue/open-PR body
+```
+
+Eight conditions, ALL must pass. **No candidate in v2 passed all eight.**
+
+---
+
+## Recommendations
+
+### Do this now
+
+1. **Move (don't delete)** `backend/archimedes/tests/test_user_profile_privacy.py`
+   → `backend/tests/test_user_profile_privacy.py`. Restores Issue #181 privacy
+   coverage on live `email_crypto`/`log_scrubber` code. This is the only
+   actionable item from v2. Even this is a `git mv`, not deletion.
+
+### Do these only when a specific PR lands
+
+| Trigger event | Becomes-safe-to-delete |
+|---|---|
+| Spine-plus-v2 § "#4 Arxiv intake paths" consolidation PR merges | `services/arxiv_corpus.py` (478 lines) — wait for it. |
+| `docs/specs/portfolio-constructor-decision-tree.md` retirement step ships | `services/_deprecated/portfolio_constructor.py` (282) + `_deprecated/kelly_portfolio.py` (523) + the deprecated `__init__.py` |
+| Regime consolidation (survey gap #2, Issue not yet filed) ships | one of `regime_detector.py` (111) or `statistical_regime.py` (466) becomes deletable depending on Önder's read |
+| Issue #173 follow-on / agentic refactor completes | `agents/base.py` continues to be protected unless the `AgentLike` Protocol is explicitly retired in spec |
+
+### Do this never (well, almost)
+
+- Don't delete `chain/strategy_publisher.py` — it's awaiting wiring per the launch
+  plan, not orphaned by mistake.
+- Don't delete `IPriceOracle.sol` — interface contract referenced in two specs;
+  the absence of Solidity-level imports is intentional (interface for off-chain
+  consumers).
+- Don't delete any `docker-compose` service entrypoint, `python -m` script, or
+  Forge script. Zero Python importers ≠ unused.
+
+---
+
+## Reproducibility
+
+All intermediate files persist under `/tmp/audit-v2/`:
+
+| File | Contents |
+|---|---|
+| `protected_existing.txt` | 135 files protected by plans/specs/PRs/issues |
+| `modules.txt` | inventory of all 116 Python modules + paths |
+| `all_imports.txt` | 608 raw import lines from grep |
+| `module_importers_py.txt` | per-module importer counts (from python parser) |
+| `module_importers.txt` | joined inventory + importer counts |
+| `jsx_importers.txt` | 34 JSX files + importer counts |
+| `sol_importers.txt` | 23 Solidity files + importer counts |
+
+To regenerate from scratch on a future `main`:
+
+```bash
+# Phase 1: protected set
+mkdir -p /tmp/audit-v2
+grep -rhE '(backend|ui|contracts|scripts|analytics-engine|tests)/[A-Za-z0-9_/.-]+\.(py|jsx|tsx|ts|js|sol)' \
+  docs/archive/ docs/specs/ docs/*.md \
+  | sort -u > /tmp/audit-v2/protected_from_docs.txt
+
+for n in $(gh pr list --state open --json number --jq '.[].number'); do
+  gh pr diff $n --name-only
+done | sort -u > /tmp/audit-v2/protected_from_open_prs.txt
+
+# Phase 2: importer map via python (handles both import forms)
+grep -rEn --include="*.py" -- '(from|import) archimedes\.[a-zA-Z0-9_.]+' \
+  backend/ scripts/ analytics-engine/ tests/ > /tmp/audit-v2/all_imports.txt
+# Then run the python parser block in this file
+
+# Phase 3: cross-check
+awk -F'|' '$6==0 { print $2 }' /tmp/audit-v2/module_importers.txt \
+  | grep -Fvxf /tmp/audit-v2/protected_existing.txt
+```
+
+---
+
+## See also
+
+- v1 retracted: not retained on `main` (lived only in conversation context + an
+  uncommitted file that was blown away by a branch switch — itself a lesson
+  about not relying on uncommitted artifacts in a multi-agent checkout)
+- `docs/chuan-architecture-survey.md` — the survey v2 cross-references for
+  redundancy clusters #1 (rigor), #2 (regime), #3 (LLM backends), #4 (arxiv),
+  #5 (portfolio constructors)
+- `docs/specs/portfolio-constructor-decision-tree.md` — canonical for the
+  `_deprecated/` retirement plan
+- `docs/specs/xia-2026-protocols.md` — protects `source_tracker.py`
+- `docs/specs/spine-plus-v2-plan.md` § "#4 Arxiv intake paths" — protects
+  `arxiv_corpus.py` for now
+- Closed Issue #173 + open Issues #163/#164 — context for `agents/base.py`
