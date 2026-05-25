@@ -16,6 +16,7 @@ const EVENT_LABELS = {
   tool_called: 'Tool called',
   tool_result: 'Tool result',
   candidate_drafted: 'Candidate drafted',
+  candidate_failed: 'No candidate',
   candidate_evaluated: 'Candidate evaluated',
   best_selected: 'Best selected',
   trace_hashed: 'Trace hashed',
@@ -42,8 +43,10 @@ function summarizeEvent(name, data) {
       return `${data?.tool_name}(${data?.args_summary || ''})`
     case 'tool_result':
       return `${data?.tool_name} → ${data?.result_summary || 'ok'}`
-    case 'candidate_drafted':
-      return `${data?.strategy_name || '?'} (${data?.candidate_id})`
+    case 'candidate_drafted': {
+      const rTag = data?.regime === 'bull' ? '🟢' : data?.regime === 'bear' ? '🔴' : ''
+      return `${rTag} ${data?.strategy_name || '?'} (${data?.candidate_id})`
+    }
     case 'candidate_evaluated': {
       const v = data?.rigor_verdict || {}
       const bits = []
@@ -56,8 +59,10 @@ function summarizeEvent(name, data) {
       return `Picked ${data?.best_candidate_id} from ${data?.considered_count}`
     case 'trace_hashed':
       return `${(data?.trace_hash || '').slice(0, 14)}…`
+    case 'candidate_failed':
+      return `${data?.regime === 'bull' ? '🟢' : '🔴'} ${data?.message || 'No candidate'}`
     case 'persisted':
-      return data?.redirect_url || ''
+      return `${data?.regime === 'bull' ? '🟢' : data?.regime === 'bear' ? '🔴' : ''} ${data?.redirect_url || ''}`
     case 'done':
       return `→ ${data?.strategy_id || ''}`
     case 'error':
@@ -73,6 +78,8 @@ export default function GenerationStream({ jobId, onDone, onReset, onPipelineSel
   const [strategyId, setStrategyId] = useState(null)
   const [errorMsg, setErrorMsg] = useState('')
   const [showRejected, setShowRejected] = useState(false)
+  const [draftedCandidates, setDraftedCandidates] = useState([])  // {candidate_id, strategy_name, regime, strategy_id}
+  const [failedRegimes, setFailedRegimes] = useState([])  // {regime, message}
   const esRef = useRef(null)
   const scrollRef = useRef(null)
 
@@ -94,12 +101,35 @@ export default function GenerationStream({ jobId, onDone, onReset, onPipelineSel
       if (name === 'pipeline_selected' && data?.pipeline) {
         onPipelineSelected?.(data.pipeline)
       }
-      if (name === 'persisted' && data?.strategy_id) setStrategyId(data.strategy_id)
+      if (name === 'candidate_drafted') {
+        setDraftedCandidates(prev => [...prev, {
+          candidate_id: data?.candidate_id,
+          strategy_name: data?.strategy_name,
+          regime: data?.regime,
+          weights_preview: data?.weights_preview,
+        }])
+      }
+      if (name === 'candidate_failed') {
+        setFailedRegimes(prev => [...prev, {
+          regime: data?.regime,
+          message: data?.message,
+        }])
+      }
+      if (name === 'persisted' && data?.strategy_id) {
+        setStrategyId(data.strategy_id)
+        // Update the drafted candidate with its strategy_id
+        setDraftedCandidates(prev => prev.map(c =>
+          c.candidate_id === data.candidate_id ? { ...c, strategy_id: data.strategy_id } : c
+        ))
+      }
       if (name === 'done') {
         setTerminal('done')
         if (data?.strategy_id) setStrategyId(data.strategy_id)
         es.close()
-        onDone?.({ strategy_id: data?.strategy_id })
+        onDone?.({
+          strategy_id: data?.strategy_id,
+          all_strategy_ids: data?.all_strategy_ids,
+        })
       }
       if (name === 'error') {
         setTerminal('error')
@@ -191,6 +221,73 @@ export default function GenerationStream({ jobId, onDone, onReset, onPipelineSel
           </div>
         ))}
       </div>
+
+      {/* ── Dual regime result cards (Issue #163) ── */}
+      {terminal === 'done' && draftedCandidates.length >= 2 && (
+        <div style={{ marginTop: 16 }}>
+          <div className="label" style={{ marginBottom: 8 }}>Strategy Candidates</div>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+            gap: 12,
+          }}>
+            {draftedCandidates.map(c => (
+              <div
+                key={c.candidate_id}
+                className="card"
+                style={{
+                  padding: 16,
+                  border: `2px solid ${c.regime === 'bull' ? 'var(--positive, #22c55e)' : c.regime === 'bear' ? 'var(--negative, #ef4444)' : 'var(--glass-border)'}`,
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <span style={{
+                    display: 'inline-block',
+                    padding: '2px 10px',
+                    borderRadius: 999,
+                    fontSize: '0.75rem',
+                    fontWeight: 700,
+                    background: c.regime === 'bull' ? 'rgba(34,197,94,0.15)' : c.regime === 'bear' ? 'rgba(239,68,68,0.15)' : 'var(--bg-2)',
+                    color: c.regime === 'bull' ? 'var(--positive, #22c55e)' : c.regime === 'bear' ? 'var(--negative, #ef4444)' : 'var(--text-2)',
+                  }}>
+                    {c.regime === 'bull' ? '🟢 Bull' : c.regime === 'bear' ? '🔴 Bear' : 'Neutral'}
+                  </span>
+                  <span className="label" style={{ fontSize: '0.85rem' }}>{c.strategy_name}</span>
+                </div>
+                {c.weights_preview && (
+                  <div className="caption" style={{ marginBottom: 8 }}>
+                    {Object.entries(c.weights_preview)
+                      .sort(([, a], [, b]) => b - a)
+                      .map(([sym, w]) => `${sym} ${(w * 100).toFixed(0)}%`)
+                      .join(' · ')}
+                  </div>
+                )}
+                {c.strategy_id && (
+                  <button
+                    className="btn btn-primary btn-sm"
+                    style={{ width: '100%', marginTop: 4 }}
+                    onClick={() => {
+                      localStorage.removeItem('archimedes:currentJobId')
+                      window.location.hash = `#/library?highlight=${c.strategy_id}`
+                    }}
+                  >
+                    View in Library →
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+          {failedRegimes.length > 0 && (
+            <div className="info-box warning" style={{ marginTop: 12 }}>
+              {failedRegimes.map((f, i) => (
+                <div key={i}>
+                  {f.regime === 'bull' ? '🟢' : '🔴'} {f.message}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {showRejected && (
         <RejectedCandidates jobId={jobId} onClose={() => setShowRejected(false)} />

@@ -107,6 +107,7 @@ class CandidateSummary(BaseModel):
     rigor_verdict: dict[str, Any] | None = None
     passes_rigor: bool
     selected: bool
+    regime: str | None = None  # "bull", "bear", or "neutral" (Issue #163)
 
 
 class CandidatesListResponse(BaseModel):

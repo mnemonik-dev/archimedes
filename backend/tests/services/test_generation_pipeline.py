@@ -62,6 +62,12 @@ async def test_fixture_pipeline_emits_full_event_sequence():
     assert "persisted" in names
     assert names[-1] == "done"
 
+    # Dual regime: both bull + bear candidates drafted
+    drafted = [e for e in store.events if e["event"] == "candidate_drafted"]
+    assert len(drafted) == 2
+    drafted_regimes = {e["data"]["regime"] for e in drafted}
+    assert drafted_regimes == {"bull", "bear"}
+
 
 @pytest.mark.asyncio
 async def test_pipeline_terminates_with_done_status():
@@ -80,7 +86,10 @@ async def test_pipeline_terminates_with_done_status():
     last_result = store.status[-1][1]
     assert last_result is not None
     assert last_result["best_strategy_id"] == "strat_test_002"
-    assert len(last_result["candidates"]) == 1
+    # Default dual_regime=True → 2 candidates (bull + bear)
+    assert len(last_result["candidates"]) == 2
+    regimes = {c["regime"] for c in last_result["candidates"]}
+    assert regimes == {"bull", "bear"}
 
 
 def test_rigor_adapter_computes_dsr_and_oos_sharpe_on_synthetic_series():
@@ -227,6 +236,117 @@ async def test_brief_validation_rejects_invalid_brief(monkeypatch):
     assert statuses[-1] == "error"
 
 
+# ── Dual bull/bear regime tests (Issue #163) ───────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_dual_regime_always_emits_both_bull_and_bear():
+    """dual_regime=True (default) emits both bull and bear candidates."""
+    store = _FakeStore()
+    brief = GenerateBrief(intent="trend following with low drawdown", risk_appetite="moderate")
+
+    with patch(
+        "archimedes.agents.generation_pipeline._persist_candidate",
+        new=AsyncMock(return_value=("strat_dual_001", "0xdual")),
+    ):
+        await run_generation(job_id="job_dual_001", brief=brief, store=store)
+
+    drafted = [e for e in store.events if e["event"] == "candidate_drafted"]
+    assert len(drafted) == 2
+    regimes = [e["data"]["regime"] for e in drafted]
+    assert "bull" in regimes
+    assert "bear" in regimes
+
+
+@pytest.mark.asyncio
+async def test_dual_regime_persists_both_with_correct_regime_tags():
+    """Both bull and bear candidates are persisted (both get strategy_id)."""
+    store = _FakeStore()
+    brief = GenerateBrief(intent="balanced equities", risk_appetite="conservative")
+
+    persist_calls = []
+    call_count = [0]
+
+    async def mock_persist(c, b):
+        call_count[0] += 1
+        sid = f"strat_{c.regime}_{call_count[0]}"
+        persist_calls.append({"regime": c.regime, "strategy_id": sid})
+        return (sid, f"0x{c.regime}")
+
+    with patch(
+        "archimedes.agents.generation_pipeline._persist_candidate",
+        new=mock_persist,
+    ):
+        await run_generation(job_id="job_dual_persist", brief=brief, store=store)
+
+    # Both candidates persisted
+    assert len(persist_calls) == 2
+    persisted_regimes = {p["regime"] for p in persist_calls}
+    assert persisted_regimes == {"bull", "bear"}
+
+    # Done result has both candidates with strategy_ids
+    last_result = store.status[-1][1]
+    assert last_result is not None
+    for c in last_result["candidates"]:
+        assert c["strategy_id"] is not None
+        assert c["regime"] in ("bull", "bear")
+
+
+@pytest.mark.asyncio
+async def test_dual_regime_fixture_names_differ():
+    """Fixture bull/bear candidates have distinct names and weights."""
+    store = _FakeStore()
+    brief = GenerateBrief(intent="growth focus", risk_appetite="aggressive")
+
+    with patch(
+        "archimedes.agents.generation_pipeline._persist_candidate",
+        new=AsyncMock(return_value=("strat_names_001", "0xnames")),
+    ):
+        await run_generation(job_id="job_names", brief=brief, store=store)
+
+    drafted = [e for e in store.events if e["event"] == "candidate_drafted"]
+    names = [e["data"]["strategy_name"] for e in drafted]
+    # Names must be different (bull vs bear)
+    assert len(set(names)) == 2
+    # One should contain "Bull", the other "Bear"
+    combined = " ".join(names)
+    assert "Bull" in combined
+    assert "Bear" in combined
+
+
+@pytest.mark.asyncio
+async def test_dual_regime_off_produces_single_neutral():
+    """dual_regime=False falls back to single neutral candidate."""
+    store = _FakeStore()
+    brief = GenerateBrief(intent="basic equities", risk_appetite="moderate")
+
+    with patch(
+        "archimedes.agents.generation_pipeline._persist_candidate",
+        new=AsyncMock(return_value=("strat_single_001", "0xsingle")),
+    ):
+        await run_generation(job_id="job_single", brief=brief, store=store, dual_regime=False)
+
+    drafted = [e for e in store.events if e["event"] == "candidate_drafted"]
+    assert len(drafted) == 1
+    assert drafted[0]["data"]["regime"] == "neutral"
+
+
+@pytest.mark.asyncio
+async def test_dual_regime_pipeline_selected_event_lists_regimes():
+    """pipeline_selected event includes the regime plan."""
+    store = _FakeStore()
+    brief = GenerateBrief(intent="macro hedge", risk_appetite="conservative")
+
+    with patch(
+        "archimedes.agents.generation_pipeline._persist_candidate",
+        new=AsyncMock(return_value=("strat_regime_evt", "0xevt")),
+    ):
+        await run_generation(job_id="job_regime_evt", brief=brief, store=store)
+
+    ps = next(e for e in store.events if e["event"] == "pipeline_selected")
+    assert ps["data"]["regimes"] == ["bull", "bear"]
+
+
 @pytest.mark.asyncio
 async def test_pipeline_multi_candidate_picks_best():
     store = _FakeStore()
@@ -236,9 +356,9 @@ async def test_pipeline_multi_candidate_picks_best():
         "archimedes.agents.generation_pipeline._persist_candidate",
         new=AsyncMock(return_value=("strat_multi_001", "0xfeed")),
     ):
-        await run_generation(job_id="job_multi", brief=brief, n_candidates=3, store=store)
+        await run_generation(job_id="job_multi", brief=brief, n_candidates=3, store=store, dual_regime=False)
 
-    # 3 candidates should produce 3 candidate_drafted events
+    # dual_regime=False + n_candidates=3 → 3 neutral candidates
     drafted = [e for e in store.events if e["event"] == "candidate_drafted"]
     assert len(drafted) == 3
     best = next((e for e in store.events if e["event"] == "best_selected"), None)

@@ -71,6 +71,14 @@ export default function RejectedCandidates({ jobId, onClose }) {
                     <span className="caption" style={{ marginLeft: 8 }}>({c.candidate_id})</span>
                   </div>
                   <div style={{ display: 'flex', gap: 6 }}>
+                    {c.regime && c.regime !== 'neutral' && (
+                      <span className="tag" style={{
+                        background: c.regime === 'bull' ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',
+                        color: c.regime === 'bull' ? 'var(--positive, #22c55e)' : 'var(--negative, #ef4444)',
+                      }}>
+                        {c.regime === 'bull' ? '🟢 Bull' : '🔴 Bear'}
+                      </span>
+                    )}
                     {c.selected && <span className="tag tag-accent">Selected</span>}
                     {c.passes_rigor
                       ? <span className="tag tag-positive">Passes rigor</span>
