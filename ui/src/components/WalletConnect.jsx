@@ -1,6 +1,12 @@
 import { Fragment, useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { connectWallet, getAvailableProviders, CIRCLE_PROVIDER_ID } from '../config'
+import {
+  connectWallet,
+  getAvailableProviders,
+  getConnectedProvider,
+  getUsdcBalance,
+  CIRCLE_PROVIDER_ID,
+} from '../config'
 
 export default function WalletConnect({ address, displayName, onConnect, onDisconnect, onEditProfile }) {
   const [showModal, setShowModal] = useState(false)
@@ -8,7 +14,11 @@ export default function WalletConnect({ address, displayName, onConnect, onDisco
   const [error, setError] = useState('')
   const [menuOpen, setMenuOpen] = useState(false)
   const [discoveryTick, setDiscoveryTick] = useState(0)
+  const [copied, setCopied] = useState(false)
+  const [balance, setBalance] = useState(null)
   const menuRef = useRef(null)
+  const providerId = getConnectedProvider()
+  const isPasskey = providerId === CIRCLE_PROVIDER_ID
 
   // EIP-6963 wallets announce themselves asynchronously. The set can grow
   // after first render — re-derive `available` when a new wallet announces.
@@ -40,6 +50,28 @@ export default function WalletConnect({ address, displayName, onConnect, onDisco
       document.removeEventListener('keydown', onKey)
     }
   }, [menuOpen])
+
+  // Fetch the USDC balance on connect + whenever the dropdown opens, so the
+  // number is fresh after the user faucets or deposits without us subscribing
+  // to chain events. Returns null on failure (caller renders placeholder).
+  useEffect(() => {
+    if (!address) { setBalance(null); return undefined }
+    let cancelled = false
+    getUsdcBalance(address).then(b => { if (!cancelled) setBalance(b) })
+    return () => { cancelled = true }
+  }, [address, menuOpen])
+
+  const handleCopy = async () => {
+    if (!address) return
+    try {
+      await navigator.clipboard.writeText(address)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      // Older browsers / blocked clipboard — silently fail; user can
+      // long-press the address to copy via native selection.
+    }
+  }
 
   const handleConnect = async (providerId) => {
     setBusy(true)
@@ -93,12 +125,66 @@ export default function WalletConnect({ address, displayName, onConnect, onDisco
           >
             <div
               className="caption"
-              style={{ padding: '6px 10px', color: 'var(--text-4)', borderBottom: '1px solid var(--glass-border)', marginBottom: 4 }}
+              style={{ padding: '8px 10px', color: 'var(--text-4)', borderBottom: '1px solid var(--glass-border)', marginBottom: 4 }}
             >
-              <div style={{ color: 'var(--text-2)', fontWeight: 600, fontSize: '0.85rem' }}>
+              <div style={{ color: 'var(--text-2)', fontWeight: 600, fontSize: '0.85rem', marginBottom: 2 }}>
                 {displayName || 'Wallet'}
               </div>
-              <div className="mono" style={{ fontSize: '0.72rem' }}>{shortAddr}</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span className="mono" style={{ fontSize: '0.72rem' }} title={address}>{shortAddr}</span>
+                <button
+                  type="button"
+                  onClick={handleCopy}
+                  title={copied ? 'Copied!' : 'Copy full address'}
+                  aria-label={copied ? 'Copied' : 'Copy full address'}
+                  style={{
+                    background: 'transparent', border: 'none', color: copied ? 'var(--accent)' : 'var(--text-3)',
+                    cursor: 'pointer', padding: 2, display: 'inline-flex', alignItems: 'center',
+                  }}
+                >
+                  <span
+                    className={copied ? 'i-lucide-check' : 'i-lucide-copy'}
+                    style={{ width: 12, height: 12 }}
+                    aria-hidden="true"
+                  />
+                </button>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6, fontSize: '0.74rem' }}>
+                <span className="i-lucide-wallet" style={{ width: 12, height: 12, color: 'var(--text-3)' }} aria-hidden="true" />
+                <span style={{ color: 'var(--text-2)' }}>
+                  {balance === null
+                    ? <span style={{ color: 'var(--text-4)' }}>Loading USDC…</span>
+                    : <><strong style={{ color: 'var(--text-1)' }}>{balance.toFixed(2)}</strong> USDC</>}
+                </span>
+                {balance !== null && balance < 1 && (
+                  <a
+                    href="https://faucet.circle.com/"
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{
+                      marginLeft: 'auto', fontSize: '0.7rem', color: 'var(--accent)',
+                      textDecoration: 'none',
+                    }}
+                    title="Get test USDC from Circle's faucet (20 USDC / 2h on Arc)"
+                  >
+                    Faucet →
+                  </a>
+                )}
+              </div>
+              {isPasskey && (
+                <div
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 4, marginTop: 6,
+                    padding: '4px 6px', background: 'rgba(99, 102, 241, 0.08)',
+                    border: '1px solid rgba(99, 102, 241, 0.18)', borderRadius: 6,
+                    fontSize: '0.68rem', color: 'var(--text-3)',
+                  }}
+                  title="Smart-contract wallet on Arc — backed by a passkey on this device. No seed phrase. No browser extension."
+                >
+                  <span className="i-lucide-fingerprint" style={{ width: 11, height: 11 }} aria-hidden="true" />
+                  <span>Circle Modular Wallet</span>
+                </div>
+              )}
             </div>
             <button
               type="button"
@@ -216,14 +302,30 @@ export default function WalletConnect({ address, displayName, onConnect, onDisco
                         ) : (
                           <span className={`wallet-icon ${p.icon} w-5 h-5`} />
                         )}
-                        <span>{p.name}</span>
-                        {p.id === CIRCLE_PROVIDER_ID && (
-                          <span
-                            className="caption"
-                            style={{ marginLeft: 'auto', fontSize: '0.7rem', color: 'var(--text-4)' }}
-                          >
-                            Works in any browser
+                        {p.id === CIRCLE_PROVIDER_ID ? (
+                          <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2, flex: 1 }}>
+                            <span style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%' }}>
+                              <span>{p.name}</span>
+                              <span
+                                style={{
+                                  marginLeft: 'auto', fontSize: '0.62rem', letterSpacing: '0.04em',
+                                  textTransform: 'uppercase', padding: '2px 6px',
+                                  background: 'rgba(212, 168, 83, 0.12)', color: 'var(--accent)',
+                                  border: '1px solid rgba(212, 168, 83, 0.3)', borderRadius: 999,
+                                }}
+                              >
+                                Recommended
+                              </span>
+                            </span>
+                            <span
+                              className="caption"
+                              style={{ fontSize: '0.68rem', color: 'var(--text-4)', lineHeight: 1.35, textAlign: 'left' }}
+                            >
+                              Powered by <strong style={{ color: 'var(--text-3)' }}>Circle Modular Wallets</strong> · Face ID / Touch ID · Smart-contract account on Arc · No extension, no seed phrase
+                            </span>
                           </span>
+                        ) : (
+                          <span>{p.name}</span>
                         )}
                       </button>
                     </Fragment>
