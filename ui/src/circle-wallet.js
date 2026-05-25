@@ -127,3 +127,31 @@ export async function connectCirclePasskey({ mode = 'auto', username = 'Archimed
     mode: resolvedMode,
   }
 }
+
+// Rebuild the smart account from a previously-stored credential WITHOUT
+// triggering a WebAuthn prompt. Safe to call on every page load — the
+// credential only contains the public key (the private key lives in the
+// device's secure enclave) so we can derive the smart account address
+// + signer wrapper without re-authenticating. The user only sees a
+// WebAuthn prompt when they actually try to sign a user operation.
+//
+// Returns null if there's no stored credential (caller should redirect
+// to the register flow).
+export async function rehydrateSmartAccount() {
+  if (!circlePasskeyEnabled()) return null
+  const credential = loadStoredCredential()
+  if (!credential) return null
+
+  const modularTransport = toModularTransport(`${CLIENT_URL}/arcTestnet`, CLIENT_KEY)
+  const client = createPublicClient({ chain: arcTestnet, transport: modularTransport })
+
+  const owner = toWebAuthnAccount({ credential })
+  const smartAccount = await toCircleSmartAccount({ client, owner })
+
+  return {
+    address: smartAccount.address,
+    smartAccount,
+    client,
+    credential,
+  }
+}

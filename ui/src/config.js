@@ -1,5 +1,10 @@
 import { createPublicClient, createWalletClient, custom, http } from 'viem'
-import { connectCirclePasskey, clearCircleSession, circlePasskeyEnabled } from './circle-wallet'
+import {
+  connectCirclePasskey,
+  clearCircleSession,
+  circlePasskeyEnabled,
+  rehydrateSmartAccount,
+} from './circle-wallet'
 
 const arcTestnet = {
   id: 5042002,
@@ -133,13 +138,17 @@ let _walletClient = null
 let _provider = null
 let _address = null
 let _providerId = null
-let _smartAccount = null  // populated for the Circle path; null for EOA paths
+let _smartAccount = null      // populated for the Circle path; null for EOA paths
+let _smartAccountClient = null // Circle modular-transport viem client (for bundler)
 
 export function getConnectedProvider() { return _providerId }
 export function getAddress() { return _address }
 // Returns the Circle smart account when connected via passkey, else null.
-// Phase 2.5 will use this to wrap deposit/approve calls in sendUserOperation.
+// Phase 2.5 uses this to wrap deposit calls in sendUserOperation.
 export function getSmartAccount() { return _smartAccount }
+// Returns the modular-transport public client paired with the smart
+// account — required for createBundlerClient. Null for EOA paths.
+export function getSmartAccountClient() { return _smartAccountClient }
 
 function saveWalletMeta(providerId, address) {
   try {
@@ -168,16 +177,31 @@ export async function reconnectWallet() {
   const meta = loadWalletMeta()
   if (!meta) return null
 
-  // Circle passkey path: restore address only; smart account is null
-  // until the user signs in again on first tx attempt.
+  // Circle passkey path: rebuild the smart account from the stored
+  // credential without triggering a WebAuthn prompt. The credential
+  // only holds the public key (private key stays in the device's
+  // secure enclave), so we can derive the address + signer wrapper
+  // silently. Prompt only happens when the user actually signs a
+  // user operation later.
   if (meta.providerId === CIRCLE_PROVIDER_ID) {
     if (!circlePasskeyEnabled()) { clearWalletMeta(); return null }
-    _address = meta.address
-    _providerId = CIRCLE_PROVIDER_ID
-    _provider = null
-    _walletClient = null
-    _smartAccount = null
-    return { address: _address, provider: _providerId }
+    try {
+      const restored = await rehydrateSmartAccount()
+      if (!restored) { clearWalletMeta(); return null }
+      _address = restored.address
+      _providerId = CIRCLE_PROVIDER_ID
+      _provider = null
+      _walletClient = null
+      _smartAccount = restored.smartAccount
+      _smartAccountClient = restored.client
+      saveWalletMeta(CIRCLE_PROVIDER_ID, _address)
+      return { address: _address, provider: _providerId }
+    } catch {
+      // If rehydration fails (corrupted credential, SDK error, etc.)
+      // fall back gracefully — user can re-connect manually.
+      clearWalletMeta()
+      return null
+    }
   }
 
   const provider = findWalletProvider(meta.providerId)
@@ -280,6 +304,7 @@ export async function connectCircleWallet() {
   _provider = null
   _walletClient = null
   _smartAccount = result.smartAccount
+  _smartAccountClient = result.client
   saveWalletMeta(CIRCLE_PROVIDER_ID, _address)
   return { address: _address, provider: CIRCLE_PROVIDER_ID }
 }
@@ -337,20 +362,20 @@ export function disconnectWallet() {
   _address = null
   _providerId = null
   _smartAccount = null
+  _smartAccountClient = null
   clearWalletMeta()
 }
 
 export async function getWalletClient() {
   if (_walletClient) return _walletClient
   if (_providerId === CIRCLE_PROVIDER_ID) {
-    // Phase 2 ships connect-only for passkey wallets. The deposit / approve
-    // flow needs a Phase 2.5 bundler-based executor (sendUserOperation via
-    // Circle Gas Station). Surface a clear message instead of failing
-    // generically — the modal already warns users about this.
+    // Passkey wallets sign via Circle's bundler (executeUserOp), not viem
+    // writeContract — callers should branch on getConnectedProvider() and
+    // use the executor for that path. This error fires only if a code path
+    // forgot to branch.
     throw new Error(
-      'Passkey wallet transactions are not yet wired. EOA wallets (MetaMask, ' +
-      'Coinbase, Rabby) work for the full deposit flow today. The passkey path ' +
-      'will sign via Circle Gas Station in the next iteration.',
+      'This action is not yet wired for passkey wallets. ' +
+      'The deposit flow uses Circle bundler execution; other flows still need that wrapper.',
     )
   }
   throw new Error('No wallet connected. Click "Connect Wallet" to continue.')
