@@ -50,6 +50,7 @@ def init_db() -> None:
     # Base.metadata before create_all runs. Otherwise the kg_* tables only
     # appear if some other code path imports archimedes.models.kg first.
     from archimedes.models import kg  # noqa: F401
+    from archimedes.models import strategy_passport_record  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
     logger.info(f"Database tables created at {DATABASE_URL}")

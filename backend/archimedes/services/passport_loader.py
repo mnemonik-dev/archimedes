@@ -1,0 +1,239 @@
+"""Passport loader — unified write path for strategy passports.
+
+Every strategy (curated file, fusion output, architect output) is
+ingested here and written to the ``strategy_passports`` Postgres table.
+Content-hash dedup prevents duplicates.
+
+Usage:
+    from archimedes.services.passport_loader import ingest_passport
+    record = ingest_passport(session, strategy_passport)
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+from datetime import UTC, datetime
+
+from sqlalchemy.orm import Session
+
+from archimedes.models.paper_ref import PaperRef
+from archimedes.models.strategy import StrategyPassport
+from archimedes.models.strategy_passport_record import (
+    PassportPaperRef,
+    StrategyPassportRecord,
+)
+
+logger = logging.getLogger(__name__)
+
+
+def _compute_content_hash(passport: StrategyPassport) -> str:
+    """Deterministic SHA-256 content hash for dedup.
+
+    Based on methodology + asset universe + paper IDs — the semantic
+    identity of a strategy. Two passports with the same methodology
+    applied to the same assets from the same papers are the same strategy.
+    """
+    canonical = json.dumps(
+        {
+            "methodology_summary": (passport.methodology_summary or "").strip(),
+            "asset_universe": sorted(passport.asset_universe),
+            "paper_ids": sorted(
+                p.arxiv_id or p.doi or p.title for p in passport.papers
+            ),
+        },
+        sort_keys=True,
+        ensure_ascii=False,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _build_paper_refs(
+    passport_id: str, papers: list[PaperRef]
+) -> list[PassportPaperRef]:
+    """Build ORM paper ref objects from dataclass PaperRefs."""
+    refs = []
+    for p in papers:
+        refs.append(
+            PassportPaperRef(
+                passport_id=passport_id,
+                arxiv_id=p.arxiv_id,
+                title=p.title or "",
+                authors=json.dumps(p.authors) if p.authors else "[]",
+                doi=p.doi,
+                venue=p.venue,
+                year=p.year,
+                citation_count=p.citation_count,
+                contribution=p.contribution,
+            )
+        )
+    return refs
+
+
+def ingest_passport(
+    session: Session,
+    passport: StrategyPassport,
+    *,
+    generation_method: str = "curated",
+    force_update: bool = False,
+) -> StrategyPassportRecord:
+    """Ingest a StrategyPassport dataclass into the unified Postgres table.
+
+    Idempotent: if a record with the same content hash exists, returns it
+    (optionally updating fields if ``force_update=True``).
+
+    Args:
+        session: SQLAlchemy session (caller manages commit/rollback).
+        passport: The StrategyPassport dataclass to persist.
+        generation_method: "curated", "fusion", or "architect".
+        force_update: If True, overwrite existing record fields on hash match.
+
+    Returns:
+        The persisted StrategyPassportRecord.
+    """
+    content_hash = _compute_content_hash(passport)
+
+    existing = (
+        session.query(StrategyPassportRecord)
+        .filter_by(id=passport.id)
+        .first()
+    )
+
+    if existing and not force_update:
+        logger.debug("passport_loader: %s already exists — skipping", passport.id)
+        return existing
+
+    if existing and force_update:
+        # Update in place
+        _update_record(existing, passport, generation_method, content_hash)
+        # Replace paper refs
+        session.query(PassportPaperRef).filter_by(passport_id=passport.id).delete()
+        existing.paper_refs = _build_paper_refs(passport.id, passport.papers)
+        existing.updated_at = datetime.now(UTC)
+        session.flush()
+        logger.info("passport_loader: updated %s (%s)", passport.id, generation_method)
+        return existing
+
+    # New record
+    record = StrategyPassportRecord(
+        id=passport.id,
+        methodology_hash=passport.methodology_hash or passport.compute_methodology_hash(),
+        content_hash=content_hash,
+        generation_method=generation_method,
+        methodology_summary=passport.methodology_summary or "",
+        methodology_text=passport.methodology_text,
+        asset_universe=json.dumps(passport.asset_universe),
+        position_sizing=passport.position_sizing.value if hasattr(passport.position_sizing, 'value') else str(passport.position_sizing),
+        rebalance_frequency=passport.rebalance_frequency.value if hasattr(passport.rebalance_frequency, 'value') else str(passport.rebalance_frequency),
+        risk_constraints=json.dumps(passport.risk_constraints) if passport.risk_constraints else "{}",
+        risk_profiles=json.dumps(passport.risk_profiles) if passport.risk_profiles else "[]",
+        status=passport.status.value if hasattr(passport.status, 'value') else str(passport.status),
+        regime_tag=passport.regime_tag or "regime_neutral",
+        extraction_llm=passport.extraction_llm,
+        extraction_prompt_hash=passport.extraction_prompt_hash,
+        curator_wallet=passport.curator_wallet,
+        curator_note=passport.curator_note,
+        strategy_code_path=passport.strategy_code_path,
+        strategy_code_hash=passport.strategy_code_hash,
+        on_chain_registration_tx=passport.on_chain_registration_tx,
+        paper_claimed_sharpe=passport.paper_claimed_sharpe,
+        paper_claimed_cagr=passport.paper_claimed_cagr,
+        paper_claimed_max_dd=passport.paper_claimed_max_dd,
+        paper_claim_blended_sharpe=passport.paper_claim_blended_sharpe,
+        # Backtest results
+        sharpe_ratio=passport.real_sharpe,
+        sortino_ratio=passport.real_sortino,
+        max_drawdown=passport.real_max_dd,
+        cagr=passport.real_cagr,
+        win_rate=passport.real_win_rate,
+        total_trades=passport.real_total_trades,
+        calmar_ratio=passport.real_calmar,
+        correlation_to_spy=passport.real_corr_spy,
+        backtest_start=passport.real_backtest_start,
+        backtest_end=passport.real_backtest_end,
+        # Rigor gate
+        deflated_sharpe_ratio=passport.deflated_sharpe_ratio,
+        dsr_p_value=passport.dsr_p_value,
+        pbo_score=passport.pbo_score,
+        out_of_sample_sharpe=passport.out_of_sample_sharpe,
+        passes_rigor_gate=passport.passes_rigor_gate,
+        kelly_fraction=passport.kelly_fraction,
+        sharpe_ci_lower=passport.sharpe_ci_lower,
+        sharpe_ci_upper=passport.sharpe_ci_upper,
+        n_obs_daily=passport.n_obs_daily,
+        # Timestamps
+        created_at=passport.created_at or datetime.now(UTC),
+        updated_at=passport.updated_at or datetime.now(UTC),
+    )
+    record.paper_refs = _build_paper_refs(passport.id, passport.papers)
+    session.add(record)
+    session.flush()
+    logger.info(
+        "passport_loader: ingested %s (%s, %d papers, regime=%s)",
+        passport.id,
+        generation_method,
+        len(passport.papers),
+        passport.regime_tag,
+    )
+    return record
+
+
+def _update_record(
+    record: StrategyPassportRecord,
+    passport: StrategyPassport,
+    generation_method: str,
+    content_hash: str,
+) -> None:
+    """Update an existing record's fields from a passport."""
+    record.content_hash = content_hash
+    record.generation_method = generation_method
+    record.methodology_summary = passport.methodology_summary or ""
+    record.methodology_text = passport.methodology_text
+    record.methodology_hash = passport.methodology_hash or passport.compute_methodology_hash()
+    record.asset_universe = json.dumps(passport.asset_universe)
+    record.status = passport.status.value if hasattr(passport.status, 'value') else str(passport.status)
+    record.regime_tag = passport.regime_tag or "regime_neutral"
+    record.passes_rigor_gate = passport.passes_rigor_gate
+    record.sharpe_ratio = passport.real_sharpe
+    record.sortino_ratio = passport.real_sortino
+    record.max_drawdown = passport.real_max_dd
+    record.cagr = passport.real_cagr
+    record.deflated_sharpe_ratio = passport.deflated_sharpe_ratio
+    record.pbo_score = passport.pbo_score
+    record.out_of_sample_sharpe = passport.out_of_sample_sharpe
+    record.kelly_fraction = passport.kelly_fraction
+
+
+def ingest_all_curated(session: Session, strategies: list[StrategyPassport]) -> int:
+    """Bulk-ingest curated strategies. Returns count ingested."""
+    count = 0
+    for s in strategies:
+        ingest_passport(session, s, generation_method="curated", force_update=True)
+        count += 1
+    session.commit()
+    logger.info("passport_loader: bulk-ingested %d curated strategies", count)
+    return count
+
+
+def get_passport(session: Session, strategy_id: str) -> StrategyPassportRecord | None:
+    """Read a single passport by ID."""
+    return session.query(StrategyPassportRecord).filter_by(id=strategy_id).first()
+
+
+def list_passports(
+    session: Session,
+    *,
+    status: str | None = None,
+    regime_tag: str | None = None,
+    generation_method: str | None = None,
+) -> list[StrategyPassportRecord]:
+    """List passports with optional filters."""
+    q = session.query(StrategyPassportRecord)
+    if status:
+        q = q.filter(StrategyPassportRecord.status == status)
+    if regime_tag:
+        q = q.filter(StrategyPassportRecord.regime_tag == regime_tag)
+    if generation_method:
+        q = q.filter(StrategyPassportRecord.generation_method == generation_method)
+    return q.all()
