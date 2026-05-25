@@ -480,9 +480,13 @@ async def _run_live_candidate(*, candidate_id: str, brief: GenerateBrief, emit: 
     pick_summary = " / ".join(t for t, _ in top_picks)
     strategy_name = f"{brief.risk_appetite.title()} Blend — {brief.intent[:50].strip()}"
     agent_reasoning = getattr(portfolio, "reasoning_text", "") or ""
-    thesis = agent_reasoning if len(agent_reasoning) > 20 else (
-        f"For brief '{brief.intent[:100]}': allocates {pick_summary} "
-        f"across {len(weights)} assets with {brief.risk_appetite} risk appetite."
+    thesis = (
+        agent_reasoning
+        if len(agent_reasoning) > 20
+        else (
+            f"For brief '{brief.intent[:100]}': allocates {pick_summary} "
+            f"across {len(weights)} assets with {brief.risk_appetite} risk appetite."
+        )
     )
 
     return _CandidateResult(
