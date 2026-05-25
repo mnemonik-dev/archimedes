@@ -333,6 +333,7 @@ class StrategySignals:
     strategy_name: str
     paper_title: str
     signals: list[AssetSignal]
+    paper_arxiv_id: str = ""
 
     @property
     def total_weight(self) -> float:
@@ -832,6 +833,7 @@ class StrategySignalEvaluator:
                         strategy_name=strategy.paper_title,
                         paper_title=strategy.paper_title,
                         signals=signals,
+                        paper_arxiv_id=strategy.paper_arxiv_id,
                     )
                 )
 

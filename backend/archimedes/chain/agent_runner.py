@@ -37,6 +37,7 @@ from archimedes.models.portfolio import (
 )
 from archimedes.models.trace import DecisionType, ReasoningTrace
 from archimedes.services.redis_state import AgentStateStore
+from archimedes.services.source_tracker import build_consulted_hashes
 from archimedes.services.strategy_provider import default_provider
 from archimedes.services.strategy_signal_evaluator import (
     StrategySignals,
@@ -57,6 +58,16 @@ USDC_FLOOR = float(os.getenv("AGENT_USDC_FLOOR", "0.20"))
 
 # Drift threshold for rebalance trigger
 _DRIFT_THRESHOLD = 0.15
+
+
+def _paper_hashes_from_signals(all_signals: list[StrategySignals]) -> list[str]:
+    """Build consulted-paper hash list (Xia § 4.3 Source Tracking) from strategy signals.
+
+    Uses strategy_id as the content hash — it is a SHA-256 of paper + methodology,
+    so it IS a stable content fingerprint even without a separate pdf_sha256.
+    """
+    papers = [{"arxiv_id": ss.paper_arxiv_id or ss.strategy_id, "content_hash": ss.strategy_id} for ss in all_signals]
+    return build_consulted_hashes(papers)
 
 
 class StrategyRunner:
@@ -576,7 +587,7 @@ class StrategyRunner:
                 for t in trades
             ],
             strategies_referenced=[ss.strategy_id for ss in all_signals],
-            consulted_paper_hashes=[],
+            consulted_paper_hashes=_paper_hashes_from_signals(all_signals),
         )
 
         trace.compute_hash()
@@ -657,7 +668,7 @@ class StrategyRunner:
             ),
             trades_executed=[{"symbol": t.symbol, "direction": t.direction.value, "amount": t.amount} for t in trades],
             strategies_referenced=[ss.strategy_id for ss in all_signals],
-            consulted_paper_hashes=[],
+            consulted_paper_hashes=_paper_hashes_from_signals(all_signals),
             # Commit-reveal temporal binding
             commit_tx_hash=commit_tx,
             commit_block_number=commit_block,
@@ -773,7 +784,7 @@ class StrategyRunner:
             ),
             trades_executed=[{"symbol": t.symbol, "direction": t.direction.value, "amount": t.amount} for t in trades],
             strategies_referenced=[ss.strategy_id for ss in all_signals],
-            consulted_paper_hashes=[],
+            consulted_paper_hashes=_paper_hashes_from_signals(all_signals),
         )
 
         trace.compute_hash()
