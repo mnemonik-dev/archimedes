@@ -19,7 +19,7 @@ import json
 import logging
 from collections.abc import AsyncIterator
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 
 from archimedes.agents.generation_pipeline import run_generation
@@ -56,7 +56,7 @@ def _register_task(job_id: str, task: asyncio.Task) -> None:
 
 @generate_router.post("/start", response_model=GenerateStartResponse, status_code=202)
 @limiter.limit("5/minute")
-async def start_generation(req: GenerateStartRequest, request: Request) -> GenerateStartResponse:  # noqa: ARG001 — slowapi @limiter.limit inspects param name
+async def start_generation(req: GenerateStartRequest, request: Request, response: Response) -> GenerateStartResponse:  # noqa: ARG001 — slowapi @limiter.limit inspects param name
     """Create a generation job and start the pipeline in the background."""
     store = get_job_store()
     job_id = await store.enqueue(

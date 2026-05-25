@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Query, Request, Response
 
 from archimedes.api._route_helpers import strategy_provider, vault_svc
 from archimedes.api.limiter import limiter
@@ -41,7 +41,7 @@ async def list_vaults(
 
 @vaults_router.post("/create", response_model=VaultCreateResponse)
 @limiter.limit("5/minute")
-async def create_vault(req: VaultCreateRequest, request: Request):  # noqa: ARG001 — slowapi @limiter.limit inspects param name
+async def create_vault(req: VaultCreateRequest, request: Request, response: Response):  # noqa: ARG001 — slowapi @limiter.limit inspects param name
     """Deploy a new vault on Arc via VaultFactory."""
     from fastapi import HTTPException
 
@@ -85,7 +85,7 @@ async def get_vault_detail(address: str):
 
 @vaults_router.post("/metadata", response_model=VaultMetadataResponse)
 @limiter.limit("10/minute")
-async def store_vault_metadata(req: VaultMetadataRequest, request: Request):  # noqa: ARG001 — slowapi @limiter.limit inspects param name
+async def store_vault_metadata(req: VaultMetadataRequest, request: Request, response: Response):  # noqa: ARG001 — slowapi @limiter.limit inspects param name
     """Store off-chain vault metadata (strategy associations, display name)."""
     from fastapi import HTTPException
 
