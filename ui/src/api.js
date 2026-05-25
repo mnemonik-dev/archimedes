@@ -1,0 +1,41 @@
+/**
+ * Shared API fetch helper — safe error handling for the Archimedes frontend.
+ *
+ * When nginx returns a 502/503 during deploys, res.text() is multi-line HTML
+ * (`<html><body>502 Bad Gateway</body></html>`) that would splat raw across
+ * the UI if thrown as an Error message. This helper throws a clean, concise
+ * error string instead.
+ */
+
+const API_BASE = import.meta.env.VITE_API_BASE ?? ''
+
+/**
+ * GET a JSON endpoint. Throws a clean error on non-2xx responses.
+ * @param {string} path — API path (e.g. "/api/strategies/")
+ * @returns {Promise<any>} parsed JSON
+ */
+export async function apiGet(path) {
+  const res = await fetch(`${API_BASE}${path}`)
+  if (!res.ok) {
+    throw new Error(`Backend returned ${res.status}`)
+  }
+  return res.json()
+}
+
+/**
+ * POST JSON to an endpoint. Throws a clean error on non-2xx responses.
+ * @param {string} path — API path
+ * @param {object} body — JSON-serializable body
+ * @returns {Promise<any>} parsed JSON
+ */
+export async function apiPost(path, body) {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    throw new Error(`Backend returned ${res.status}`)
+  }
+  return res.json()
+}

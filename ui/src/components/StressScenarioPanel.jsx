@@ -49,7 +49,7 @@ export default function StressScenarioPanel({ allocations, usdcWeight, portfolio
             usdc_weight: usdc,
           }),
         })
-        if (!res.ok) throw new Error(await res.text())
+        if (!res.ok) throw new Error(`Backend returned ${res.status}`)
         const data = await res.json()
         if (!cancelled) setResults(data.results || [])
       } catch (e) {

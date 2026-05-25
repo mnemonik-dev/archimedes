@@ -202,7 +202,7 @@ export default function AssetModal({ asset, onClose }) {
             if (!cancelled) { setHistory([]); setError('') }
             return null
           }
-          throw new Error(await res.text() || `History fetch failed (${res.status})`)
+          throw new Error(`History fetch failed (${res.status})`)
         }
         return res.json()
       })

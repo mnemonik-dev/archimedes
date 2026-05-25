@@ -1,16 +1,11 @@
+import { apiGet } from '../api'
 import { useState, useEffect, useCallback } from 'react'
 import {
   publicClient,
   TRACE_REGISTRY_ABI, NEW_CONTRACTS,
 } from '../config'
 
-const API_BASE = import.meta.env.VITE_API_BASE ?? ''
 
-async function apiGet(path) {
-  const res = await fetch(`${API_BASE}${path}`)
-  if (!res.ok) throw new Error(await res.text())
-  return res.json()
-}
 
 function timeAgo(ts) {
   if (!ts) return '—'

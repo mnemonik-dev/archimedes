@@ -1,12 +1,7 @@
+import { apiGet } from '../api'
 import { useState, useEffect } from 'react'
 
-const API_BASE = import.meta.env.VITE_API_BASE ?? ''
 
-async function apiGet(path) {
-  const res = await fetch(`${API_BASE}${path}`)
-  if (!res.ok) throw new Error(await res.text())
-  return res.json()
-}
 
 /**
  * EfficientFrontier — SVG scatter plot of the MVO efficient frontier.

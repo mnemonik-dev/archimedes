@@ -101,7 +101,7 @@ export default function Generate({ onNavigate }) {
           // it transparently without us forcing a tab choice.
         }),
       })
-      if (!res.ok) throw new Error(await res.text())
+      if (!res.ok) throw new Error(`Generation start failed (${res.status})`)
       const data = await res.json()
       localStorage.setItem(STORAGE_JOB_KEY, data.job_id)
       setJobId(data.job_id)
