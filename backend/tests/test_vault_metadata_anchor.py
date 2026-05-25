@@ -37,12 +37,15 @@ class TestVaultMetadataAnchor:
         mock_provider.get_strategy.side_effect = lambda sid: _make_passport(sid)
         mock_publisher.anchor = AsyncMock()
 
-        resp = client.post("/api/vaults/metadata", json={
-            "vault_address": "0x" + "ab" * 20,
-            "name": "Test Vault",
-            "symbol": "tVLT",
-            "strategy_ids": ["s1", "s2", "s3"],
-        })
+        resp = client.post(
+            "/api/vaults/metadata",
+            json={
+                "vault_address": "0x" + "ab" * 20,
+                "name": "Test Vault",
+                "symbol": "tVLT",
+                "strategy_ids": ["s1", "s2", "s3"],
+            },
+        )
         assert resp.status_code == 200
 
         # Give the fire-and-forget task time to execute
@@ -61,12 +64,15 @@ class TestVaultMetadataAnchor:
         mock_provider.get_strategy.side_effect = get_strat
         mock_publisher.anchor = AsyncMock()
 
-        resp = client.post("/api/vaults/metadata", json={
-            "vault_address": "0x" + "cd" * 20,
-            "name": "Test Vault 2",
-            "symbol": "tVL2",
-            "strategy_ids": ["s1", "s2", "s3"],
-        })
+        resp = client.post(
+            "/api/vaults/metadata",
+            json={
+                "vault_address": "0x" + "cd" * 20,
+                "name": "Test Vault 2",
+                "symbol": "tVL2",
+                "strategy_ids": ["s1", "s2", "s3"],
+            },
+        )
         assert resp.status_code == 200
 
         asyncio.get_event_loop().run_until_complete(asyncio.sleep(0.1))
@@ -79,12 +85,15 @@ class TestVaultMetadataAnchor:
         mock_provider.get_strategy.side_effect = lambda sid: _make_passport(sid)
         mock_publisher.anchor = AsyncMock(side_effect=RuntimeError("simulated chain failure"))
 
-        resp = client.post("/api/vaults/metadata", json={
-            "vault_address": "0x" + "ef" * 20,
-            "name": "Test Vault 3",
-            "symbol": "tVL3",
-            "strategy_ids": ["s1"],
-        })
+        resp = client.post(
+            "/api/vaults/metadata",
+            json={
+                "vault_address": "0x" + "ef" * 20,
+                "name": "Test Vault 3",
+                "symbol": "tVL3",
+                "strategy_ids": ["s1"],
+            },
+        )
         # Handler still returns 200 — anchor failure is non-fatal
         assert resp.status_code == 200
 
@@ -94,12 +103,15 @@ class TestVaultMetadataAnchor:
         mock_provider.get_strategy.return_value = None
         mock_publisher.anchor = AsyncMock()
 
-        resp = client.post("/api/vaults/metadata", json={
-            "vault_address": "0x" + "11" * 20,
-            "name": "Test Vault 4",
-            "symbol": "tVL4",
-            "strategy_ids": ["unknown_id"],
-        })
+        resp = client.post(
+            "/api/vaults/metadata",
+            json={
+                "vault_address": "0x" + "11" * 20,
+                "name": "Test Vault 4",
+                "symbol": "tVL4",
+                "strategy_ids": ["unknown_id"],
+            },
+        )
         assert resp.status_code == 200
 
         asyncio.get_event_loop().run_until_complete(asyncio.sleep(0.1))
