@@ -57,6 +57,9 @@ jobs:
             sed -i '/^EMAIL_ENCRYPTION_KEY=/d' .env
             echo "EMAIL_ENCRYPTION_KEY=${{ secrets.EMAIL_ENCRYPTION_KEY }}" >> .env
 
+            # Ensure PUBLIC_DOMAIN is set (gates /docs and email crypto)
+            grep -q '^PUBLIC_DOMAIN=' .env || echo 'PUBLIC_DOMAIN=https://archimedes-arc.app' >> .env
+
             # Rebuild and restart services (detached)
             docker compose build --no-cache
             docker compose up -d --force-recreate --remove-orphans
@@ -81,8 +84,9 @@ jobs:
               docker compose logs --tail=50 backend
               exit 1
             }
+            # nginx redirects HTTP→HTTPS (301) which is correct; accept both 200 and 301
             homepage_status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost/)
-            if [ "$homepage_status" != "200" ]; then
+            if [ "$homepage_status" != "200" ] && [ "$homepage_status" != "301" ]; then
               echo "❌ Homepage check failed (HTTP $homepage_status)"
               docker compose logs --tail=50 nginx
               exit 1
