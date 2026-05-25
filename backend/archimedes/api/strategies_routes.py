@@ -1579,4 +1579,3 @@ async def construct_strategy(req: StrategyConstructionRequest):
             is_anchored=trace.is_anchored,
         ),
     )
-
