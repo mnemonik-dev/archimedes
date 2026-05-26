@@ -95,6 +95,18 @@ export default function WalletConnect({ address, displayName, onConnect, onDisco
     setError('')
     try {
       const result = await connectWallet(providerId)
+
+      // SIWE: prove wallet ownership via signature (EIP-4361)
+      try {
+        const { authenticateWithSIWE } = await import('../siwe')
+        const walletClient = await getWalletClient()
+        await authenticateWithSIWE(walletClient, result.address)
+      } catch (siweErr) {
+        // SIWE failure is non-fatal during transition — wallet still connects,
+        // but PII endpoints won't return sensitive data without a session.
+        console.warn('SIWE auth failed (non-fatal):', siweErr.message)
+      }
+
       setShowModal(false)
       onConnect(result.address)
     } catch (err) {

@@ -27,6 +27,7 @@ load_ssm_secrets()
 
 # Shared rate limiter (Redis-backed, falls back to in-memory).
 # Defined in a separate module to avoid circular imports with route modules.
+from archimedes.api.auth_siwe import auth_router
 from archimedes.api.chat_routes import chat_router
 from archimedes.api.corpus_routes import corpus_router
 from archimedes.api.explore_routes import explore_router
@@ -231,6 +232,7 @@ app.include_router(risk_router)
 app.include_router(selection_bias_router)
 app.include_router(papers_router)
 app.include_router(user_router)
+app.include_router(auth_router)
 app.include_router(proposals_router)
 
 

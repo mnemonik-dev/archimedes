@@ -66,12 +66,18 @@ def _profile_to_response(p: UserProfile, *, owner: bool = False) -> UserProfileR
 
 
 def _extract_caller_wallet(request: Request) -> str | None:
-    """Extract the caller's wallet from request headers.
+    """Extract the caller's verified wallet from SIWE session cookie.
 
-    The frontend sends the connected wallet address via the
-    ``X-Wallet-Address`` header. In a production system this would be
-    a signed payload; for the hackathon MVP the header is trusted.
+    Falls back to X-Wallet-Address header for backward compatibility
+    during the transition period, but the session cookie takes priority.
     """
+    from archimedes.api.auth_siwe import get_verified_wallet
+
+    # SIWE session cookie (cryptographically verified)
+    verified = get_verified_wallet(request)
+    if verified:
+        return verified
+    # Fallback: header (will be removed once SIWE is fully deployed)
     return request.headers.get("X-Wallet-Address", "").lower().strip() or None
 
 

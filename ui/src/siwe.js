@@ -1,0 +1,82 @@
+/**
+ * SIWE (Sign-In with Ethereum) — EIP-4361 session authentication.
+ *
+ * After wallet connection, the user signs a challenge message to prove
+ * they own the wallet. The backend verifies the signature and issues
+ * a session cookie (httpOnly, Secure, SameSite=Strict).
+ *
+ * This replaces the spoofable X-Wallet-Address header with
+ * cryptographically verified wallet ownership.
+ */
+
+const API_BASE = import.meta.env.VITE_API_BASE ?? ''
+
+/**
+ * Perform SIWE authentication: request nonce, sign message, verify.
+ *
+ * @param {object} walletClient — viem wallet client (from getWalletClient())
+ * @param {string} address — the connected wallet address
+ * @returns {Promise<{authenticated: boolean, wallet: string}>}
+ */
+export async function authenticateWithSIWE(walletClient, address) {
+  // Step 1: Request a nonce from the backend
+  const nonceRes = await fetch(`${API_BASE}/api/auth/nonce`)
+  if (!nonceRes.ok) throw new Error(`Nonce request failed (${nonceRes.status})`)
+  const { nonce, domain, issued_at } = await nonceRes.json()
+
+  // Step 2: Construct the SIWE message (EIP-4361 format)
+  const message = [
+    `${domain} wants you to sign in with your Ethereum account:`,
+    address,
+    '',
+    'Sign in to Archimedes — prove you own this wallet.',
+    '',
+    `URI: https://${domain}`,
+    `Version: 1`,
+    `Chain ID: 5042002`,
+    `Nonce: ${nonce}`,
+    `Issued At: ${new Date(issued_at * 1000).toISOString()}`,
+  ].join('\n')
+
+  // Step 3: Sign the message (wallet popup — Touch ID or MetaMask confirm)
+  const signature = await walletClient.signMessage({ message })
+
+  // Step 4: Send to backend for verification
+  const verifyRes = await fetch(`${API_BASE}/api/auth/verify`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include', // important: include cookies
+    body: JSON.stringify({ message, signature }),
+  })
+
+  if (!verifyRes.ok) {
+    const err = await verifyRes.json().catch(() => ({ detail: 'Verification failed' }))
+    throw new Error(err.detail || `Verification failed (${verifyRes.status})`)
+  }
+
+  return verifyRes.json()
+}
+
+/**
+ * Check if the user has an active SIWE session.
+ * @returns {Promise<{authenticated: boolean, wallet: string|null}>}
+ */
+export async function checkSession() {
+  try {
+    const res = await fetch(`${API_BASE}/api/auth/session`, { credentials: 'include' })
+    if (!res.ok) return { authenticated: false, wallet: null }
+    return res.json()
+  } catch {
+    return { authenticated: false, wallet: null }
+  }
+}
+
+/**
+ * Log out — clear the SIWE session cookie.
+ */
+export async function logout() {
+  await fetch(`${API_BASE}/api/auth/logout`, {
+    method: 'POST',
+    credentials: 'include',
+  }).catch(() => {})
+}

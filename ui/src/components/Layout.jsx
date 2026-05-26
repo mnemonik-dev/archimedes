@@ -70,6 +70,7 @@ export default function Layout({ page, setPage, walletAddr, onConnect, onDisconn
     const seen = localStorage.getItem('archimedes.welcomeProfileSeen.' + walletAddr.toLowerCase())
     fetch(`${API_BASE}/api/user/profile/${walletAddr}`, {
         headers: { 'X-Wallet-Address': walletAddr },
+        credentials: 'include',  // Send SIWE session cookie
       })
       .then(r => r.ok ? r.json() : null)
       .then(data => {

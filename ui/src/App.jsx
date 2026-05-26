@@ -113,7 +113,12 @@ export default function App() {
   }, [])
 
   const handleConnect = (addr) => setWalletAddr(addr)
-  const handleDisconnect = () => { disconnectWallet(); setWalletAddr(null) }
+  const handleDisconnect = () => {
+    disconnectWallet()
+    setWalletAddr(null)
+    // Clear SIWE session cookie
+    import('./siwe').then(m => m.logout()).catch(() => {})
+  }
 
   const navigateToPage = useCallback((nextPage, opts = {}) => {
     const nextVault = opts.vaultAddress ?? selectedVault
