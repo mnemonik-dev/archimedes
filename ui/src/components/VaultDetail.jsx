@@ -192,7 +192,23 @@ export default function VaultDetail({ address, onBack }) {
       await w.writeContract({ address: USDC, abi: TOKEN_ABI, functionName: 'approve', args: [address, amount] })
       setStatus('Depositing…')
       const hash = await w.writeContract({ address, abi: VAULT_ABI, functionName: 'deposit', args: [amount, getAddress()] })
-      setStatus(`Deposited! TX: ${hash}`)
+      // Render TX hash as a clickable arcscan link (Issue #389 follow-up — Pi
+      // missed this in the original bundle). status is a ReactNode so we can
+      // mix string + <a>; the renderer at line 376 already passes through.
+      setStatus(
+        <span>
+          Deposited! TX:{' '}
+          <a
+            href={`https://testnet.arcscan.app/tx/${hash}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mono"
+            style={{ color: 'var(--accent)' }}
+          >
+            {hash.slice(0, 10)}…{hash.slice(-6)} ↗
+          </a>
+        </span>
+      )
       setDepositAmt('')
       loadOnChain()
     } catch (err) { setStatus(err.shortMessage || err.message) }
@@ -243,7 +259,7 @@ export default function VaultDetail({ address, onBack }) {
             try {
               const connected = getAddress()
               if (connected && creator.toLowerCase() === connected.toLowerCase()) return 'Created by you'
-            } catch {}
+            } catch { /* getAddress() may throw if wallet hook isn't ready — fall through to hex */ }
             return shortAddr(creator)
           })()}</code></div>
         </div>

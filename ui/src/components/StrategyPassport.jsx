@@ -21,10 +21,20 @@ function fmtPct(v) {
   return `${(Number(v) * 100).toFixed(1)}%`
 }
 
-function statusTag(status) {
+function statusTag(status, passesRigor) {
+  // A "live" admin status combined with a failed rigor verdict shouldn't
+  // render green — the rigor verdict is the truthful signal. Match the
+  // Strategies.jsx pill rule (Issue #387) so the passport doesn't
+  // contradict the library page.
+  if (status === 'live' && passesRigor === false) return 'tag-muted'
   if (status === 'validated' || status === 'live') return 'tag-positive'
   if (status === 'rejected' || status === 'retired') return 'tag-muted'
   return 'tag-accent'
+}
+
+function statusLabel(status, passesRigor) {
+  if (status === 'live' && passesRigor === false) return 'Live (rigor failed)'
+  return (status || 'candidate').charAt(0).toUpperCase() + (status || 'candidate').slice(1)
 }
 
 // Derive a brief-specific display title. The unified passport table doesn't
@@ -125,7 +135,7 @@ export default function StrategyPassport({ strategyId, onNavigate, walletAddr })
         </div>
         <div className="flex gap-2 items-center flex-wrap">
           {regime && <span className={`tag ${regime.cls}`}>{regime.label}</span>}
-          <span className={`tag ${statusTag(s.status)}`} style={{ textTransform: 'capitalize' }}>{s.status || 'candidate'}</span>
+          <span className={`tag ${statusTag(s.status, s.passes_rigor_gate)}`}>{statusLabel(s.status, s.passes_rigor_gate)}</span>
           {s.passes_rigor_gate === true && (
             <span className="tag tag-positive inline-flex items-center gap-1">
               <span className="i-lucide-check w-3.5 h-3.5" /> rigor gate passed
