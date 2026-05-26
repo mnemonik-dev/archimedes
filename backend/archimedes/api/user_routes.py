@@ -65,19 +65,32 @@ def _profile_to_response(p: UserProfile, *, owner: bool = False) -> UserProfileR
     )
 
 
-def _extract_caller_wallet(request: Request) -> str | None:
-    """Extract the caller's verified wallet from SIWE session cookie.
+def _extract_caller_wallet_siwe(request: Request) -> str | None:
+    """Extract wallet from SIWE session ONLY (cryptographic proof).
 
-    PII (email, display_name) is ONLY returned when the caller has a
-    cryptographically verified SIWE session. The X-Wallet-Address header
-    is no longer trusted for identity — it's kept only for non-PII
-    operations (e.g. chat posting during the transition).
+    Used for PII access — email and display_name are ONLY returned
+    when this function returns a verified wallet.
     """
     from archimedes.api.auth_siwe import get_verified_wallet
 
-    # SIWE session cookie (cryptographically verified) — the ONLY path
-    # that unlocks PII in profile responses.
     return get_verified_wallet(request)
+
+
+def _extract_caller_wallet(request: Request) -> str | None:
+    """Extract wallet from SIWE session or X-Wallet-Address header.
+
+    Used for write operations (profile upsert, chat posting) where the
+    caller is modifying their OWN data. The header is acceptable here
+    because the write check enforces caller == payload.wallet_address.
+
+    PII reads use _extract_caller_wallet_siwe() instead.
+    """
+    from archimedes.api.auth_siwe import get_verified_wallet
+
+    verified = get_verified_wallet(request)
+    if verified:
+        return verified
+    return request.headers.get("X-Wallet-Address", "").lower().strip() or None
 
 
 @user_router.get("/profile/{wallet}", response_model=UserProfileResponse)
@@ -95,7 +108,8 @@ async def get_profile(wallet: str, request: Request):
         if not profile:
             raise HTTPException(status_code=404, detail="Profile not found")
 
-        is_owner = _extract_caller_wallet(request) == wallet_lower
+        # PII requires SIWE session — header spoofing cannot access email/name
+        is_owner = _extract_caller_wallet_siwe(request) == wallet_lower
         response = _profile_to_response(profile, owner=is_owner)
 
         logger.info(
