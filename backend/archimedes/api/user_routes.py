@@ -68,17 +68,16 @@ def _profile_to_response(p: UserProfile, *, owner: bool = False) -> UserProfileR
 def _extract_caller_wallet(request: Request) -> str | None:
     """Extract the caller's verified wallet from SIWE session cookie.
 
-    Falls back to X-Wallet-Address header for backward compatibility
-    during the transition period, but the session cookie takes priority.
+    PII (email, display_name) is ONLY returned when the caller has a
+    cryptographically verified SIWE session. The X-Wallet-Address header
+    is no longer trusted for identity — it's kept only for non-PII
+    operations (e.g. chat posting during the transition).
     """
     from archimedes.api.auth_siwe import get_verified_wallet
 
-    # SIWE session cookie (cryptographically verified)
-    verified = get_verified_wallet(request)
-    if verified:
-        return verified
-    # Fallback: header (will be removed once SIWE is fully deployed)
-    return request.headers.get("X-Wallet-Address", "").lower().strip() or None
+    # SIWE session cookie (cryptographically verified) — the ONLY path
+    # that unlocks PII in profile responses.
+    return get_verified_wallet(request)
 
 
 @user_router.get("/profile/{wallet}", response_model=UserProfileResponse)
