@@ -252,7 +252,9 @@ export default function Portfolio({ walletAddr, onSelectVault, onSelectTrace, on
                     {v.name || `Vault ${shortAddr(v.address)}`}
                   </span>
                   <span className={`tag ${v.tier === 1 ? 'tag-accent' : 'tag-muted'}`}>
-                    {v.tier === 1 ? '🏆 Verified' : '👥 Community'}
+                    {v.tier === 1
+                      ? <><span className="i-lucide-trophy w-3.5 h-3.5" /> Verified</>
+                      : <><span className="i-lucide-users w-3.5 h-3.5" /> Community</>}
                   </span>
                 </div>
                 <div className="flex items-baseline gap-2 mt-3 mb-1">
@@ -287,8 +289,8 @@ export default function Portfolio({ walletAddr, onSelectVault, onSelectTrace, on
       {hasVaults && (
         <div className="mb-7">
           <details className="card" style={{ padding: 0 }}>
-            <summary className="label cursor-pointer" style={{ padding: '14px 18px' }}>
-              🔥 Stress Scenarios
+            <summary className="label cursor-pointer flex items-center gap-1.5" style={{ padding: '14px 18px' }}>
+              <span className="i-lucide-flame w-3.5 h-3.5" /> Stress Scenarios
             </summary>
             <div style={{ padding: '0 18px 18px' }}>
               <StressScenarioPanel

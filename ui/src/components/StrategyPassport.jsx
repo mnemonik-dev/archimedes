@@ -40,8 +40,18 @@ function deriveDisplayTitle(s) {
 }
 
 function regimeChip(tag) {
-  if (tag === 'bull') return { label: '🟢 Bull regime', cls: 'tag-positive' }
-  if (tag === 'bear') return { label: '🔴 Bear regime', cls: 'tag-negative' }
+  if (tag === 'bull') {
+    return {
+      label: <><span className="i-lucide-trending-up w-3.5 h-3.5" /> Bull regime</>,
+      cls: 'tag-positive',
+    }
+  }
+  if (tag === 'bear') {
+    return {
+      label: <><span className="i-lucide-trending-down w-3.5 h-3.5" /> Bear regime</>,
+      cls: 'tag-negative',
+    }
+  }
   return null
 }
 
@@ -117,7 +127,9 @@ export default function StrategyPassport({ strategyId, onNavigate, walletAddr })
           {regime && <span className={`tag ${regime.cls}`}>{regime.label}</span>}
           <span className={`tag ${statusTag(s.status)}`} style={{ textTransform: 'capitalize' }}>{s.status || 'candidate'}</span>
           {s.passes_rigor_gate === true && (
-            <span className="tag tag-positive">✓ rigor gate passed</span>
+            <span className="tag tag-positive inline-flex items-center gap-1">
+              <span className="i-lucide-check w-3.5 h-3.5" /> rigor gate passed
+            </span>
           )}
           {s.passes_rigor_gate === false && (
             <span className="tag tag-muted">rigor gate not passed</span>
@@ -257,8 +269,8 @@ export default function StrategyPassport({ strategyId, onNavigate, walletAddr })
       <div className="card p-5 mb-6 fade-up fade-up-5">
         <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
           <div className="label">Rigor verdict — selection-bias controls</div>
-          <span className={`tag ${passingRigor ? 'tag-positive' : 'tag-muted'}`}>
-            {passingRigor ? '✓ passed' : 'not passed'}
+          <span className={`tag inline-flex items-center gap-1 ${passingRigor ? 'tag-positive' : 'tag-muted'}`}>
+            {passingRigor ? <><span className="i-lucide-check w-3.5 h-3.5" /> passed</> : 'not passed'}
           </span>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">

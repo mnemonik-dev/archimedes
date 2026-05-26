@@ -99,8 +99,8 @@ export default function Marketplace({ onNavigate }) {
           generate a strategy and deploy your own.
         </p>
         <p className="caption" style={{ color: 'var(--text-4)' }}>
-          Tier 1 vaults (🏆 Verified) are paper-grounded and selection-bias-corrected.
-          Tier 2 vaults (👥 Community) are permissionless and opt-in to agent features.
+          Tier 1 vaults (<span className="i-lucide-trophy w-3.5 h-3.5" /> Verified) are paper-grounded and selection-bias-corrected.
+          Tier 2 vaults (<span className="i-lucide-users w-3.5 h-3.5" /> Community) are permissionless and opt-in to agent features.
         </p>
       </div>
 
@@ -120,7 +120,7 @@ export default function Marketplace({ onNavigate }) {
               onClick={() => setTierFilter(1)}
               style={{ cursor: 'pointer' }}
             >
-              🏆 Verified ({tier1Count})
+              <span className="i-lucide-trophy w-3.5 h-3.5" /> Verified ({tier1Count})
             </span>
           )}
           {tier2Count > 0 && (
@@ -129,7 +129,7 @@ export default function Marketplace({ onNavigate }) {
               onClick={() => setTierFilter(2)}
               style={{ cursor: 'pointer' }}
             >
-              👥 Community ({tier2Count})
+              <span className="i-lucide-users w-3.5 h-3.5" /> Community ({tier2Count})
             </span>
           )}
         </div>
@@ -194,7 +194,9 @@ export default function Marketplace({ onNavigate }) {
                   {v.name || `Vault ${shortAddr(v.address)}`}
                 </span>
                 <span className={`tag ${v.tier === 1 ? 'tag-accent' : 'tag-muted'}`}>
-                  {v.tier === 1 ? '🏆 Verified' : '👥 Community'}
+                  {v.tier === 1
+                    ? <><span className="i-lucide-trophy w-3.5 h-3.5" /> Verified</>
+                    : <><span className="i-lucide-users w-3.5 h-3.5" /> Community</>}
                 </span>
               </div>
               <div className="flex items-baseline gap-2 mt-3 mb-1">

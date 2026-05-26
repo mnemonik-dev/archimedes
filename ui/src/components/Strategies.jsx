@@ -569,7 +569,11 @@ function StrategyTable({ strategies, emptyState, highlightStrategyId, onOpenRigo
           const sharpe = s.sharpe_ratio != null ? s.sharpe_ratio.toFixed(2) : '—'
           const cagr = s.cagr != null ? `${(s.cagr * 100).toFixed(1)}%` : '—'
           const maxDD = s.max_drawdown != null ? `${(s.max_drawdown * 100).toFixed(1)}%` : '—'
-          const statusLabel = s.passes_rigor_gate ? '✅ Rigorous' : s.status === 'live' ? '🟢 Live' : s.status
+          const statusLabel = s.passes_rigor_gate
+            ? <><span className="i-lucide-check-circle-2 w-3.5 h-3.5 text-[var(--positive)]" /> Rigorous</>
+            : s.status === 'live'
+              ? <><span className="i-lucide-radio w-3.5 h-3.5 text-[var(--positive)]" /> Live</>
+              : s.status
           return (
             <div
               key={s.id}
