@@ -13,7 +13,7 @@
 
 ## TL;DR
 
-Describe what you want; Archimedes fuses your intent with live market data and a 10,000-paper quantitative-finance research library into novel strategies, gates them through selection-bias rigor (Deflated Sharpe, Probability of Backtest Overfitting), and lets you execute them into non-custodial vaults on Arc testnet — every reasoning step traceable to a source paper and anchored on-chain.
+Describe what you want; Archimedes fuses your intent with live market data and a quantitative-finance research library (1,014 papers ingested into Postgres so far; ~10,000-paper manifest seed target hydrates incrementally) into novel strategies, gates them through selection-bias rigor (Deflated Sharpe, Probability of Backtest Overfitting), and lets you execute them into non-custodial vaults on Arc testnet — every reasoning step traceable to a source paper and anchored on-chain.
 
 **Hackathon RFB alignment.** Archimedes is built against **[RFB 04 — Adaptive Portfolio Manager](https://luma.com/7i50p2r9)** — the only one of the six Agora Request-For-Builds whose primitives map one-to-one onto what we ship (regime detection, asset allocation by regime, autonomous rebalancing, Kelly + risk-parity sizing, correlation-based diversification, cross-chain-ready execution). **Adjacent fit:** RFB 02 (Prediction Market Trader Intelligence — our +EV / Kelly primitive maps without requiring us to ship prediction markets) and RFB 06 (Social Trading Intelligence — our Tier-1 verified library + paper-anchored passport + DSR/PBO rigor *is* the "AI selects, weights, monitors" leaderboard pattern the RFB describes). RFB 04 is the core claim; the others are bonus surface area.
 
@@ -56,19 +56,19 @@ Foundry, Circle wallet, and oracle targets (`compile`, `test`, `wallet`, `feed`,
 
 **Live on the Arc public testnet** (chain ID `5042002`): grab faucet USDC at <https://faucet.circle.com/> (20 USDC / 2h — on Arc, USDC *is* gas) and try the full flow with test funds. **No real money at risk, by design.** Arc has no mainnet yet (Circle's docs list mainnet as "upcoming"); mainnet launch, real-funds custody, and the regulatory architecture (off-chain redemptions, preset-strategy / RIA posture) are the **business-plan roadmap**, not hackathon scope — see [`docs/competitor-landscape.md`](docs/competitor-landscape.md).
 
-**Built today:**
+**Built today — visible on the live site right now:**
 
-- Live testnet deploy: <http://13.40.112.220> · 10 Solidity contracts on Arc
-- 3-input fusion engine: user brief × live market regime × 10,000-paper q-fin corpus → grounded strategy spec
-- LLM-driven agentic portfolio advisor (`portfolio_agent.py`, 850 lines) — picks individual instruments and anchors each to a strategy passport
-- Four-control selection-bias rigor gate (DSR + PBO + walk-forward OOS + look-ahead audit) — **2 Tier-1 strategies pass today** against 22.3 years of real SPY data
-- Regime-conditional risk aversion in the Kelly optimizer (Ang & Bekaert 2002, *Review of Financial Studies*) — effective γ scales with the live regime
-- Multi-asset NAV vaults — `Vault.totalAssets()` prices all synthetic holdings via oracles
-- On-chain reasoning trace anchoring via the deployed `ReasoningTraceRegistry`
-- 6-container docker stack: backend (FastAPI) + postgres + redis + nginx + oracle + agent
-- Multi-wallet UX (MetaMask + Coinbase + Circle passkey via EIP-6963 wallet discovery) with profile dropdown
-- 806 backend tests + 16 analytics-engine tests collected
-- Server-side ruff format guard (`main-format-guard.yml`) — main self-heals if a direct-to-main commit lands unformatted; CI run stays red so the violation is visible
+- **Live HTTPS testnet deploy** at <https://archimedes-arc.app/> behind nginx + Route 53 + ACM. 11 Solidity contracts deployed on Arc testnet (chain ID `5042002`).
+- **SPEC-1 end-to-end evidence on-chain** — submission-day dress-rehearsal walkthrough captured in [`docs/runbooks/arc-testnet-e2e-evidence.md`](docs/runbooks/arc-testnet-e2e-evidence.md). Two vaults deployed by a real user wallet, **8 transactions confirmed** on Arc testnet (`txreceipt_status: 1` for every one), `vault.creator == user wallet` verified on each — the architectural proof that user funds never pass through platform custody. **The wedge held empirically**: of 6 strategies in the library, exactly the 2 that pass DSR ≥ 0.95 + PBO < 0.5 + OOS Sharpe ≥ 0.5 + look-ahead audit were deployed; the other 4 were correctly gate-blocked.
+- **Real on-chain rebalance traces in production** — the autonomous agent has been writing rebalance txs against the deployed `Vault` + `ReasoningTraceRegistry` contracts; `curl https://archimedes-arc.app/api/traces/?limit=10` returns `arc_tx_hash` values verifiable on `testnet.arcscan.app`.
+- **End-to-end deposit flow** — `CreateVaultModal` → `DepositFlow` stepper signs 3 wallet txs (USDC.approve → vault.deposit → vault.setTargetAllocations). `StrategyPublisher` anchors the passport's `methodology_hash` on the `StrategyRegistry` contract per vault created.
+- **Verify-on-chain (O(1))** — the Reasoning page's "Verify on-chain" button runs a single `eth_getTransactionReceipt` + log decode and surfaces a `testnet.arcscan.app/tx/...` link on success.
+- **Multi-wallet UX** with EIP-6963 wallet discovery — MetaMask, Coinbase, and Circle Modular Wallets passkey paths all working. Wallet-gated routes (Library / Portfolio / Learnings) render an explicit "Connect Wallet" CTA when logged-out so we never imply personalization the user doesn't have.
+- **Three-mode Generate page** — agentic streaming (LLM portfolio agent with 12-iteration tool-use), fusion (novel multi-paper synthesis), and architect (curated-library selection). All three feed the same selection-bias rigor gate (DSR + PBO + walk-forward OOS + look-ahead audit) before a strategy is admitted as Tier-1.
+- **Regime-conditional Kelly sizing** in the optimizer — effective γ scales with the live regime per Ang & Bekaert 2002, so the same strategy generates regime-appropriate sizing without parallel agents.
+- **Honest Explore page** — `is_stale` reflects the *displayed* price's freshness window per source (on-chain oracle 5min / yfinance fallback 4 days / no source = stale). The page no longer flags every asset STALE; the `price_source` field discloses where each price came from.
+- **Unified `strategy_passports` store on Postgres** — both curated and generated strategies live in one typed table; the Considered-Alternatives panel reads from `strategy_proposals` so judges see what was rejected and why.
+- **806+ backend tests** + 16 analytics-engine tests green; server-side ruff format guard (`main-format-guard.yml`) auto-heals direct-to-main commits if any land unformatted.
 
 ## Why Archimedes
 
@@ -106,8 +106,7 @@ flowchart LR
   %% Alternate paths (allowed; not canonical)
   L -. 'Browse Example Library' .-> LIB[/library?tab=examples/]
   LIB -. click row .-> ST
-  L -. sidebar Explore .-> E[/explore/]
-  E -. 'Use in Generate' .-> G
+  L -. sidebar Explore .-> E[/explore — read-only viewer/]
   L -. sidebar Corpus .-> C[/corpus/]
   C -. paper detail → 'Generate from this' .-> G
 ```
@@ -143,7 +142,7 @@ archimedes/
 ├── docs/                 ← design + planning + specs + ADRs + archive (see docs/README.md)
 ├── backend/              ← FastAPI app (Python 3.12) — see docs/chuan-architecture-survey.md
 ├── analytics-engine/     ← backtest engine (uv-managed)
-├── contracts/            ← Solidity (Foundry layout) — 10 contracts deployed on Arc testnet
+├── contracts/            ← Solidity (Foundry layout) — 11 contracts deployed on Arc testnet
 ├── ui/                   ← React 19 + Vite 8 + viem 2.48 (the live frontend)
 ├── nginx/                ← reverse-proxy + UI build container
 ├── wallet-setup/         ← Circle Wallets scripts (oracle wallet, entity-secret rotation)
@@ -187,7 +186,7 @@ Fork, branch (`<your-handle>/<short-name>`), PR to `main`. One logical change pe
 ## Cited literature
 
 The deck, the rigor gate, and the pitch all rest on a specific reading of the academic
-record. The four papers below are load-bearing and worth reading first if you want to
+record. The five papers below are load-bearing and worth reading first if you want to
 audit our claims.
 
 | Citation | What it gives us |
