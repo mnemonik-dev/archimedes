@@ -110,23 +110,9 @@ resource "aws_security_group" "archimedes" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  # FastAPI dev port
-  ingress {
-    description = "FastAPI"
-    from_port   = 8000
-    to_port     = 8000
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  # Next.js dev port
-  ingress {
-    description = "Next.js"
-    from_port   = 3000
-    to_port     = 3000
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
+  # Ports 8000 (FastAPI), 3000 (Next.js dev), 5432 (Postgres), 6379 (Redis)
+  # are deliberately NOT exposed. All traffic goes through nginx on 80/443.
+  # Backend, DB, and cache are only reachable via Docker's internal network.
 
   # Egress — all
   egress {
