@@ -1,5 +1,5 @@
 import { apiGet } from '../api'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 
 
 
@@ -93,17 +93,31 @@ function TransitionRow({ from, to, prob }) {
   )
 }
 
+const FETCH_TIMEOUT_MS = 10_000
+
 export default function RegimePanel({ regime: regimeProp = null, compact = false }) {
   const [fetchedRegime, setFetchedRegime] = useState(null)
   const [loading, setLoading] = useState(regimeProp == null)
+  const [failed, setFailed] = useState(false)
+
+  const fetchRegime = useCallback(() => {
+    setLoading(true)
+    setFailed(false)
+    const timeout = setTimeout(() => {
+      setLoading(false)
+      setFailed(true)
+      console.error('Regime fetch timed out after', FETCH_TIMEOUT_MS, 'ms')
+    }, FETCH_TIMEOUT_MS)
+    apiGet('/api/regime/current')
+      .then(data => { clearTimeout(timeout); setFetchedRegime(data); setFailed(false) })
+      .catch(err => { clearTimeout(timeout); setFailed(true); console.error('Regime fetch failed:', err) })
+      .finally(() => setLoading(false))
+  }, [])
 
   useEffect(() => {
     if (regimeProp != null) return
-    apiGet('/api/regime/current')
-      .then(setFetchedRegime)
-      .catch(() => {})
-      .finally(() => setLoading(false))
-  }, [regimeProp])
+    fetchRegime()
+  }, [regimeProp, fetchRegime])
 
   const regime = regimeProp ?? fetchedRegime
 
@@ -119,12 +133,9 @@ export default function RegimePanel({ regime: regimeProp = null, compact = false
   if (!regime || regime.regime === 'unknown') {
     if (compact) {
       return (
-        <span
-          className="caption"
-          title="Agent not running or Redis not connected — the regime classifier writes state to Redis on each agent tick."
-          style={{ color: 'var(--text-4)' }}
-        >
-          Regime: unavailable
+        <span className="caption" style={{ color: 'var(--text-4)', cursor: 'pointer' }} onClick={fetchRegime}
+          title="Click to retry. Agent not running or Redis not connected.">
+          Regime: unavailable {failed ? '· Retry' : ''}
         </span>
       )
     }
@@ -133,6 +144,7 @@ export default function RegimePanel({ regime: regimeProp = null, compact = false
         <div className="label mb-2">Current Market Regime</div>
         <div className="caption" style={{ color: 'var(--text-4)' }}>
           Regime data unavailable — agent not running or Redis not connected.
+          {' '}<button onClick={fetchRegime} style={{ color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline', padding: 0, fontSize: 'inherit' }}>Retry</button>
         </div>
       </div>
     )

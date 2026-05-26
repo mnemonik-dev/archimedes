@@ -47,14 +47,16 @@ function downloadStrategy(strategy, format) {
   URL.revokeObjectURL(url)
 }
 
-function statusTag(status) {
+function statusTag(status, passesRigor) {
+  if (status === 'live' && passesRigor === false) return 'tag-muted'
   if (status === 'live') return 'tag-positive'
   if (status === 'validated') return 'tag-accent'
   if (status === 'pending_backtest') return 'tag-warning'
   return 'tag-muted'
 }
 
-function statusLabel(status) {
+function statusLabel(status, passesRigor) {
+  if (status === 'live' && passesRigor === false) return 'Live (rigor failed)'
   if (status === 'pending_backtest') return 'Pending Backtest'
   if (!status) return 'Candidate'
   return status.charAt(0).toUpperCase() + status.slice(1)
@@ -406,10 +408,10 @@ function StrategyRow({ s, isHighlighted, onOpenRigorExplainer, onOpenPassport })
         <td>
           <div className="flex items-center gap-1.5 flex-wrap">
             <span
-              className={`tag ${statusTag(s.status)}`}
+              className={`tag ${statusTag(s.status, s.passes_rigor_gate)}`}
               title={s.status === 'pending_backtest' ? 'Generated but the rigor gate has not scored real metrics yet — DSR / PBO / OOS Sharpe pending a backtest run.' : undefined}
             >
-              {statusLabel(s.status)}
+              {statusLabel(s.status, s.passes_rigor_gate)}
             </span>
             {s.passes_rigor_gate === true && (
               <span className="i-lucide-check w-3.5 h-3.5 text-[var(--positive)]" title="Passes rigor gate" />

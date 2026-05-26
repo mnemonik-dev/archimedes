@@ -38,9 +38,13 @@ export default function CreateVaultModal({ strategy, walletAddr, onClose, onDepl
   const defaultName = strategy?.paper_title
     ? strategy.paper_title.slice(0, 48).replace(/\s+$/, '')
     : 'My Strategy Vault'
-  const defaultSymbol = strategy?.id
-    ? `sV${String(strategy.id).slice(0, 6).toUpperCase()}`
-    : 'sVAULT'
+  // Derive readable symbol from strategy name: first letter of each word, s-prefixed (#389)
+  const defaultSymbol = (() => {
+    const title = strategy?.paper_title || ''
+    if (!title) return strategy?.id ? `sV${String(strategy.id).slice(0, 6).toUpperCase()}` : 'sVAULT'
+    const initials = title.replace(/[^a-zA-Z\s]/g, '').split(/\s+/).map(w => w[0]?.toUpperCase() || '').join('')
+    return `s${initials}`.slice(0, 8) || 'sVAULT'
+  })()
 
   const [name, setName] = useState(defaultName)
   const [symbol, setSymbol] = useState(defaultSymbol)

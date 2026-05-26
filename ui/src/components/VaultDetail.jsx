@@ -74,10 +74,13 @@ function SharpeDriftBadge({ drift }) {
           </div>
         </div>
       </div>
-      <div style={{ marginTop: 6, fontSize: '0.68rem', color: 'var(--text-4)' }}>
-        McLean-Pontiff 42% post-publication retention floor
-        {drift.drift_sigma != null && ` · drift ${drift.drift_sigma > 0 ? '+' : ''}${drift.drift_sigma.toFixed(2)}σ`}
-      </div>
+      {/* Only show McLean-Pontiff footnote when we have real data to compare against (#389) */}
+      {drift.live_sharpe != null && (
+        <div style={{ marginTop: 6, fontSize: '0.68rem', color: 'var(--text-4)' }}>
+          McLean-Pontiff 42% post-publication retention floor
+          {drift.drift_sigma != null && ` · drift ${drift.drift_sigma > 0 ? '+' : ''}${drift.drift_sigma.toFixed(2)}σ`}
+        </div>
+      )}
     </div>
   )
 }
@@ -235,7 +238,14 @@ export default function VaultDetail({ address, onBack }) {
         </div>
         <div className="vault-stat-card">
           <div className="vault-stat-label">Creator</div>
-          <div className="vault-stat-value"><code>{shortAddr(onChainData?.creator || detail?.creator)}</code></div>
+          <div className="vault-stat-value"><code>{(() => {
+            const creator = onChainData?.creator || detail?.creator || ''
+            try {
+              const connected = getAddress()
+              if (connected && creator.toLowerCase() === connected.toLowerCase()) return 'Created by you'
+            } catch {}
+            return shortAddr(creator)
+          })()}</code></div>
         </div>
       </div>
 
