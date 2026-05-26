@@ -58,7 +58,9 @@ def test_docs_disabled_when_public_domain_set():
 
     Uses subprocess to avoid module-reload side effects in the test process.
     """
-    script = _DOTENV_NEUTRALIZE + """
+    script = (
+        _DOTENV_NEUTRALIZE
+        + """
 import os
 os.environ["PUBLIC_DOMAIN"] = "https://archimedes-arc.app"
 os.environ["EMAIL_ENCRYPTION_KEY"] = "test-key-32chars-for-ci"
@@ -70,6 +72,7 @@ assert app.openapi_url is None, f"openapi_url should be None, got {app.openapi_u
 assert app.docs_url is None, f"docs_url should be None, got {app.docs_url}"
 print("PASS")
 """
+    )
     result = subprocess.run(
         [sys.executable, "-c", script],
         capture_output=True,
@@ -84,7 +87,9 @@ print("PASS")
 
 def test_docs_enabled_when_flag_set():
     """/docs returns 200 when ENABLE_API_DOCS=1."""
-    script = _DOTENV_NEUTRALIZE + """
+    script = (
+        _DOTENV_NEUTRALIZE
+        + """
 import os
 os.environ["PUBLIC_DOMAIN"] = "https://archimedes-arc.app"
 os.environ["EMAIL_ENCRYPTION_KEY"] = "test-key-32chars-for-ci"
@@ -96,6 +101,7 @@ assert app.docs_url == "/docs", f"docs_url should be /docs, got {app.docs_url}"
 assert app.openapi_url == "/openapi.json", f"openapi_url should be /openapi.json, got {app.openapi_url}"
 print("PASS")
 """
+    )
     result = subprocess.run(
         [sys.executable, "-c", script],
         capture_output=True,
@@ -110,7 +116,9 @@ print("PASS")
 
 def test_docs_enabled_in_local_dev():
     """/docs available when PUBLIC_DOMAIN is not set (local dev)."""
-    script = _DOTENV_NEUTRALIZE + """
+    script = (
+        _DOTENV_NEUTRALIZE
+        + """
 import os
 os.environ.pop("PUBLIC_DOMAIN", None)
 os.environ.pop("ENABLE_API_DOCS", None)
@@ -120,6 +128,7 @@ from archimedes.main import app
 assert app.docs_url == "/docs", f"docs_url should be /docs, got {app.docs_url}"
 print("PASS")
 """
+    )
     result = subprocess.run(
         [sys.executable, "-c", script],
         capture_output=True,
@@ -140,7 +149,9 @@ def test_startup_fails_without_encryption_key_in_production():
 
     Uses subprocess to avoid leaving the module in a broken state.
     """
-    script = _DOTENV_NEUTRALIZE + """
+    script = (
+        _DOTENV_NEUTRALIZE
+        + """
 import os
 os.environ["PUBLIC_DOMAIN"] = "https://archimedes-arc.app"
 os.environ.pop("EMAIL_ENCRYPTION_KEY", None)
@@ -155,6 +166,7 @@ except RuntimeError as e:
     else:
         print(f"FAIL: wrong error: {e}")
 """
+    )
     result = subprocess.run(
         [sys.executable, "-c", script],
         capture_output=True,

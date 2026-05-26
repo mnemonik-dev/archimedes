@@ -391,10 +391,12 @@ class TestAgentRoutes:
         """
         from archimedes.services.redis_state import AgentStateStore
 
-        with patch.object(AgentStateStore, "get_heartbeat", AsyncMock(side_effect=ConnectionError("redis down"))), \
-             patch.object(AgentStateStore, "load_regime", AsyncMock(side_effect=ConnectionError("redis down"))), \
-             patch.object(AgentStateStore, "get_events", AsyncMock(side_effect=ConnectionError("redis down"))), \
-             patch.object(AgentStateStore, "close", AsyncMock(return_value=None)):
+        with (
+            patch.object(AgentStateStore, "get_heartbeat", AsyncMock(side_effect=ConnectionError("redis down"))),
+            patch.object(AgentStateStore, "load_regime", AsyncMock(side_effect=ConnectionError("redis down"))),
+            patch.object(AgentStateStore, "get_events", AsyncMock(side_effect=ConnectionError("redis down"))),
+            patch.object(AgentStateStore, "close", AsyncMock(return_value=None)),
+        ):
             resp = client.get("/api/agent/status")
         assert resp.status_code == 200
         data = resp.json()
@@ -488,8 +490,10 @@ class TestAdvisorRoutes:
         """
         from archimedes.services.redis_state import AgentStateStore
 
-        with patch.object(AgentStateStore, "load_regime", AsyncMock(side_effect=ConnectionError("redis down"))), \
-             patch.object(AgentStateStore, "close", AsyncMock(return_value=None)):
+        with (
+            patch.object(AgentStateStore, "load_regime", AsyncMock(side_effect=ConnectionError("redis down"))),
+            patch.object(AgentStateStore, "close", AsyncMock(return_value=None)),
+        ):
             resp = client.get("/api/strategies/advisor?risk_profile=moderate")
         assert resp.status_code == 200
         data = resp.json()
