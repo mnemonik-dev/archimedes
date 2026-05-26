@@ -85,7 +85,9 @@ export default function RejectedCandidates({ jobId, onClose }) {
                         background: c.regime === 'bull' ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',
                         color: c.regime === 'bull' ? 'var(--positive, #22c55e)' : 'var(--negative, #ef4444)',
                       }}>
-                        {c.regime === 'bull' ? '🟢 Bull' : '🔴 Bear'}
+                        {c.regime === 'bull'
+                          ? <><span className="i-lucide-trending-up w-3.5 h-3.5" /> Bull</>
+                          : <><span className="i-lucide-trending-down w-3.5 h-3.5" /> Bear</>}
                       </span>
                     )}
                     {c.selected && <span className="tag tag-accent">Selected</span>}

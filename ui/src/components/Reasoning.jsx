@@ -142,7 +142,13 @@ function OnChainTraces({ onNavigate, highlightTraceId }) {
             onClick={() => setFilter(f)}
             style={{ border: 'none', padding: '4px 12px' }}
           >
-            {f === 'all' ? 'All' : f === 'rebalance' ? '✅ Rebalances' : f === 'construction' ? '🏛️ Constructions' : '⏭ Skips'}
+            {f === 'all'
+              ? 'All'
+              : f === 'rebalance'
+                ? <><span className="i-lucide-check-circle-2 w-3.5 h-3.5" /> Rebalances</>
+                : f === 'construction'
+                  ? <><span className="i-lucide-landmark w-3.5 h-3.5" /> Constructions</>
+                  : <><span className="i-lucide-skip-forward w-3.5 h-3.5" /> Skips</>}
           </button>
         ))}
       </div>
@@ -269,7 +275,7 @@ function OnChainTraces({ onNavigate, highlightTraceId }) {
                     {verifying[t.id] ? (
                       'Verifying…'
                     ) : vResult?.is_verified ? (
-                      <><span className="i-lucide-check w-3.5 h-3.5 positive" /> Hash verified ✓</>
+                      <><span className="i-lucide-check w-3.5 h-3.5 positive" /> Hash verified</>
                     ) : (
                       <><span className="i-lucide-search w-3.5 h-3.5" /> Verify hash on-chain</>
                     )}

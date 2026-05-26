@@ -242,9 +242,10 @@ export default function Generate({ onNavigate }) {
                 Click for the architecture and example briefs.
               </div>
             </div>
-            <span style={{ fontSize: '1rem', color: 'var(--text-3)', flexShrink: 0 }}>
-              {helpOpen ? '▾' : '▸'}
-            </span>
+            <span
+              className={`${helpOpen ? 'i-lucide-chevron-down' : 'i-lucide-chevron-right'} w-4 h-4`}
+              style={{ color: 'var(--text-3)', flexShrink: 0 }}
+            />
           </button>
 
           {helpOpen && (

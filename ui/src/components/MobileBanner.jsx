@@ -32,7 +32,7 @@ export default function MobileBanner() {
         cursor: 'pointer',
       }}
     >
-      📱 Best on desktop · Mobile is functional for browsing. <span style={{ textDecoration: 'underline' }}>Tap to dismiss.</span>
+      <span className="i-lucide-smartphone w-3.5 h-3.5" /> Best on desktop · Mobile is functional for browsing. <span style={{ textDecoration: 'underline' }}>Tap to dismiss.</span>
     </div>
   )
 }

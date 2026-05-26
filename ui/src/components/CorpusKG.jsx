@@ -12,11 +12,11 @@ const TYPE_COLORS = {
 }
 
 const TYPE_ICONS = {
-  paper: '📄',
-  author: '👤',
-  category: '🏷',
-  topic: '💡',
-  method: '⚙',
+  paper: 'i-lucide-file-text',
+  author: 'i-lucide-user',
+  category: 'i-lucide-tag',
+  topic: 'i-lucide-lightbulb',
+  method: 'i-lucide-settings',
 }
 
 /**
@@ -236,11 +236,11 @@ export default function CorpusKG({ onOpenPaper }) {
 
             {/* Legend */}
             <g transform={`translate(12, 12)`}>
-              {Object.entries(TYPE_ICONS).map(([type, icon], i) => (
+              {Object.keys(TYPE_ICONS).map((type, i) => (
                 <g key={type} transform={`translate(0, ${i * 18})`}>
                   <circle r={5} fill={TYPE_COLORS[type]} />
                   <text x={10} y={4} fontSize={10} fill="var(--text-3)" fontFamily="system-ui">
-                    {icon} {type}
+                    {type}
                   </text>
                 </g>
               ))}
@@ -260,8 +260,9 @@ export default function CorpusKG({ onOpenPaper }) {
             })
             return Object.entries(byType).map(([type, items]) => (
               <div key={type} className="mb-3">
-                <div className="label mb-1" style={{ textTransform: 'capitalize' }}>
-                  {TYPE_ICONS[type] || ''} {type}s ({items.length})
+                <div className="label mb-1 flex items-center gap-1.5" style={{ textTransform: 'capitalize' }}>
+                  <span className={`${TYPE_ICONS[type] || 'i-lucide-circle'} w-3.5 h-3.5`} />
+                  {type}s ({items.length})
                 </div>
                 <div className="flex gap-1.5 flex-wrap">
                   {items.slice(0, 40).map(e => (

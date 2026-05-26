@@ -76,7 +76,7 @@ export default function Landing({ onNavigate }) {
       {/* ── Built On ─────────────────────────────────────────────── */}
       <LSection>
         <SectionTitle>Built On</SectionTitle>
-        <div className="flex gap-3 overflow-x-auto pb-1 justify-center flex-wrap lg:flex-nowrap max-w-full mx-auto">
+        <div className="flex flex-nowrap gap-2 sm:gap-3 justify-center max-w-full mx-auto">
           {[
             { name: 'Arc',         desc: 'EVM · Sub-second finality' },
             { name: 'Circle',      desc: 'USDC · Wallets · CCTP' },
@@ -85,9 +85,9 @@ export default function Landing({ onNavigate }) {
             { name: 'React + viem',desc: 'Frontend · Wallet UX' },
             { name: 'FastAPI',     desc: 'Backend · Agent runner' },
           ].map(t => (
-            <div key={t.name} className="flex flex-col items-center px-5 py-3 min-w-[140px] flex-shrink-0 bg-[var(--surface-2)] border border-[var(--glass-border)] rounded-lg">
-              <span className="text-sm font-semibold text-[var(--text-1)]">{t.name}</span>
-              <span className="text-xs text-[var(--text-3)] mt-0.5">{t.desc}</span>
+            <div key={t.name} className="flex flex-col items-center text-center px-2 sm:px-4 py-3 flex-1 min-w-0 bg-[var(--surface-2)] border border-[var(--glass-border)] rounded-lg">
+              <span className="text-xs sm:text-sm font-semibold text-[var(--text-1)]">{t.name}</span>
+              <span className="text-[0.65rem] sm:text-xs text-[var(--text-3)] mt-0.5">{t.desc}</span>
             </div>
           ))}
         </div>

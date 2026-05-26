@@ -25,6 +25,19 @@ const EVENT_LABELS = {
   error: 'Error',
 }
 
+// Small regime marker: trending-up (green) for bull, trending-down (red) for
+// bear. `fallbackBear` renders the bear icon for any non-bull regime — matches
+// the old green/red two-state behaviour on the failure/persist log lines.
+function RegimeIcon({ regime, fallbackBear = false }) {
+  if (regime === 'bull') {
+    return <span className="i-lucide-trending-up w-3.5 h-3.5" style={{ color: 'var(--positive, #22c55e)' }} />
+  }
+  if (regime === 'bear' || fallbackBear) {
+    return <span className="i-lucide-trending-down w-3.5 h-3.5" style={{ color: 'var(--negative, #ef4444)' }} />
+  }
+  return null
+}
+
 function summarizeEvent(name, data) {
   switch (name) {
     case 'job_queued':
@@ -43,10 +56,12 @@ function summarizeEvent(name, data) {
       return `${data?.tool_name}(${data?.args_summary || ''})`
     case 'tool_result':
       return `${data?.tool_name} → ${data?.result_summary || 'ok'}`
-    case 'candidate_drafted': {
-      const rTag = data?.regime === 'bull' ? '🟢' : data?.regime === 'bear' ? '🔴' : ''
-      return `${rTag} ${data?.strategy_name || '?'} (${data?.candidate_id})`
-    }
+    case 'candidate_drafted':
+      return (
+        <>
+          <RegimeIcon regime={data?.regime} /> {data?.strategy_name || '?'} ({data?.candidate_id})
+        </>
+      )
     case 'candidate_evaluated': {
       const v = data?.rigor_verdict || {}
       const bits = []
@@ -60,9 +75,17 @@ function summarizeEvent(name, data) {
     case 'trace_hashed':
       return `${(data?.trace_hash || '').slice(0, 14)}…`
     case 'candidate_failed':
-      return `${data?.regime === 'bull' ? '🟢' : '🔴'} ${data?.message || 'No candidate'}`
+      return (
+        <>
+          <RegimeIcon regime={data?.regime} fallbackBear /> {data?.message || 'No candidate'}
+        </>
+      )
     case 'persisted':
-      return `${data?.regime === 'bull' ? '🟢' : data?.regime === 'bear' ? '🔴' : ''} ${data?.redirect_url || ''}`
+      return (
+        <>
+          <RegimeIcon regime={data?.regime} /> {data?.redirect_url || ''}
+        </>
+      )
     case 'done':
       return `→ ${data?.strategy_id || ''}`
     case 'error':
@@ -274,7 +297,7 @@ export default function GenerationStream({ jobId, onDone, onReset, onPipelineSel
                       background: c.regime === 'bull' ? 'rgba(34,197,94,0.15)' : c.regime === 'bear' ? 'rgba(239,68,68,0.15)' : 'var(--bg-2)',
                       color: c.regime === 'bull' ? 'var(--positive, #22c55e)' : c.regime === 'bear' ? 'var(--negative, #ef4444)' : 'var(--text-2)',
                     }}>
-                      {c.regime === 'bull' ? '🟢 Bull' : c.regime === 'bear' ? '🔴 Bear' : 'Neutral'}
+                      {c.regime === 'bull' ? <><RegimeIcon regime="bull" /> Bull</> : c.regime === 'bear' ? <><RegimeIcon regime="bear" /> Bear</> : 'Neutral'}
                     </span>
                     <span className="label" style={{ fontSize: '0.85rem' }}>{c.strategy_name}</span>
                   </div>
@@ -303,7 +326,7 @@ export default function GenerationStream({ jobId, onDone, onReset, onPipelineSel
             <div className="info-box warning" style={{ marginTop: 12 }}>
               {failedRegimes.map((f, i) => (
                 <div key={i}>
-                  {f.regime === 'bull' ? '🟢' : '🔴'} {f.message}
+                  <RegimeIcon regime={f.regime} fallbackBear /> {f.message}
                 </div>
               ))}
             </div>

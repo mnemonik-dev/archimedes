@@ -54,11 +54,11 @@ function shortHash(hash) {
 }
 
 function StatusIcon({ status }) {
-  if (status === DONE) return <span style={{ color: 'var(--positive, #22c55e)', fontSize: '1.1rem' }}>✓</span>
-  if (status === FAILED) return <span style={{ color: 'var(--negative, #ef4444)', fontSize: '1.1rem' }}>✗</span>
+  if (status === DONE) return <span className="i-lucide-check w-[1.1rem] h-[1.1rem]" style={{ color: 'var(--positive, #22c55e)' }} />
+  if (status === FAILED) return <span className="i-lucide-x w-[1.1rem] h-[1.1rem]" style={{ color: 'var(--negative, #ef4444)' }} />
   if (status === CONFIRMING) return <span className="spin" style={{ display: 'inline-block', width: 16, height: 16, border: '2px solid var(--text-4)', borderTopColor: 'var(--accent)', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
-  if (status === WAITING) return <span style={{ color: 'var(--accent)' }}>⏳</span>
-  return <span style={{ color: 'var(--text-4)' }}>○</span>
+  if (status === WAITING) return <span className="i-lucide-hourglass w-[1.1rem] h-[1.1rem]" style={{ color: 'var(--accent)' }} />
+  return <span className="i-lucide-circle w-[1.1rem] h-[1.1rem]" style={{ color: 'var(--text-4)' }} />
 }
 
 // Default allocation: equal weight across first 4 synthetics + remainder USDC
