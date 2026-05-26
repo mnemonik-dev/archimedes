@@ -244,12 +244,22 @@ class ChatService:
         """
         parts = []
         try:
+            from sqlalchemy import func
+
             from archimedes.db import get_session
             from archimedes.models.chat import VaultMetadata
 
             session = get_session()
             try:
-                meta = session.query(VaultMetadata).filter(VaultMetadata.vault_address == vault_address).first()
+                # VaultMetadata rows can be inserted in checksum-case (see
+                # vaults_routes.py — no normalization at write). MetaMask hands
+                # checksum addresses to the chat route too. Compare lowercase
+                # to lowercase so the lookup actually finds the row.
+                meta = (
+                    session.query(VaultMetadata)
+                    .filter(func.lower(VaultMetadata.vault_address) == vault_address.lower())
+                    .first()
+                )
                 if meta:
                     parts.append(f"Vault name: {meta.name or vault_address[:10]}")
                     strategy_ids = meta.get_strategy_ids() if meta else []
