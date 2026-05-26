@@ -86,8 +86,9 @@ class CircleService:
                     "SyntheticFactory",
                     "SyntheticToken",
                     "SyntheticVault",
+                    "StrategyRegistry",
                 ],
-                "count": 10,
+                "count": 11,
             },
             "usdc_settlement": {
                 "status": "active",
@@ -119,8 +120,6 @@ class CircleService:
             "circle_tools_count": len(tools_used),
             "tools": tools_used,
             "wallet": wallet_info,
-            "rubric_score_estimate": "6/10",
-            "next_tools": ["Paymaster (gasless tx)", "App Kit (frontend)", "USYC floor enforcement"],
         }
 
 

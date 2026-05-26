@@ -268,7 +268,12 @@ export default function RegimePanel({ regime: regimeProp = null, compact = false
 
         {/* Transition probabilities */}
         <div>
-          <div className="label mb-3" style={{ fontSize: '0.72rem' }}>Regime Persistence (Dirichlet priors)</div>
+          <div className="label mb-3" style={{ fontSize: '0.72rem', display: 'flex', alignItems: 'center', gap: 8 }}>
+            Regime Persistence
+            {regime.transitions_source === 'default_prior' && (
+              <span className="caption" style={{ fontSize: '0.6rem', padding: '1px 6px', borderRadius: 4, background: 'rgba(255,255,255,0.06)', color: 'var(--text-4)' }}>prior</span>
+            )}
+          </div>
           {currentTransitions ? (
             Object.entries(currentTransitions)
               .sort(([, a], [, b]) => b - a)

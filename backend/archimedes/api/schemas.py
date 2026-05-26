@@ -328,6 +328,7 @@ class RegimeResponse(BaseModel):
     regime_changed: bool = False
     signals: RegimeSignalsResponse
     transition_probabilities: dict | None = None  # From get_transition_probabilities()
+    transitions_source: str = "default_prior"  # "redis_measured" | "default_prior"
     regime_history: dict | None = None  # From get_regime_history_summary()
     recommended_strategies: list[str] | None = None  # Strategy IDs best for this regime
     # Paper titles for each recommended_strategies id, in matching order.

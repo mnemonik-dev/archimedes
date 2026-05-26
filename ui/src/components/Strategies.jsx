@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import CustomSelect from './CustomSelect'
-import EfficientFrontier from './EfficientFrontier'
+// EfficientFrontier + CorrelationMatrix deleted (Issue #383) — synthetic RNG data
 import RigorExplainer from './RigorExplainer'
 
 import { apiGet, apiPost } from '../api'
@@ -832,10 +832,7 @@ export default function Strategies({ highlightStrategyId, defaultTab, onNavigate
         </div>
       )}
 
-      {/* Page-level analytics panels — moved from Reasoning per page-roles-spec. */}
-      <div className="mt-8 flex flex-col gap-4">
-        <EfficientFrontier />
-      </div>
+      {/* EfficientFrontier + CorrelationMatrix removed (Issue #383) — synthetic RNG data */}
 
       {/* Rigor Explainer modal (portal-rendered, page-level) */}
       {rigorModalOpen && createPortal(

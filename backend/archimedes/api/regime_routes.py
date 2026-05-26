@@ -33,7 +33,9 @@ async def get_current_regime():
 
     if data:
         regime_value = data.get("regime", "unknown")
-        transitions = data.get("transition_probabilities") or default_transitions
+        raw_transitions = data.get("transition_probabilities")
+        transitions = raw_transitions or default_transitions
+        transitions_source = "redis_measured" if raw_transitions else "default_prior"
         history = data.get("regime_history_summary") or {"total": 0}
 
         regime_to_keywords = {
@@ -80,6 +82,7 @@ async def get_current_regime():
                 btc_dominance=data.get("btc_dominance"),
             ),
             transition_probabilities=transitions,
+            transitions_source=transitions_source,
             regime_history=history,
             recommended_strategies=recommended_ids[:2],
             recommended_strategy_titles=recommended_titles[:2],
@@ -96,6 +99,7 @@ async def get_current_regime():
             sp500_above_ma200=True,
         ),
         transition_probabilities=default_transitions,
+        transitions_source="default_prior",
         regime_history={"total": 0},
         recommended_strategies=[],
         recommended_strategy_titles=[],
@@ -118,6 +122,7 @@ async def get_regime_transitions():
     finally:
         await state.close()
 
+    source = "redis_measured" if transitions else "default_prior"
     if not transitions:
         transitions = {
             "risk_on": {"risk_on": 0.85, "transition": 0.10, "risk_off": 0.04, "crisis": 0.01},
@@ -129,4 +134,5 @@ async def get_regime_transitions():
     return {
         "transition_probabilities": transitions,
         "history": history or {"total": 0},
+        "source": source,
     }

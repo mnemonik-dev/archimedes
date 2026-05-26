@@ -222,85 +222,10 @@ async def get_strategy_signals():
     )
 
 
-@strategies_router.get("/frontier")
-async def get_efficient_frontier():
-    """Compute efficient frontier for all Tier-1 validated strategies."""
-    import numpy as np
-
-    from archimedes.services.portfolio_optimizer import compute_efficient_frontier
-
-    strategies = strategy_provider.list_strategies()
-    active = [s for s in strategies if s.passes_rigor_gate]
-
-    if len(active) < 2:
-        return {"frontier": [], "strategies": [], "message": "Need >= 2 validated strategies"}
-
-    rng = np.random.default_rng(42)
-    N_DAYS = 5560
-    synthetic_returns = {}
-    labels = []
-
-    for s in active[:5]:
-        sr = s.real_sharpe if s.real_sharpe is not None else s.stub_sharpe if s.stub_sharpe is not None else 0.5
-        cagr = s.real_cagr if s.real_cagr is not None else s.stub_cagr if s.stub_cagr is not None else 0.08
-        mu_d = cagr / 252
-        sigma_d = abs(mu_d / (sr / (252**0.5))) if sr != 0 else 0.01
-        rets = rng.normal(mu_d, sigma_d, N_DAYS).tolist()
-        synthetic_returns[s.id] = rets
-        labels.append({"id": s.id, "title": s.paper_title})
-
-    frontier = compute_efficient_frontier(list(synthetic_returns.keys()), synthetic_returns)
-    return {"frontier": frontier, "strategies": labels, "message": None}
-
-
-@strategies_router.get("/correlation")
-async def get_strategy_correlation():
-    """Pairwise correlation matrix for the active strategy library."""
-    import numpy as np
-
-    strategies = [s for s in strategy_provider.list_strategies() if s.real_sharpe is not None]
-    if len(strategies) < 2:
-        return {"matrix": [], "labels": [], "diversification_ratio": None}
-
-    rng = np.random.default_rng(42)
-    N_DAYS = 5560
-
-    spy_daily = rng.normal(0.00035, 0.01, N_DAYS)
-
-    return_matrix = []
-    labels = []
-    for s in strategies:
-        sr = s.real_sharpe if s.real_sharpe is not None else 0.5
-        cagr = s.real_cagr if s.real_cagr is not None else 0.08
-        corr = s.real_corr_spy if s.real_corr_spy is not None else 1.0
-        mu_d = cagr / 252
-        sigma_d = abs(mu_d / (sr / (252**0.5))) if sr != 0 else 0.01
-
-        idio = rng.normal(0, sigma_d * float(np.sqrt(max(1 - corr**2, 0))), N_DAYS)
-        rets = corr * (spy_daily * sigma_d / 0.01) + idio + mu_d
-        return_matrix.append(rets)
-        labels.append(
-            {
-                "id": s.id,
-                "title": s.paper_title[:30],
-                "passes_rigor_gate": s.passes_rigor_gate,
-            }
-        )
-
-    R = np.array(return_matrix)
-    corr_matrix = np.corrcoef(R)
-
-    n = len(strategies)
-    off_diag = [corr_matrix[i, j] for i in range(n) for j in range(n) if i != j]
-    avg_corr = sum(off_diag) / len(off_diag) if off_diag else 1.0
-
-    return {
-        "matrix": [[round(float(corr_matrix[i, j]), 3) for j in range(n)] for i in range(n)],
-        "labels": labels,
-        "avg_pairwise_correlation": round(avg_corr, 3),
-        "diversification_ratio": None,
-        "note": "Strategies track broad equity markets — high inter-strategy correlation is expected and shown honestly.",
-    }
+# /frontier and /correlation endpoints deleted (Issue #383).
+# They fabricated returns via np.random.default_rng(42) — synthetic data
+# masquerading as measured correlations. Honest alternatives require real
+# backtest return series, which is a post-submission feature.
 
 
 # ── Advisor (large endpoint) ──────────────────────────────────
