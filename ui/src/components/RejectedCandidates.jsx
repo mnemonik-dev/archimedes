@@ -14,7 +14,7 @@ export default function RejectedCandidates({ jobId, onClose }) {
   useEffect(() => {
     let cancelled = false
     fetch(`${API_BASE}/api/generate/jobs/${encodeURIComponent(jobId)}/candidates`)
-      .then(r => r.ok ? r.json() : r.text().then(t => { throw new Error(t) }))
+      .then(r => r.ok ? r.json() : Promise.reject(new Error(`Backend returned ${r.status}`)))
       .then(d => { if (!cancelled) setData(d) })
       .catch(e => { if (!cancelled) setError(e.message || 'Failed to load candidates') })
       .finally(() => { if (!cancelled) setLoading(false) })
@@ -98,11 +98,21 @@ export default function RejectedCandidates({ jobId, onClose }) {
                 </div>
                 {c.rigor_verdict && (
                   <div className="caption" style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-                    {c.rigor_verdict.dsr != null && <span>DSR: <strong>{c.rigor_verdict.dsr}</strong></span>}
-                    {c.rigor_verdict.pbo != null && <span>PBO: <strong>{c.rigor_verdict.pbo}</strong></span>}
-                    {c.rigor_verdict.oos_sharpe != null && <span>OOS Sharpe: <strong>{c.rigor_verdict.oos_sharpe}</strong></span>}
-                    {c.rigor_verdict.lookahead_audit_passed != null && (
-                      <span>Lookahead: <span className={`${c.rigor_verdict.lookahead_audit_passed ? 'i-lucide-check text-[var(--positive)]' : 'i-lucide-x text-[var(--negative)]'} w-3 h-3`} /></span>
+                    <span>DSR: <strong style={{ color: c.rigor_verdict.dsr != null && c.rigor_verdict.dsr < 0.5 ? 'var(--negative)' : undefined }}>
+                      {c.rigor_verdict.dsr != null ? c.rigor_verdict.dsr.toFixed(3) : '—'}
+                    </strong></span>
+                    <span>PBO: <strong style={{ color: c.rigor_verdict.pbo != null && c.rigor_verdict.pbo > 0.5 ? 'var(--negative)' : undefined }}>
+                      {c.rigor_verdict.pbo != null ? c.rigor_verdict.pbo.toFixed(3) : '—'}
+                    </strong></span>
+                    <span>OOS Sharpe: <strong>
+                      {c.rigor_verdict.oos_sharpe != null ? c.rigor_verdict.oos_sharpe.toFixed(3) : '—'}
+                    </strong></span>
+                    <span>Lookahead: {c.rigor_verdict.lookahead_audit_passed !== false
+                      ? <span style={{ color: 'var(--positive)' }}>✓</span>
+                      : <span style={{ color: 'var(--negative)' }}>✗</span>}
+                    </span>
+                    {c.rigor_verdict.reason && (
+                      <span style={{ color: 'var(--text-4)', fontStyle: 'italic' }}>{c.rigor_verdict.reason}</span>
                     )}
                   </div>
                 )}
