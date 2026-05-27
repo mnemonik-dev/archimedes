@@ -2,10 +2,13 @@
 
 > **Status:** Living context doc. Written 2026-05-12 (Day 2); revised 2026-05-13 (Day 3,
 > marketplace pivot + rigor-as-wedge), 2026-05-14 (Day 4, 10-contract Arc deploy + live
-> UI + ownership reshuffle), and 2026-05-19 (build-on-deploy main-only + `develop`
+> UI + ownership reshuffle), 2026-05-19 (build-on-deploy main-only + `develop`
 > retired; GLM intelligence live; product spine locked in `docs/user-stories.md`;
-> agentic-issue pipeline codified). Intent: drop at the root of the `archimedes` repo
-> and read at the start of every Claude Code session.
+> agentic-issue pipeline codified), and 2026-05-27 (post-hackathon lessons:
+> merge-commit-only enforced; testing conventions; secrets-in-git guidance expanded;
+> AWS account access protocol; agent-as-proxy authorization; verify-your-own-audits).
+> Intent: drop at the root of the `archimedes` repo and read at the start of every
+> Claude Code session.
 >
 > **Architecture lineage to read together:**
 > - [`docs/user-stories.md`](docs/user-stories.md) — **the locked product spine
@@ -167,7 +170,40 @@ on `main` as of 2026-05-26; suite is still growing). Coverage:
 `pytest --cov=archimedes --cov-report=term-missing`. The
 analytics-engine runs its own suite: `cd analytics-engine && uv run pytest`. See
 README § "Running the test suite" for the honest coverage picture and the
-build-on-deploy integration-test caveat.
+build-on-deploy integration-test caveat. See also "Testing conventions" in
+Engineering conventions for the hermetic-test standard.
+
+**AWS account access (added 2026-05-27):** Team members who need to verify AWS
+infrastructure (security review, dashboard checks, SSM access to the live EC2,
+Aurora port-forwarding) should ask Chuan (the AWS account owner) for an IAM
+user with the AWS managed policies `SecurityAudit` + `ViewOnlyAccess`, MFA
+required on first login, and the access key + secret delivered via a secure
+channel (1Password / Bitwarden / Signal — never Discord, never email).
+
+Local setup:
+```bash
+brew install awscli
+mkdir -p ~/.aws && chmod 700 ~/.aws
+aws configure --profile archimedes
+# region: eu-west-2 ; output: json
+chmod 600 ~/.aws/credentials
+export AWS_PROFILE=archimedes
+aws sts get-caller-identity   # smoke-test
+```
+
+For SSM admin access to the live EC2 (replaces SSH, no port 22 needed):
+```bash
+aws ssm start-session --target i-<instance-id> --region eu-west-2
+# Aurora port forward (after VPC migration):
+aws ssm start-session --target i-<instance-id> --region eu-west-2 \
+  --document-name AWS-StartPortForwardingSessionToRemoteHost \
+  --parameters host=<aurora-endpoint>,portNumber=5432,localPortNumber=5432
+```
+
+Optional hardening: `brew install aws-vault` to store credentials in Keychain
+instead of plaintext `~/.aws/credentials`. Long-term plan is to migrate to AWS
+IAM Identity Center (no long-lived access keys) once the team is past
+hackathon scale.
 
 ## External references — submodules
 
@@ -326,6 +362,13 @@ Codified 2026-05-18 to match how the team actually works (see
   drifts again. Don't wait for it to "settle" — it won't.
 - Short-lived per-owner branches `<discord-handle>/<short-name>` → PR → merge to
   `main`. Delete the branch after merge.
+- **Merge commits only (codified 2026-05-27).** Squash-merge and rebase-merge are
+  disabled in repo settings. Use `gh pr merge <n> --merge` or the GitHub UI's
+  "Create a merge commit" option. Why: merge commits preserve branch topology,
+  making `git log --merges` and `git log --graph` show unit-of-work boundaries
+  clearly. Rebase-merge confuses `git branch --merged` (the rewritten commits
+  aren't ancestors of `main` anymore) and loses the "this was a single PR" signal
+  needed for post-hoc forensics.
 - **The few hard rules — universal, and they do not impede speed:** never force-push
   `main`; never commit secrets or `.env`; one logical change per PR. Force-pushing
   your *own* unmerged feature branch is fine and expected (rebase-before-merge).
@@ -384,6 +427,68 @@ implications:
 
 When in doubt, default to **no marker** (patch). Over-bumping minor/major dilutes
 the signal; under-bumping is recoverable later.
+
+### Testing conventions (codified 2026-05-27)
+
+Hard-won during the post-hackathon test-coverage push and the env-flaky-test
+sweep. **CI green ≠ local green** is itself a bug; tests must pass identically
+in both environments. Read this before writing any new test.
+
+- **Tests must be hermetic.** No `.env` dependence, no live Redis / Postgres /
+  Anthropic / Arc RPC. CI runs without `.env` or those services; tests that pass
+  in CI but fail locally (or vice versa) are real bugs that need fixing, not
+  flaky tests to be skip-marked. The hermetic gate: `env -i HOME=$HOME PATH=$PATH
+  PYTHONPATH=backend python -m pytest backend/tests/test_<module>.py -q` must
+  end with `N passed, 0 failed`.
+- **`asyncio.get_event_loop().run_until_complete(...)` is forbidden.** Python
+  3.12 removed implicit loop creation in non-running contexts and raises
+  `RuntimeError`. Use `asyncio.run(coro)` for sync tests calling an async
+  function, or `async def` plus the automatic `@pytest.mark.asyncio` (asyncio_mode
+  is `auto` in `pytest.ini`) for async tests. The CI gate: `grep -r
+  "asyncio.get_event_loop" backend/tests/` must return nothing.
+- **Subprocess tests must use `_clean_subprocess_env()` + `_DOTENV_NEUTRALIZE`.**
+  Reference pattern in [`backend/tests/test_security_hardening.py`](backend/tests/test_security_hardening.py).
+  Inheriting `os.environ` leaks the developer's `.env` (which sets
+  `DATABASE_URL=postgresql://...@postgres:5432/...`, a hostname only reachable
+  inside docker compose) into the subprocess, causing `psycopg2.OperationalError`
+  on bare-metal local. The parent pytest process can also leak `.env` vars via
+  earlier test imports that trigger `load_dotenv` — `_DOTENV_NEUTRALIZE` plus an
+  explicit `env=` whitelist on `subprocess.run` are both needed.
+- **Mock at boundaries, not internals.** Wrong: mocking dict operations or
+  internal helpers. Right: mocking the HTTP client, the DB session, the Redis
+  client, the chain client, the Circle signer. Real precedents to copy:
+    - `AgentStateStore` mock for Redis-down scenarios — see
+      [`backend/tests/test_api_routes.py`](backend/tests/test_api_routes.py)
+      `TestAgentRoutes::test_agent_status_redis_down_defaults` (uses
+      `patch.object(AgentStateStore, ..., AsyncMock(side_effect=ConnectionError))`).
+    - `chain_client` + `chain_executor` mocking — see
+      [`backend/tests/test_api_routes.py`](backend/tests/test_api_routes.py)
+      `client` fixture (line 36).
+    - SIWE signed-cookie test helper — see
+      [`backend/tests/test_user_routes.py`](backend/tests/test_user_routes.py)
+      `_siwe_cookies(wallet)` for testing PII-gated endpoints with a real signed
+      session (not header spoofing).
+    - tmp-sqlite DB fixture — see
+      [`backend/tests/test_api_routes.py`](backend/tests/test_api_routes.py)
+      `_use_tmp_db` (monkeypatch.setenv DATABASE_URL to a tmp sqlite).
+    - `httpx.ASGITransport` for endpoint tests — see
+      [`backend/tests/test_risk_routes.py`](backend/tests/test_risk_routes.py).
+- **Test the production code path, not the easy one.** When a function accepts
+  multiple input types (e.g. `_confirm_receipt` takes both `str` and `bytes`
+  HexBytes), the test matrix must cover *every* type the production code path
+  emits. The raw-key signer in `chain/executor.py` emits `HexBytes`; tests that
+  only exercise the `str` branch leave the production path uncovered. Issue
+  [#408](https://github.com/a-apin/archimedes/issues/408) was filed to backfill
+  this specific gap.
+- **Coverage targets and gates.** Per-module ≥85% line coverage is the standard
+  for new test work. Measure with `pytest --cov=archimedes.<module> --cov-report=term-missing
+  backend/tests/test_<module>.py`. The repo-level `--cov-fail-under=60` gate
+  fires only on `t2o2` agent PRs and is informational for non-Python PRs.
+- **No skip-marks on flaky tests.** If a test is flaky, the cause is almost
+  always a missing mock at a boundary or hidden environmental state. Fix the
+  flakiness, don't `@pytest.mark.skip`. Skip-marks should be rare and load-bearing
+  (e.g., "Requires chain_client.settings module-level init mocking" — a known
+  architectural limitation, not a flaky test).
 
 ### Python linting + formatting (ruff)
 
@@ -562,6 +667,18 @@ the resulting PR.
   commits that touched unrelated files or made cosmetic edits that passed a
   naive heuristic without doing the structural work. Pattern-match on commit
   messages is not verification — running the actual commands is.
+- **Verify your own audit claims before acting on them (added 2026-05-27).**
+  When an agent (including yourself, earlier in the session) flags a finding
+  like "X is in git history" or "Y is a vulnerable dependency," verify it with
+  the literal command before recommending or applying the remediation. The
+  session example: an audit message flagged `infra/terraform.tfstate` as
+  committed-to-git CRITICAL; subsequent verification with `gh api
+  search/code -f q="tfstate repo:..."` and `git rev-list --all --objects`
+  confirmed it was never tracked — a false alarm. Acting on unverified audit
+  claims wastes work and erodes trust in the agent's findings. The rule is
+  symmetric: do not over-trust audit output from your past self, and surface
+  the verification command alongside any audit claim you make so the next
+  reader can re-run it cheaply.
 
 Copy-paste skeleton:
 
@@ -588,7 +705,27 @@ Non-negotiable, and load-bearing because the judges read this repo like operator
   secrets, not "never touch `main`."
 - `main` moves continuously — rebase onto it right before merge and merge fast.
 - **Never commit secrets or `.env`** — `.env` is gitignored; keep it that way; no
-  private keys in the tree.
+  private keys in the tree. `.gitignore` covers `*.pem`, `*.key`, `*.p12`, `*.pfx`,
+  `*.crt`, `*.tfstate*` globally as of 2026-05-27. The
+  [`detect-secrets`](https://github.com/Yelp/detect-secrets) pre-commit hook is
+  wired in `.pre-commit-config.yaml` with the audited baseline at
+  `.secrets.baseline` — install with `pip install pre-commit && pre-commit install`
+  so commits are scanned locally before push.
+- **Rotation alone does not undo a leak.** When a credential is committed and
+  later removed, the value remains in `git log -p` forever and on every clone
+  anyone has done. Rotation makes the leaked credential *useless going forward*
+  (the threat is neutralized) — it does not erase the historical artifact.
+  Plan accordingly: don't put a secret in code thinking rotation makes the leak
+  fully reversible. The SSH deploy key that lived briefly in
+  `infra/archimedes-deploy-key.pem` was rotated 2026-05-26 and the old key
+  revoked on the EC2; the leaked bytes are still in git history but useless.
+- **Terraform state belongs in S3, never local-committed.** S3 backend: bucket
+  versioned + encrypted (SSE-S3) + bucket-policied to deny non-TLS access +
+  restrict to the account principal; S3-native locking (`use_lockfile = true`)
+  obviates the DynamoDB lock table. See [`infra/README.md`](infra/README.md) for
+  bootstrap commands. State can contain real secrets (e.g., the `tls_private_key`
+  resource puts a private key into state) — treat the backend as a secrets store
+  and scope IAM read access accordingly.
 - If an AI agent is uncertain, it **stops and asks** — it does not invent APIs,
   fabricate data, or silently work around a blocker.
 - New to the stack: pair on one full branch → push → PR cycle before running
@@ -612,6 +749,38 @@ Hard-won (2026-05-16); ignore at your peril:
   commit; do not commit to the base branch between dispatches.
 - Dismantle worktrees at end of session; retain their branches until the PRs
   merge.
+- **Structure subagent responses to preserve parent context (added 2026-05-27).**
+  When dispatching review-style subagents (PR review, audit, multi-file scan),
+  specify both a structured response format (`Verdict / What it does / Concerns
+  / Recommendation` per item) and a per-item word cap. Three subagents
+  reviewing 8 PRs in parallel returned ~3000 words of structured per-PR
+  verdicts I could synthesize without re-reading any diff — the structure is
+  what made the synthesis cheap. Unstructured "review these PRs and tell me
+  what you think" produces long prose that the parent has to re-read and
+  re-organize, defeating the context-preservation reason for fan-out.
+
+### Agent-as-proxy authorization (added 2026-05-27)
+
+Teams have lanes (see "Lead + coverage" table) and humans have AI agents that
+operate on their behalf. When a teammate is unresponsive for an extended
+window (>24h) and work in their lane is blocked, their agent **is authorized
+to act as proxy for backend code reviews and merges in that lane**, with two
+exceptions:
+
+- **Solidity contract changes still require the human's explicit consent.**
+  Contracts hold live funds; the human's contract-specific judgment is
+  load-bearing. Pi can review and recommend, but the human (Chuan) must
+  approve the merge.
+- **Architecture decisions and infrastructure cost commitments** (new AWS
+  services, recurring spend, multi-day migrations) still warrant the human's
+  ack. Operational fixes within an already-approved architecture are fine to
+  proxy.
+
+This unblocks work without compromising the high-stakes review surfaces.
+Document each proxy-merge action in the PR description with a one-line note
+("Reviewed by Pi on Chuan's behalf — Chuan offline since 2026-05-26 20:00 UTC")
+so the human can audit on return. If the human disagrees on return, revert and
+re-review — the proxy is a stop-gap, not a delegation.
 
 ## Architectural primitives we want to get right
 
