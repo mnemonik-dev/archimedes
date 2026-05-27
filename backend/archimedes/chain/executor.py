@@ -104,6 +104,13 @@ class ChainExecutor:
 
         for trade in trades:
             token_addr = chain_client.to_checksum(trade.token_address)
+            # A USDC-denominated leg (e.g. the cash / TREASURY allocation) needs
+            # no swap — it is already in the settlement asset. getPool(USDC, USDC)
+            # has no pool and would otherwise raise InsufficientLiquidityError,
+            # aborting the whole rebalance before any fundable leg is reached
+            # (issue #399). Skip it.
+            if token_addr == usdc_addr:
+                continue
             try:
                 pool_addr = await router.functions.getPool(usdc_addr, token_addr).call()
                 if pool_addr == "0x" + "0" * 40:
@@ -155,6 +162,13 @@ class ChainExecutor:
           - BUY (USDC → synth): amount in USDC raw (6 decimals)
           - SELL (synth → USDC): amount in synth raw (18 decimals)
         """
+        # Drop USDC-denominated legs (cash / TREASURY allocation): holding USDC
+        # is already the settlement asset, so there is no swap to make and no
+        # USDC/USDC pool to find (issue #399). Filter once so both the liquidity
+        # check and the swap construction below see only real swap legs.
+        usdc_addr = chain_client.to_checksum(chain_client.settings.usdc_address)
+        trades = [t for t in trades if chain_client.to_checksum(t.token_address) != usdc_addr]
+
         # Pre-flight liquidity check (raises InsufficientLiquidityError)
         await self._validate_trade_liquidity(trades)
 
