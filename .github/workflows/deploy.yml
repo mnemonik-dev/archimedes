@@ -82,7 +82,8 @@ jobs:
             --document-name "AWS-RunShellScript" \
             --timeout-seconds 600 \
             --parameters commands='[
-              "set -euxo pipefail",
+              "#!/bin/bash",
+              "set -eux",
               "cd /opt/archimedes",
               "mkdir -p analytics-engine/artifacts",
               "sudo chown -R ubuntu:ubuntu analytics-engine/artifacts/ 2>/dev/null || true",
