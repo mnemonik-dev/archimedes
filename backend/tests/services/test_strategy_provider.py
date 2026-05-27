@@ -31,7 +31,7 @@ _MINIMAL_STRATEGY = textwrap.dedent('''\
     ASSET_UNIVERSE = ["SPY", "GOLD"]
     POSITION_SIZING = "equal_weight"
     REBALANCE_FREQUENCY = "daily"
-    STRATEGY_STATUS = "live"
+    STATUS = "live"
     CURATOR_NOTE = "Test strategy for hermetic unit tests."
     REGIME_TAG = "bull"
 ''')
@@ -46,7 +46,7 @@ _SECOND_STRATEGY = textwrap.dedent('''\
     ASSET_UNIVERSE = ["SPY", "NIKKEI"]
     POSITION_SIZING = "inverse_vol"
     REBALANCE_FREQUENCY = "daily"
-    STRATEGY_STATUS = "candidate"
+    STATUS = "candidate"
     REGIME_TAG = "bear"
 ''')
 
@@ -73,7 +73,9 @@ def _mock_db():
     with (
         patch("archimedes.services.strategy_provider.get_session") as mock_session,
         patch("archimedes.services.strategy_provider.latest_backtests_by_strategy", return_value={}),
-        patch("archimedes.services.strategy_provider.ingest_passport", return_value=None),
+        # ingest_passport is a LOCAL import inside refresh() at strategy_provider.py:396,
+        # so we must patch where it's defined (passport_loader), not where it's used.
+        patch("archimedes.services.passport_loader.ingest_passport", return_value=None),
     ):
         # Return a context manager that yields a mock session
         mock_cm = MagicMock()
