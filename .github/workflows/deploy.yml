@@ -11,6 +11,35 @@
 # Required GitHub Variables (or hardcoded below):
 #   AWS_ROLE_ARN — arn:aws:iam::159903201072:role/archimedes-github-deploy
 #   EC2_INSTANCE_ID — i-0987f70a131ed3ab1
+#
+# ─── KNOWN SECURITY DEBT (added 2026-05-27, fix in follow-up PR) ───
+#
+# 1. SECRETS IN SSM COMMAND HISTORY + CLOUDTRAIL.
+#    GitHub Actions interpolates ${{ secrets.X }} into the SSM command body
+#    BEFORE the API call. The literal secret values then land in:
+#      - SSM command history (`aws ssm list-commands` shows parameters)
+#      - CloudTrail SendCommand events (cloudtrail:LookupEvents-visible)
+#      - CloudWatch Logs (if SSM logging is enabled)
+#    Anyone with read access to those AWS audit surfaces can extract the
+#    secrets. Regression vs. SSH (where secrets stayed on the runner only).
+#    Acceptable now because audit surfaces are IAM-gated to the account.
+#    Proper fix: backend reads secrets from AWS Secrets Manager / SSM
+#    Parameter Store via its EC2 IAM role at container start. Deploy
+#    script never touches secrets.
+#
+# 2. OUT-OF-BAND IAM RESOURCES NOT TERRAFORMED.
+#    `archimedes-github-deploy`, `AWSSystemsManagerDefaultEC2InstanceManagementRole`,
+#    and the AmazonSSMManagedInstanceCore policy attachment on the EC2 role
+#    were created via AWS CLI, not Terraform. Codify in `infra/iam/`
+#    follow-up so the IAM state is versioned + recoverable from declarative
+#    config.
+#
+# 3. VERIFY OIDC TRUST POLICY IS LOCKED TO THIS REPO.
+#    The role trust policy must restrict token.actions.githubusercontent.com
+#    to `repo:a-apin/archimedes:*` (or tighter: `:ref:refs/heads/main`).
+#    Without that condition, any GitHub repo's Actions can assume the role.
+#    Verify with: aws iam get-role --role-name archimedes-github-deploy
+#    and inspect AssumeRolePolicyDocument's Condition block.
 
 name: Deploy to EC2
 
