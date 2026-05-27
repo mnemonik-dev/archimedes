@@ -33,3 +33,44 @@ output "ssh_private_key" {
   value       = tls_private_key.deploy.private_key_openssh
   sensitive   = true
 }
+
+# ── New VPC infrastructure outputs ────────────────────────────
+
+output "vpc_id" {
+  description = "New VPC ID"
+  value       = aws_vpc.main.id
+}
+
+output "aurora_endpoint" {
+  description = "Aurora cluster endpoint (for DATABASE_URL)"
+  value       = aws_rds_cluster.main.endpoint
+}
+
+output "aurora_reader_endpoint" {
+  description = "Aurora reader endpoint"
+  value       = aws_rds_cluster.main.reader_endpoint
+}
+
+output "redis_endpoint" {
+  description = "ElastiCache Redis endpoint (for REDIS_URL)"
+  value       = aws_elasticache_replication_group.main.primary_endpoint_address
+}
+
+output "database_url" {
+  description = <<-DESC
+    Full DATABASE_URL for backend .env. STATE-SENSITIVE: this output stores
+    the master password in Terraform state (which lives in the S3 backend).
+    The bucket policy restricts access to the AWS account principal and TLS-only,
+    but the password is still in the state file. Recommended pattern going forward:
+    backend fetches the password from AWS Secrets Manager / SSM Parameter Store at
+    runtime and constructs the URL from `aurora_endpoint` + password — that way
+    the secret never lands in Terraform state at all. Tracked as a follow-up.
+  DESC
+  value       = "postgresql://archimedes:${var.aurora_master_password}@${aws_rds_cluster.main.endpoint}:5432/archimedes"
+  sensitive   = true
+}
+
+output "redis_url" {
+  description = "Full REDIS_URL for backend .env"
+  value       = "rediss://${aws_elasticache_replication_group.main.primary_endpoint_address}:6379/0"
+}
