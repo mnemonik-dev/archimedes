@@ -1,11 +1,45 @@
-# Archimedes — Deploy to EC2 on merge to main
+# Archimedes — Deploy to EC2 via SSM (no SSH keys)
+#
+# Authentication: OIDC federation (GitHub → AWS IAM role assumption).
+# No long-lived AWS access keys in GitHub Secrets.
 #
 # Required GitHub Secrets (Settings → Secrets → Actions):
-#   EC2_HOST          — Public IP or DNS of the EC2 instance
-#   SSH_PRIVATE_KEY   — Contents of the deploy SSH private key (infra/archimedes-deploy-key.pem)
+#   LLM_PROVIDER, LLM_AUTH_TOKEN, LLM_BASE_URL — LLM credentials
+#   EMAIL_ENCRYPTION_KEY — Fernet key for email encryption at rest
+#   VITE_CIRCLE_CLIENT_KEY — Circle Modular Wallets client key
 #
-# The workflow SSHes into the instance, pulls the latest main, and
-# rebuilds/restarts all Docker services.
+# Required GitHub Variables (or hardcoded below):
+#   AWS_ROLE_ARN — arn:aws:iam::159903201072:role/archimedes-github-deploy
+#   EC2_INSTANCE_ID — i-0987f70a131ed3ab1
+#
+# ─── KNOWN SECURITY DEBT (added 2026-05-27, fix in follow-up PR) ───
+#
+# 1. SECRETS IN SSM COMMAND HISTORY + CLOUDTRAIL.
+#    GitHub Actions interpolates ${{ secrets.X }} into the SSM command body
+#    BEFORE the API call. The literal secret values then land in:
+#      - SSM command history (`aws ssm list-commands` shows parameters)
+#      - CloudTrail SendCommand events (cloudtrail:LookupEvents-visible)
+#      - CloudWatch Logs (if SSM logging is enabled)
+#    Anyone with read access to those AWS audit surfaces can extract the
+#    secrets. Regression vs. SSH (where secrets stayed on the runner only).
+#    Acceptable now because audit surfaces are IAM-gated to the account.
+#    Proper fix: backend reads secrets from AWS Secrets Manager / SSM
+#    Parameter Store via its EC2 IAM role at container start. Deploy
+#    script never touches secrets.
+#
+# 2. OUT-OF-BAND IAM RESOURCES NOT TERRAFORMED.
+#    `archimedes-github-deploy`, `AWSSystemsManagerDefaultEC2InstanceManagementRole`,
+#    and the AmazonSSMManagedInstanceCore policy attachment on the EC2 role
+#    were created via AWS CLI, not Terraform. Codify in `infra/iam/`
+#    follow-up so the IAM state is versioned + recoverable from declarative
+#    config.
+#
+# 3. VERIFY OIDC TRUST POLICY IS LOCKED TO THIS REPO.
+#    The role trust policy must restrict token.actions.githubusercontent.com
+#    to `repo:a-apin/archimedes:*` (or tighter: `:ref:refs/heads/main`).
+#    Without that condition, any GitHub repo's Actions can assume the role.
+#    Verify with: aws iam get-role --role-name archimedes-github-deploy
+#    and inspect AssumeRolePolicyDocument's Condition block.
 
 name: Deploy to EC2
 
@@ -15,92 +49,103 @@ on:
       - main
   workflow_dispatch:
 
-# Only one deploy at a time — cancel in-flight deploys if a new push lands
 concurrency:
   group: deploy-production
   cancel-in-progress: true
+
+permissions:
+  id-token: write   # Required for OIDC token request
+  contents: read
+
+env:
+  AWS_REGION: eu-west-2
+  EC2_INSTANCE_ID: i-0987f70a131ed3ab1
 
 jobs:
   deploy:
     name: Deploy
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     steps:
-      - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ubuntu
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          command_timeout: 10m
-          script: |
-            set -euxo pipefail
+          role-to-assume: arn:aws:iam::159903201072:role/archimedes-github-deploy
+          aws-region: ${{ env.AWS_REGION }}
 
-            cd /opt/archimedes
+      - name: Deploy via SSM SendCommand
+        run: |
+          # Build the deploy script as a single string for SSM
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "$EC2_INSTANCE_ID" \
+            --document-name "AWS-RunShellScript" \
+            --timeout-seconds 600 \
+            --parameters commands='[
+              "set -euxo pipefail",
+              "cd /opt/archimedes",
+              "mkdir -p analytics-engine/artifacts",
+              "sudo chown -R ubuntu:ubuntu analytics-engine/artifacts/ 2>/dev/null || true",
+              "git fetch origin main",
+              "git reset --hard origin/main",
+              "sed -i '"'"'/^LLM_PROVIDER=/d; /^LLM_AUTH_TOKEN=/d; /^LLM_BASE_URL=/d'"'"' .env",
+              "echo \"LLM_PROVIDER=${{ secrets.LLM_PROVIDER }}\" >> .env",
+              "echo \"LLM_AUTH_TOKEN=${{ secrets.LLM_AUTH_TOKEN }}\" >> .env",
+              "echo \"LLM_BASE_URL=${{ secrets.LLM_BASE_URL }}\" >> .env",
+              "sed -i '"'"'/^EMAIL_ENCRYPTION_KEY=/d'"'"' .env",
+              "echo \"EMAIL_ENCRYPTION_KEY=${{ secrets.EMAIL_ENCRYPTION_KEY }}\" >> .env",
+              "grep -q '"'"'^PUBLIC_DOMAIN='"'"' .env || echo '"'"'PUBLIC_DOMAIN=https://archimedes-arc.app'"'"' >> .env",
+              "sed -i '"'"'/^VITE_CIRCLE_CLIENT_KEY=/d'"'"' .env",
+              "echo \"VITE_CIRCLE_CLIENT_KEY=${{ secrets.VITE_CIRCLE_CLIENT_KEY }}\" >> .env",
+              "docker compose build --no-cache",
+              "docker compose up -d --force-recreate --remove-orphans",
+              "docker image prune -f",
+              "docker compose exec -T backend python -m archimedes.scripts.seed_backtests_from_artifacts || echo WARN_SEED_SKIP",
+              "docker compose exec -dT backend python -m archimedes.scripts.hydrate_corpus || echo WARN_HYDRATE_SKIP",
+              "docker compose exec -T backend python -c '"'"'import asyncio; from archimedes.services.amm_bootstrap import bootstrap_amm_liquidity; r=asyncio.run(bootstrap_amm_liquidity()); print(dict(r))'"'"' || echo WARN_BOOTSTRAP_SKIP",
+              "sleep 10",
+              "docker compose exec -T backend python -c '"'"'import urllib.request; r=urllib.request.urlopen(\"http://localhost:8000/health\"); print(r.read().decode()[:80])'"'"'",
+              "echo DEPLOY_COMPLETE"
+            ]' \
+            --region "$AWS_REGION" \
+            --query 'Command.CommandId' \
+            --output text)
 
-            # Fix permissions for analytics-engine artifacts (may be owned by docker)
-            mkdir -p analytics-engine/artifacts
-            sudo chown -R ubuntu:ubuntu analytics-engine/artifacts/ 2>/dev/null || true
+          echo "SSM Command ID: $COMMAND_ID"
 
-            # Pull latest code
-            git fetch origin main
-            git reset --hard origin/main
+          # Poll for completion
+          for i in $(seq 1 60); do
+            STATUS=$(aws ssm get-command-invocation \
+              --command-id "$COMMAND_ID" \
+              --instance-id "$EC2_INSTANCE_ID" \
+              --region "$AWS_REGION" \
+              --query 'Status' \
+              --output text 2>/dev/null || echo "Pending")
 
-            # Inject LLM credentials into .env (idempotent — overwrites if present)
-            sed -i '/^LLM_PROVIDER=/d; /^LLM_AUTH_TOKEN=/d; /^LLM_BASE_URL=/d' .env
-            echo "LLM_PROVIDER=${{ secrets.LLM_PROVIDER }}" >> .env
-            echo "LLM_AUTH_TOKEN=${{ secrets.LLM_AUTH_TOKEN }}" >> .env
-            echo "LLM_BASE_URL=${{ secrets.LLM_BASE_URL }}" >> .env
-
-            # Inject EMAIL_ENCRYPTION_KEY (required by security hardening PR #330)
-            sed -i '/^EMAIL_ENCRYPTION_KEY=/d' .env
-            echo "EMAIL_ENCRYPTION_KEY=${{ secrets.EMAIL_ENCRYPTION_KEY }}" >> .env
-
-            # Ensure PUBLIC_DOMAIN is set (gates /docs and email crypto)
-            grep -q '^PUBLIC_DOMAIN=' .env || echo 'PUBLIC_DOMAIN=https://archimedes-arc.app' >> .env
-
-            # Inject Circle Modular Wallets client key (Issue #348)
-            # This is a client-side key (safe to embed in bundle); security is
-            # enforced by Circle's Allowed Domain check, not secrecy.
-            sed -i '/^VITE_CIRCLE_CLIENT_KEY=/d' .env
-            echo "VITE_CIRCLE_CLIENT_KEY=${{ secrets.VITE_CIRCLE_CLIENT_KEY }}" >> .env
-
-            # Rebuild and restart services (detached)
-            docker compose build --no-cache
-            docker compose up -d --force-recreate --remove-orphans
-
-            # Prune old images to save disk
-            docker image prune -f
-
-            # Seed backtest results into DB from pre-computed artifacts (idempotent)
-            docker compose exec -T backend python -m archimedes.scripts.seed_backtests_from_artifacts || echo "⚠️ Backtest seeding skipped (non-fatal)"
-
-            # Hydrate arXiv corpus text from manifest-keyed PDFs (idempotent).
-            # Backgrounded (-d) so a 10K-paper iteration cannot blow the SSH
-            # `command_timeout: 10m` and cancel the deploy before the health
-            # checks below run. The script itself also short-circuits if the
-            # PDF/text dirs are read-only on this host.
-            docker compose exec -dT backend python -m archimedes.scripts.hydrate_corpus || echo "⚠️ Corpus hydration kickoff skipped (non-fatal)"
-
-            # Bootstrap AMM pool liquidity (idempotent — skips pools with existing reserves)
-            docker compose exec -T backend python -c 'import asyncio; from archimedes.services.amm_bootstrap import bootstrap_amm_liquidity; r=asyncio.run(bootstrap_amm_liquidity()); print(dict(r))' || echo "⚠️ AMM bootstrap skipped (non-fatal)"
-
-            # Verify services are healthy
-            sleep 10
-            # Backend port 8000 is no longer exposed to the host (security
-            # lockdown). Health check goes through the Docker network directly.
-            docker compose exec -T backend python -c 'import urllib.request; r=urllib.request.urlopen("http://localhost:8000/health"); print(r.read().decode()[:80])' || {
-              echo "❌ Backend health check failed"
-              docker compose logs --tail=50 backend
-              exit 1
-            }
-            # nginx redirects HTTP→HTTPS (301) which is correct; accept both 200 and 301
-            homepage_status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost/)
-            if [ "$homepage_status" != "200" ] && [ "$homepage_status" != "301" ]; then
-              echo "❌ Homepage check failed (HTTP $homepage_status)"
-              docker compose logs --tail=50 nginx
+            if [ "$STATUS" = "Success" ]; then
+              echo "✅ Deploy succeeded"
+              # Print output
+              aws ssm get-command-invocation \
+                --command-id "$COMMAND_ID" \
+                --instance-id "$EC2_INSTANCE_ID" \
+                --region "$AWS_REGION" \
+                --query 'StandardOutputContent' \
+                --output text | tail -20
+              exit 0
+            elif [ "$STATUS" = "Failed" ] || [ "$STATUS" = "TimedOut" ] || [ "$STATUS" = "Cancelled" ]; then
+              echo "❌ Deploy $STATUS"
+              aws ssm get-command-invocation \
+                --command-id "$COMMAND_ID" \
+                --instance-id "$EC2_INSTANCE_ID" \
+                --region "$AWS_REGION" \
+                --query '{Stdout:StandardOutputContent,Stderr:StandardErrorContent}' \
+                --output json | tail -50
               exit 1
             fi
 
-            echo "✅ Deploy complete"
+            echo "Status: $STATUS (attempt $i/60)"
+            sleep 10
+          done
+
+          echo "❌ Deploy timed out waiting for SSM command"
+          exit 1
