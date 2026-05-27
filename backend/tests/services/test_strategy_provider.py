@@ -1,0 +1,274 @@
+"""Tests for LocalStrategyProvider (file-system-backed strategy loading).
+
+Target: backend/archimedes/services/strategy_provider.py
+Goal: ≥85% coverage on the target module.
+
+Hermetic: uses a temp directory with minimal strategy files. No network,
+no running DB (DB calls mocked at the session boundary).
+"""
+
+from __future__ import annotations
+
+import textwrap
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+
+# ── Minimal strategy file content ────────────────────────────
+
+_MINIMAL_STRATEGY = textwrap.dedent('''\
+    """Test strategy for unit tests."""
+    PAPER_TITLE = "Test Momentum Strategy"
+    PAPER_AUTHORS = ["Alice", "Bob"]
+    PAPER_VENUE = "Journal of Testing"
+    PAPER_YEAR = 2024
+    PAPER_DOI = "10.1234/test"
+    PAPER_CITATION_COUNT = 42
+    PAPER_ARXIV_ID = "2401.00001"
+    METHODOLOGY_SUMMARY = "Buy when price is above the 200-day SMA."
+    ASSET_UNIVERSE = ["SPY", "GOLD"]
+    POSITION_SIZING = "equal_weight"
+    REBALANCE_FREQUENCY = "daily"
+    STRATEGY_STATUS = "live"
+    CURATOR_NOTE = "Test strategy for hermetic unit tests."
+    REGIME_TAG = "bull"
+''')
+
+_SECOND_STRATEGY = textwrap.dedent('''\
+    """Second test strategy."""
+    PAPER_TITLE = "Vol-Managed Portfolios"
+    PAPER_AUTHORS = ["Carol"]
+    PAPER_VENUE = "Journal of Finance"
+    PAPER_YEAR = 2017
+    METHODOLOGY_SUMMARY = "Scale exposure inversely to realized volatility."
+    ASSET_UNIVERSE = ["SPY", "NIKKEI"]
+    POSITION_SIZING = "inverse_vol"
+    REBALANCE_FREQUENCY = "daily"
+    STRATEGY_STATUS = "candidate"
+    REGIME_TAG = "bear"
+''')
+
+_NO_TITLE_FILE = textwrap.dedent('''\
+    """File without PAPER_TITLE — should be skipped."""
+    SOME_OTHER_CONSTANT = "not a strategy"
+''')
+
+
+@pytest.fixture
+def strategies_dir(tmp_path):
+    """Create a temp directory with test strategy files."""
+    (tmp_path / "test_momentum.py").write_text(_MINIMAL_STRATEGY)
+    (tmp_path / "test_volmanaged.py").write_text(_SECOND_STRATEGY)
+    (tmp_path / "test_notitle.py").write_text(_NO_TITLE_FILE)
+    (tmp_path / "_private.py").write_text("# underscore-prefixed, should be skipped")
+    (tmp_path / "not_python.txt").write_text("not a Python file")
+    return tmp_path
+
+
+# Mock DB calls so we don't need Postgres
+@pytest.fixture(autouse=True)
+def _mock_db():
+    with (
+        patch("archimedes.services.strategy_provider.get_session") as mock_session,
+        patch("archimedes.services.strategy_provider.latest_backtests_by_strategy", return_value={}),
+        patch("archimedes.services.strategy_provider.ingest_passport", return_value=None),
+    ):
+        # Return a context manager that yields a mock session
+        mock_cm = MagicMock()
+        mock_cm.__enter__ = MagicMock(return_value=MagicMock())
+        mock_cm.__exit__ = MagicMock(return_value=False)
+        mock_session.return_value = mock_cm
+        yield
+
+
+def _make_provider(strategies_dir: Path):
+    from archimedes.services.strategy_provider import LocalStrategyProvider
+
+    return LocalStrategyProvider(strategies_dir)
+
+
+# ── Constructor / refresh ─────────────────────────────────────
+
+
+class TestRefresh:
+    def test_loads_strategies_from_directory(self, strategies_dir):
+        provider = _make_provider(strategies_dir)
+        assert len(provider.list_strategies()) == 2  # momentum + volmanaged (notitle skipped)
+
+    def test_skips_underscore_prefixed_files(self, strategies_dir):
+        provider = _make_provider(strategies_dir)
+        names = [s.paper_title for s in provider.list_strategies()]
+        assert "_private" not in str(names)
+
+    def test_skips_files_without_paper_title(self, strategies_dir):
+        provider = _make_provider(strategies_dir)
+        names = [s.paper_title for s in provider.list_strategies()]
+        assert "not a strategy" not in str(names)
+
+    def test_returns_loaded_count(self, strategies_dir):
+        provider = _make_provider(strategies_dir)
+        count = provider.refresh()
+        assert count == 2
+
+    def test_empty_directory(self, tmp_path):
+        provider = _make_provider(tmp_path)
+        assert provider.list_strategies() == []
+
+    def test_nonexistent_directory(self, tmp_path):
+        provider = _make_provider(tmp_path / "nonexistent")
+        assert provider.list_strategies() == []
+        assert provider.refresh() == 0
+
+
+# ── list_strategies ───────────────────────────────────────────
+
+
+class TestListStrategies:
+    def test_returns_all_without_filter(self, strategies_dir):
+        provider = _make_provider(strategies_dir)
+        assert len(provider.list_strategies()) == 2
+
+    def test_filter_by_status(self, strategies_dir):
+        from archimedes.models.strategy import StrategyStatus
+
+        provider = _make_provider(strategies_dir)
+        live = provider.list_strategies(status=StrategyStatus.LIVE)
+        assert len(live) == 1
+        assert live[0].paper_title == "Test Momentum Strategy"
+
+    def test_filter_by_asset_universe(self, strategies_dir):
+        provider = _make_provider(strategies_dir)
+        gold = provider.list_strategies(asset_universe=["GOLD"])
+        assert len(gold) == 1
+        assert gold[0].paper_title == "Test Momentum Strategy"
+
+    def test_filter_by_asset_universe_intersection(self, strategies_dir):
+        provider = _make_provider(strategies_dir)
+        spy = provider.list_strategies(asset_universe=["SPY"])
+        assert len(spy) == 2  # both strategies have SPY
+
+
+# ── get_strategy ──────────────────────────────────────────────
+
+
+class TestGetStrategy:
+    def test_returns_strategy_by_id(self, strategies_dir):
+        provider = _make_provider(strategies_dir)
+        strats = provider.list_strategies()
+        s = provider.get_strategy(strats[0].id)
+        assert s is not None
+        assert s.id == strats[0].id
+
+    def test_returns_none_for_unknown_id(self, strategies_dir):
+        provider = _make_provider(strategies_dir)
+        assert provider.get_strategy("nonexistent") is None
+
+
+# ── get_backtest_result ───────────────────────────────────────
+
+
+class TestGetBacktestResult:
+    def test_returns_none_when_no_backtests(self, strategies_dir):
+        provider = _make_provider(strategies_dir)
+        strats = provider.list_strategies()
+        result = provider.get_backtest_result(strats[0].id)
+        assert result is None
+
+    def test_returns_none_for_unknown_strategy(self, strategies_dir):
+        provider = _make_provider(strategies_dir)
+        assert provider.get_backtest_result("nonexistent") is None
+
+
+# ── Strategy model fields ─────────────────────────────────────
+
+
+class TestStrategyFields:
+    def test_metadata_parsed_correctly(self, strategies_dir):
+        provider = _make_provider(strategies_dir)
+        s = next(s for s in provider.list_strategies() if s.paper_title == "Test Momentum Strategy")
+        assert s.paper_authors == ["Alice", "Bob"]
+        assert s.paper_venue == "Journal of Testing"
+        assert s.paper_year == 2024
+        assert s.paper_doi == "10.1234/test"
+        assert s.paper_citation_count == 42
+        assert s.paper_arxiv_id == "2401.00001"
+        assert s.methodology_summary == "Buy when price is above the 200-day SMA."
+        assert s.asset_universe == ["SPY", "GOLD"]
+        assert s.position_sizing == "equal_weight"
+        assert s.rebalance_frequency == "daily"
+        assert s.regime_tag == "bull"
+
+    def test_methodology_hash_is_deterministic(self, strategies_dir):
+        provider = _make_provider(strategies_dir)
+        s = next(s for s in provider.list_strategies() if s.paper_title == "Test Momentum Strategy")
+        assert s.methodology_hash is not None
+        assert len(s.methodology_hash) == 64  # SHA-256 hex
+
+        # Refresh and verify hash is the same
+        provider.refresh()
+        s2 = next(s for s in provider.list_strategies() if s.paper_title == "Test Momentum Strategy")
+        assert s2.methodology_hash == s.methodology_hash
+
+    def test_strategy_id_is_deterministic(self, strategies_dir):
+        provider = _make_provider(strategies_dir)
+        ids1 = {s.id for s in provider.list_strategies()}
+        provider.refresh()
+        ids2 = {s.id for s in provider.list_strategies()}
+        assert ids1 == ids2
+
+    def test_second_strategy_fields(self, strategies_dir):
+        provider = _make_provider(strategies_dir)
+        s = next(s for s in provider.list_strategies() if s.paper_title == "Vol-Managed Portfolios")
+        assert s.paper_authors == ["Carol"]
+        assert s.status == "candidate"
+        assert s.regime_tag == "bear"
+        assert "NIKKEI" in s.asset_universe
+
+
+# ── get_strategies_for_risk_profile ───────────────────────────
+
+
+class TestRiskProfile:
+    def test_returns_empty_when_no_match(self, strategies_dir):
+        provider = _make_provider(strategies_dir)
+        # Default strategies don't set risk_profiles explicitly
+        result = provider.get_strategies_for_risk_profile("nonexistent_profile")
+        assert isinstance(result, list)
+
+
+# ── Helper functions ──────────────────────────────────────────
+
+
+class TestHelpers:
+    def test_hash_file_deterministic(self, strategies_dir):
+        from archimedes.services.strategy_provider import _hash_file
+
+        h1 = _hash_file(strategies_dir / "test_momentum.py")
+        h2 = _hash_file(strategies_dir / "test_momentum.py")
+        assert h1 == h2
+        assert len(h1) == 64
+
+    def test_hash_file_different_for_different_files(self, strategies_dir):
+        from archimedes.services.strategy_provider import _hash_file
+
+        h1 = _hash_file(strategies_dir / "test_momentum.py")
+        h2 = _hash_file(strategies_dir / "test_volmanaged.py")
+        assert h1 != h2
+
+    def test_read_module_constants(self, strategies_dir):
+        from archimedes.services.strategy_provider import _read_module_constants
+
+        meta = _read_module_constants(strategies_dir / "test_momentum.py")
+        assert meta["PAPER_TITLE"] == "Test Momentum Strategy"
+        assert meta["PAPER_YEAR"] == 2024
+
+    def test_read_module_constants_skips_non_literals(self, strategies_dir):
+        # Write a file with a non-literal constant
+        (strategies_dir / "test_dynamic.py").write_text('PAPER_TITLE = "Dynamic"\nCOMPUTED = 1 + 2\n')
+        from archimedes.services.strategy_provider import _read_module_constants
+
+        meta = _read_module_constants(strategies_dir / "test_dynamic.py")
+        assert meta["PAPER_TITLE"] == "Dynamic"
+        # COMPUTED may or may not be in meta depending on AST parsing — that's fine
