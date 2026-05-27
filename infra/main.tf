@@ -9,7 +9,7 @@ terraform {
     key            = "infra/terraform.tfstate"
     region         = "eu-west-2"
     encrypt        = true
-    use_lockfile   = true
+    use_lockfile   = true  # S3-native locking (Terraform 1.10+), no DynamoDB needed
   }
 
   required_providers {
@@ -66,6 +66,10 @@ data "aws_vpc" "default" {
 # SSH key pair — generated in Terraform, private key saved locally
 # ---------------------------------------------------------------------------
 
+# WARNING: tls_private_key puts the private key into Terraform state.
+# State is in S3 (encrypted, account-restricted, TLS-only bucket policy).
+# Long-term: generate keys out-of-band, only store public key in Terraform.
+# The key in state was rotated on 2026-05-26; the old key is revoked.
 resource "tls_private_key" "deploy" {
   algorithm = "ED25519"
 }

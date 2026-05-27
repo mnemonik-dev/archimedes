@@ -1,10 +1,11 @@
 # Archimedes Infrastructure
 
-## Terraform State Backend (S3 + DynamoDB)
+## Terraform State Backend (S3)
 
-State is stored remotely in S3 with DynamoDB locking. These resources
-were created out-of-band via AWS CLI (they're infrastructure-of-
-infrastructure — never change, don't try to manage them with Terraform).
+State is stored remotely in S3 with S3-native locking (Terraform 1.10+,
+`use_lockfile = true`). The S3 bucket was created out-of-band via AWS
+CLI (infrastructure-of-infrastructure — never changes, don't manage
+with Terraform). No DynamoDB table needed.
 
 ### Bootstrap Commands (run once, already done)
 
@@ -29,13 +30,19 @@ aws s3api put-public-access-block \
   --public-access-block-configuration \
   BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
 
-# DynamoDB lock table
-aws dynamodb create-table \
-  --table-name archimedes-tfstate-lock \
-  --attribute-definitions AttributeName=LockID,AttributeType=S \
-  --key-schema AttributeName=LockID,KeyType=HASH \
-  --billing-mode PAY_PER_REQUEST \
-  --region eu-west-2
+# Bucket policy: deny non-TLS + restrict to account only
+aws s3api put-bucket-policy \
+  --bucket archimedes-tfstate-159903201072 \
+  --policy '{
+    "Version": "2012-10-17",
+    "Statement": [
+      {"Sid":"DenyNonTLS","Effect":"Deny","Principal":"*","Action":"s3:*",
+       "Resource":["arn:aws:s3:::archimedes-tfstate-159903201072","arn:aws:s3:::archimedes-tfstate-159903201072/*"],
+       "Condition":{"Bool":{"aws:SecureTransport":"false"}}},
+      {"Sid":"RestrictToAccount","Effect":"Deny","Principal":"*","Action":"s3:*",
+       "Resource":["arn:aws:s3:::archimedes-tfstate-159903201072","arn:aws:s3:::archimedes-tfstate-159903201072/*"],
+       "Condition":{"StringNotEquals":{"aws:PrincipalAccount":"159903201072"}}}
+    ]}'
 ```
 
 ### Working with Terraform
