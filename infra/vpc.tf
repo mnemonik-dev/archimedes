@@ -62,6 +62,12 @@ resource "aws_route_table" "public" {
     gateway_id = aws_internet_gateway.main.id
   }
 
+  # Route to default VPC via peering (ALB needs to reach EC2)
+  route {
+    cidr_block                = "172.31.0.0/16"
+    vpc_peering_connection_id = aws_vpc_peering_connection.default_to_main.id
+  }
+
   tags = {
     Name    = "${var.project_name}-public-rt"
     Project = var.project_name
@@ -124,7 +130,7 @@ data "aws_ami" "fck_nat" {
 
 resource "aws_security_group" "nat" {
   name        = "${var.project_name}-nat-sg"
-  description = "NAT instance — allows outbound for private subnets"
+  description = "NAT instance - allows outbound for private subnets"
   vpc_id      = aws_vpc.main.id
 
   # Inbound from private subnets (all traffic)

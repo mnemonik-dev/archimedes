@@ -138,7 +138,7 @@ resource "aws_acm_certificate_validation" "main" {
 
 resource "aws_security_group" "alb" {
   name        = "${var.project_name}-alb-sg"
-  description = "ALB — public HTTPS only"
+  description = "ALB - public HTTPS only"
   vpc_id      = aws_vpc.main.id
 
   # HTTPS from internet
@@ -201,10 +201,11 @@ resource "aws_lb" "main" {
 # Points at the EC2 instance. Health check on /health (not /api/generate/stream/).
 
 resource "aws_lb_target_group" "backend" {
-  name     = "${var.project_name}-backend-tg"
-  port     = 80
-  protocol = "HTTP"
-  vpc_id   = data.aws_vpc.default.id # EC2 is still in default VPC
+  name        = "${var.project_name}-backend-tg"
+  port        = 80
+  protocol    = "HTTP"
+  vpc_id      = aws_vpc.main.id # ALB and TG must be in same VPC
+  target_type = "ip"           # IP-based targeting for cross-VPC (EC2 in default VPC)
 
   health_check {
     enabled             = true
@@ -224,9 +225,10 @@ resource "aws_lb_target_group" "backend" {
 }
 
 resource "aws_lb_target_group_attachment" "backend" {
-  target_group_arn = aws_lb_target_group.backend.arn
-  target_id        = aws_instance.archimedes.id
-  port             = 80
+  target_group_arn  = aws_lb_target_group.backend.arn
+  target_id         = aws_instance.archimedes.private_ip # IP target, not instance ID
+  port              = 80
+  availability_zone = "all" # Cross-VPC IP target
 }
 
 # ── Listeners ────────────────────────────────────────────────

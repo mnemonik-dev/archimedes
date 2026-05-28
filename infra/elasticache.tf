@@ -14,7 +14,7 @@ resource "aws_elasticache_subnet_group" "main" {
 
 resource "aws_security_group" "redis" {
   name        = "${var.project_name}-redis-sg"
-  description = "ElastiCache Redis — only reachable from EC2 backend"
+  description = "ElastiCache Redis - only reachable from EC2 backend"
   vpc_id      = aws_vpc.main.id
 
   # Inbound: Redis from private subnets
@@ -50,7 +50,7 @@ resource "aws_security_group" "redis" {
 
 resource "aws_elasticache_replication_group" "main" {
   replication_group_id = "${var.project_name}-redis"
-  description          = "Archimedes Redis — regime state, traces, job queue"
+  description          = "Archimedes Redis - regime state, traces, job queue"
 
   engine         = "redis"
   engine_version = "7.1"
