@@ -18,7 +18,7 @@ resource "aws_db_subnet_group" "aurora" {
 
 resource "aws_security_group" "aurora" {
   name        = "${var.project_name}-aurora-sg"
-  description = "Aurora — only reachable from EC2 backend"
+  description = "Aurora - only reachable from EC2 backend"
   vpc_id      = aws_vpc.main.id
 
   # Inbound: Postgres from the EC2 security group (current default VPC)
