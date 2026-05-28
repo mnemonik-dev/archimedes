@@ -782,6 +782,43 @@ Document each proxy-merge action in the PR description with a one-line note
 so the human can audit on return. If the human disagrees on return, revert and
 re-review — the proxy is a stop-gap, not a delegation.
 
+### Length-limited message surfaces (added 2026-05-27)
+
+When drafting for a hard character limit — Discord (2000 default, 4000 with
+Nitro; Dan has Nitro), Twitter/X (280), SMS (160), etc. — **write the final
+text to a file and measure it with `wc -m`. Never eyeball.** Two pitfalls
+that compounded in this session and produced an over-limit message:
+
+- **`wc -c` counts BYTES, not characters.** UTF-8 multi-byte glyphs inflate
+  the byte count without inflating the character count: 🔴 = 4 bytes, em-dash
+  — = 3 bytes, arrow → = 3 bytes, all = 1 codepoint each. `wc -m` (and
+  Python's `len(str)`) count codepoints, which is what Discord/Twitter/SMS
+  count.
+- **An estimate is not a measurement.** "Roughly 3,500 chars" stacks an
+  arbitrary error on top of any tool error. Run the count on the exact
+  final text — not an earlier draft, not an inferred-from-structure
+  estimate.
+
+```bash
+# Right — measure codepoints on the exact final text:
+wc -m < /tmp/discord-msg.md                                  # 3754
+python3 -c "print(len(open('/tmp/discord-msg.md').read()))"  # 3754
+
+# Wrong — bytes; undercounts content with emoji/em-dashes:
+wc -c < /tmp/discord-msg.md                                  # 3808
+```
+
+Aim for ≥5% headroom below the limit so trivial edits don't push you over.
+The target surface's own counter is authoritative; `wc -m` agrees with
+Discord to within a handful of characters (typically CRLF-vs-LF or
+grapheme-cluster edge cases).
+
+When presenting the final text to the user for copy-paste, render it inside
+a 4-backtick fence (` ```` `) — not 3-backtick. Inner triple-backticks in
+the message (code snippets) will terminate a 3-backtick outer fence and
+produce a fragmented copy-block. The 4-backtick outer fence keeps it as one
+contiguous copy region.
+
 ## Architectural primitives we want to get right
 
 These five architectural commitments are load-bearing for the pitch's defensibility.
@@ -857,6 +894,34 @@ proposal + every rigor verdict + every user-reject is content-hashed
 and persisted via the `strategy_proposals` table (T-PE.8 / [issue
 #165](https://github.com/a-apin/archimedes-arcadia/issues/165)) so the
 library demonstrably *compounds* rather than restarting per session.
+
+### 6. Security and trust ship with the product, not after (added 2026-05-28)
+
+Codified after Dan's stance during the post-hackathon security architecture
+work: every person who visits the live site — friends Dan is sharing the URL
+with, judges, opportunistic GitHub-clone-derived visitors, eventual real
+users — gets the **same** security posture. No "we'll add it when there's
+real traffic," no "demo project so we'll cut corners," no waiting for a
+revenue milestone before turning on Aurora encryption / WAF / OIDC / SIWE
+hardening.
+
+Practical implications for Claude sessions:
+- **Don't suggest deferring security work** for cost or scope reasons. If a
+  security improvement is the right architecture, recommend it; Dan will
+  cover the cost personally if needed (his explicit offer, 2026-05-28).
+- **Don't accept "we don't have real users yet" as justification** for not
+  shipping a security fix. The bar is "anyone visiting the live site," not
+  "anyone who matters commercially."
+- When cost-vs-security tension surfaces (e.g., #436's $133→$42/mo
+  teardown proposal), surface it but lean toward keeping security live;
+  the human will make the call.
+- This is a *values* commitment, distinct from the architectural primitives
+  above. Those describe what we build; this describes when we ship it.
+
+The corollary for engineering effort: security-relevant PRs (auth, secrets,
+permissions, vault contracts, anything PII-adjacent) deserve more careful
+review than feature work, even when the diff looks small. The cost of a
+miss compounds with every visitor.
 
 ## Known risks
 
