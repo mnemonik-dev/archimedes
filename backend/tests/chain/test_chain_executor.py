@@ -12,14 +12,14 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
-
 from archimedes.chain.executor import (
     MIN_HEALTHY_LIQUIDITY_USDC,
     ChainExecutor,
     InsufficientLiquidityError,
+    TradeRevertedError,
 )
 from archimedes.models.portfolio import TradeDirection, TradeOrder
-
+from hexbytes import HexBytes
 
 # ── Fixtures ──────────────────────────────────────────────────
 
@@ -178,11 +178,15 @@ class TestExecuteTrades:
         """execute_trades propagates InsufficientLiquidityError."""
         trade = _make_trade()
 
-        with patch.object(
-            executor, "_validate_trade_liquidity", new=AsyncMock(side_effect=InsufficientLiquidityError("thin pool"))
+        with (
+            patch.object(
+                executor,
+                "_validate_trade_liquidity",
+                new=AsyncMock(side_effect=InsufficientLiquidityError("thin pool")),
+            ),
+            pytest.raises(InsufficientLiquidityError),
         ):
-            with pytest.raises(InsufficientLiquidityError):
-                asyncio.run(executor.execute_trades("0xvault", [trade]))
+            asyncio.run(executor.execute_trades("0xvault", [trade]))
 
     def test_circle_signer_path(self, executor, mock_loader):
         """When Circle signer is configured, uses circle_signer.execute_contract.
@@ -219,6 +223,318 @@ class TestExecuteTrades:
             executor._mock_cc.settings.agent_account = None
 
             with pytest.raises(RuntimeError, match="No agent account"):
+                asyncio.run(executor.execute_trades("0xvault", [trade]))
+
+
+# ── execute_trades depth coverage (#408) ──────────────────────
+
+
+class _Awaitable:
+    """A re-awaitable value wrapper. Needed because the executor awaits
+    `chain_client.w3.eth.gas_price` like a property, which means the
+    attribute itself must be awaitable. AsyncMock instances are only
+    awaitable when *called*, not on attribute access, so they don't fit
+    this access pattern. This helper wraps any value so `await wrapper`
+    returns it, and is safe to await repeatedly.
+    """
+
+    def __init__(self, value):
+        self._value = value
+
+    def __await__(self):
+        async def _coro():
+            return self._value
+
+        return _coro().__await__()
+
+
+def _install_raw_key_eth(executor, tx_hash):
+    """Replace `executor._mock_cc.w3.eth` with a minimal real namespace that
+    correctly supports the production raw-key path's await pattern.
+
+    Returns the namespace so callers can override individual attrs per-test
+    (e.g. swap send_raw_transaction for a side_effect-raising async fn).
+    """
+    import types
+
+    async def _get_tx_count(addr, when=None):
+        return 1
+
+    async def _send_raw_transaction(raw):
+        return tx_hash
+
+    async def _wait_for_receipt(wait_arg):  # not used by these tests — _confirm_receipt is mocked
+        return {"status": 1}
+
+    ns = types.SimpleNamespace(
+        chain_id=5042002,
+        gas_price=_Awaitable(1_000_000_000),
+        get_transaction_count=_get_tx_count,
+        send_raw_transaction=_send_raw_transaction,
+        wait_for_transaction_receipt=_wait_for_receipt,
+    )
+    executor._mock_cc.w3.eth = ns
+    return ns
+
+
+def _install_raw_key_vault(mock_loader, mock_account):
+    """Wire up vault.functions.rebalance(...).build_transaction(...) to
+    return a plausible tx dict via real async functions (not AsyncMock),
+    because the AsyncMock-on-attribute pattern bites the same way
+    gas_price does.
+    """
+
+    async def _build_transaction(tx_dict):
+        return {"from": mock_account.address, "nonce": 1, "gas": 2_000_000, **tx_dict}
+
+    inner = MagicMock()
+    inner.build_transaction = _build_transaction
+    mock_loader.vault.return_value.functions.rebalance.return_value = inner
+
+
+class TestExecuteTradesDepth:
+    """Scenario-coverage matrix for execute_trades (#408).
+
+    Complements TestExecuteTrades above by exercising the failure modes
+    and signer-path branches that previously went uncovered. Production
+    path uses HexBytes from web3's send_raw_transaction; the Circle
+    path uses str. Both must be tested.
+    """
+
+    def test_empty_trades_no_amm_calls(self, executor, mock_loader):
+        """Empty trades list — _validate_trade_liquidity sees no synth legs,
+        so no AMM getPool calls fire. The rebalance() invocation does
+        proceed with empty arrays (current behavior — not short-circuited).
+        """
+        with (
+            patch.object(executor, "_confirm_receipt", new=AsyncMock(return_value="0xtxhash")),
+            patch("archimedes.chain.executor.circle_signer") as mock_signer,
+        ):
+            mock_signer.is_configured = True
+            mock_signer.execute_contract = AsyncMock(return_value="0xtxhash")
+            result = asyncio.run(executor.execute_trades("0xvault", []))
+            assert result == ["0xtxhash"]
+            mock_loader.amm_router.functions.getPool.assert_not_called()
+
+    def test_all_usdc_legs_filtered_no_pool_calls(self, executor, mock_loader):
+        """All-USDC trades filtered out (#399) — no AMM `getPool` invocations."""
+        usdc_trade = _make_trade(
+            symbol="USDC",
+            token_address="0x3600000000000000000000000000000000000000",
+        )
+        with (
+            patch.object(executor, "_confirm_receipt", new=AsyncMock(return_value="0xtxhash")),
+            patch("archimedes.chain.executor.circle_signer") as mock_signer,
+        ):
+            mock_signer.is_configured = True
+            mock_signer.execute_contract = AsyncMock(return_value="0xtxhash")
+            asyncio.run(executor.execute_trades("0xvault", [usdc_trade]))
+            # _validate_trade_liquidity should have seen an empty list after filtering
+            mock_loader.amm_router.functions.getPool.assert_not_called()
+
+    def test_sell_direction_calls_usdc_value_to_token_raw(self, executor, mock_loader):
+        """SELL trades route through _usdc_value_to_token_raw for decimal conversion.
+
+        Covers lines 216-223 of execute_trades that the existing tests
+        (all-BUY) didn't exercise.
+        """
+        trade = _make_trade(direction=TradeDirection.SELL)
+
+        with (
+            patch.object(executor, "_validate_trade_liquidity", new=AsyncMock()),
+            patch.object(
+                executor,
+                "_usdc_value_to_token_raw",
+                new=AsyncMock(return_value=5_000_000_000_000_000_000),
+            ) as mock_convert,
+            patch.object(executor, "_confirm_receipt", new=AsyncMock(return_value="0xtxhash")),
+            patch("archimedes.chain.executor.circle_signer") as mock_signer,
+        ):
+            mock_signer.is_configured = True
+            mock_signer.execute_contract = AsyncMock(return_value="0xtxhash")
+            asyncio.run(executor.execute_trades("0xvault", [trade]))
+            # SELL branch converts USDC value → token raw amount
+            mock_convert.assert_called_once()
+
+    def test_mixed_usdc_and_synth_only_synth_validated(self, executor, mock_loader):
+        """Mixed USDC+synth: synth leg gets pool-checked, USDC leg filtered."""
+        usdc_trade = _make_trade(
+            symbol="USDC",
+            token_address="0x3600000000000000000000000000000000000000",
+        )
+        synth_trade = _make_trade()  # sTSLA — non-USDC
+        pool_addr = "0x38c3A5f52044a72C9cC11Ce621f1bfD7754BF8Bd"
+        mock_loader.amm_router.functions.getPool.return_value.call = AsyncMock(return_value=pool_addr)
+        mock_pool = mock_loader.amm_pool.return_value
+        mock_pool.functions.reserve0.return_value.call = AsyncMock(return_value=10_000_000_000)
+        mock_pool.functions.reserve1.return_value.call = AsyncMock(return_value=1_000_000_000_000_000)
+        mock_pool.functions.token0.return_value.call = AsyncMock(
+            return_value="0x3600000000000000000000000000000000000000"
+        )
+        with (
+            patch.object(executor, "_confirm_receipt", new=AsyncMock(return_value="0xtxhash")),
+            patch("archimedes.chain.executor.circle_signer") as mock_signer,
+        ):
+            mock_signer.is_configured = True
+            mock_signer.execute_contract = AsyncMock(return_value="0xtxhash")
+            asyncio.run(executor.execute_trades("0xvault", [usdc_trade, synth_trade]))
+            # getPool fires exactly once — for the synth leg only
+            mock_loader.amm_router.functions.getPool.assert_called_once()
+
+    def test_circle_path_propagates_revert(self, executor, mock_loader):
+        """Circle signer path: receipt revert raises TradeRevertedError."""
+        trade = _make_trade()
+        with (
+            patch.object(executor, "_validate_trade_liquidity", new=AsyncMock()),
+            patch.object(
+                executor,
+                "_confirm_receipt",
+                new=AsyncMock(side_effect=TradeRevertedError("Rebalance tx reverted on-chain: 0xabc")),
+            ),
+            patch("archimedes.chain.executor.circle_signer") as mock_signer,
+        ):
+            mock_signer.is_configured = True
+            mock_signer.execute_contract = AsyncMock(return_value="0xabc")
+            with pytest.raises(TradeRevertedError, match="reverted on-chain"):
+                asyncio.run(executor.execute_trades("0xvault", [trade]))
+
+    def test_circle_path_propagates_rate_limit_error(self, executor, mock_loader):
+        """Circle signer raising a rate-limit-shaped exception propagates."""
+        trade = _make_trade()
+        with (
+            patch.object(executor, "_validate_trade_liquidity", new=AsyncMock()),
+            patch("archimedes.chain.executor.circle_signer") as mock_signer,
+        ):
+            mock_signer.is_configured = True
+            mock_signer.execute_contract = AsyncMock(
+                side_effect=RuntimeError("Rate limit exceeded: 429 Too Many Requests")
+            )
+            with pytest.raises(RuntimeError, match="Rate limit"):
+                asyncio.run(executor.execute_trades("0xvault", [trade]))
+
+    def test_circle_path_propagates_network_failure(self, executor, mock_loader):
+        """Network failure (ConnectionError-shaped) propagates from the signer."""
+        trade = _make_trade()
+        with (
+            patch.object(executor, "_validate_trade_liquidity", new=AsyncMock()),
+            patch("archimedes.chain.executor.circle_signer") as mock_signer,
+        ):
+            mock_signer.is_configured = True
+            mock_signer.execute_contract = AsyncMock(side_effect=ConnectionError("upstream RPC unreachable"))
+            with pytest.raises(ConnectionError, match="RPC unreachable"):
+                asyncio.run(executor.execute_trades("0xvault", [trade]))
+
+    def test_raw_key_path_succeeds_with_hexbytes_tx_hash(self, executor, mock_loader):
+        """Raw-key signer path: send_raw_transaction returns HexBytes; flow completes.
+
+        This is the production raw-key path that previously went uncovered
+        (per the #408 issue body). The HexBytes return type is what web3.py
+        actually emits from send_raw_transaction.
+        """
+        trade = _make_trade()
+        hex_hash = HexBytes("0x" + "ab" * 32)
+
+        mock_account = MagicMock()
+        mock_account.address = "0xAGENT0000000000000000000000000000000000ab"
+        signed = MagicMock()
+        signed.raw_transaction = b"\x01\x02\x03"
+        mock_account.sign_transaction.return_value = signed
+
+        executor._mock_cc.settings.agent_account = mock_account
+        _install_raw_key_eth(executor, hex_hash)
+        _install_raw_key_vault(mock_loader, mock_account)
+
+        with (
+            patch.object(executor, "_validate_trade_liquidity", new=AsyncMock()),
+            patch.object(executor, "_confirm_receipt", new=AsyncMock(return_value="0x" + "ab" * 32)) as mock_confirm,
+            patch("archimedes.chain.executor.circle_signer") as mock_signer,
+        ):
+            mock_signer.is_configured = False
+            result = asyncio.run(executor.execute_trades("0xvault", [trade]))
+            assert result == ["0x" + "ab" * 32]
+            # Critical: _confirm_receipt must have been called with HexBytes (not str)
+            mock_confirm.assert_called_once()
+            (call_arg,) = mock_confirm.call_args.args
+            assert isinstance(call_arg, (bytes, bytearray)), (
+                f"Production raw-key path passes HexBytes to _confirm_receipt; got {type(call_arg).__name__}"
+            )
+
+    def test_raw_key_path_propagates_revert(self, executor, mock_loader):
+        """Raw-key path: receipt revert raises TradeRevertedError."""
+        trade = _make_trade()
+        hex_hash = HexBytes("0x" + "cd" * 32)
+
+        mock_account = MagicMock()
+        mock_account.address = "0xAGENT0000000000000000000000000000000000cd"
+        mock_account.sign_transaction.return_value = MagicMock(raw_transaction=b"\x04\x05\x06")
+
+        executor._mock_cc.settings.agent_account = mock_account
+        _install_raw_key_eth(executor, hex_hash)
+        _install_raw_key_vault(mock_loader, mock_account)
+
+        with (
+            patch.object(executor, "_validate_trade_liquidity", new=AsyncMock()),
+            patch.object(
+                executor,
+                "_confirm_receipt",
+                new=AsyncMock(side_effect=TradeRevertedError("Rebalance tx reverted on-chain: 0xcd")),
+            ),
+            patch("archimedes.chain.executor.circle_signer") as mock_signer,
+        ):
+            mock_signer.is_configured = False
+            with pytest.raises(TradeRevertedError):
+                asyncio.run(executor.execute_trades("0xvault", [trade]))
+
+    def test_raw_key_path_propagates_timeout(self, executor, mock_loader):
+        """Raw-key path: timeout during receipt wait propagates."""
+        trade = _make_trade()
+        hex_hash = HexBytes("0x" + "ef" * 32)
+
+        mock_account = MagicMock()
+        mock_account.address = "0xAGENT0000000000000000000000000000000000ef"
+        mock_account.sign_transaction.return_value = MagicMock(raw_transaction=b"\x07\x08\x09")
+
+        executor._mock_cc.settings.agent_account = mock_account
+        _install_raw_key_eth(executor, hex_hash)
+        _install_raw_key_vault(mock_loader, mock_account)
+
+        with (
+            patch.object(executor, "_validate_trade_liquidity", new=AsyncMock()),
+            patch.object(
+                executor,
+                "_confirm_receipt",
+                new=AsyncMock(side_effect=TimeoutError("receipt wait timed out")),
+            ),
+            patch("archimedes.chain.executor.circle_signer") as mock_signer,
+        ):
+            mock_signer.is_configured = False
+            with pytest.raises(TimeoutError, match="timed out"):
+                asyncio.run(executor.execute_trades("0xvault", [trade]))
+
+    def test_raw_key_path_propagates_network_failure_on_send(self, executor, mock_loader):
+        """Raw-key path: send_raw_transaction failure propagates before receipt-wait."""
+        trade = _make_trade()
+
+        mock_account = MagicMock()
+        mock_account.address = "0xAGENT0000000000000000000000000000000000ff"
+        mock_account.sign_transaction.return_value = MagicMock(raw_transaction=b"\x0a\x0b\x0c")
+
+        executor._mock_cc.settings.agent_account = mock_account
+        eth_ns = _install_raw_key_eth(executor, HexBytes("0x" + "ff" * 32))
+        _install_raw_key_vault(mock_loader, mock_account)
+
+        # Override send_raw_transaction to raise instead of returning a hash
+        async def _failing_send(raw):
+            raise ConnectionError("RPC down")
+
+        eth_ns.send_raw_transaction = _failing_send
+
+        with (
+            patch.object(executor, "_validate_trade_liquidity", new=AsyncMock()),
+            patch("archimedes.chain.executor.circle_signer") as mock_signer,
+        ):
+            mock_signer.is_configured = False
+            with pytest.raises(ConnectionError, match="RPC down"):
                 asyncio.run(executor.execute_trades("0xvault", [trade]))
 
 
