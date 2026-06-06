@@ -30,7 +30,6 @@ from archimedes.api.selection_bias_routes import (
 )
 from httpx import ASGITransport, AsyncClient
 
-
 # ── Hermetic DB fixture ────────────────────────────────────────────────
 
 
@@ -460,7 +459,7 @@ async def test_gate_endpoint_empty_provider(monkeypatch):
     from archimedes.api import selection_bias_routes
     from archimedes.main import app
 
-    monkeypatch.setattr(selection_bias_routes._provider, "list_strategies", lambda: [])
+    monkeypatch.setattr(selection_bias_routes._provider, "list_strategies", list)
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get("/api/selection-bias/gate")
