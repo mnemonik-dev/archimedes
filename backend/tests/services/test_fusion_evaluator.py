@@ -14,12 +14,18 @@ separate piece of work).
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from archimedes.services.fusion_evaluator import (
     BacktestMetrics,
     apply_rigor_gate,
     evaluate_fusion_spec,
+    is_admissible_source,
+    run_dsl_backtest,
 )
-from archimedes.services.strategy_dsl import FABER_2007_SPEC
+from archimedes.services.strategy_dsl import FABER_2007_SPEC, validate_strategy_spec
+
+_SPY_FIXTURE = Path(__file__).parent.parent / "fixtures" / "spy_ohlcv_2004_2026.csv"
 
 
 class TestFixtureFusionToLibrary:
@@ -292,3 +298,68 @@ class TestFusionWithVariantsComputesRealPbo:
             f"Expected high PBO (> 0.5) for IS/OOS reversal pattern, got {verdict.pbo_score}"
         )
         assert verdict.passing is False, f"Rigor gate must fail when PBO > 0.5, but passing={verdict.passing}"
+
+
+class TestDataProvenanceGate:
+    """A strategy can only be admissible if its rigor was computed on real data."""
+
+    def test_is_admissible_source_helper(self):
+        assert is_admissible_source("csv:spy_ohlcv_2004_2026.csv") is True
+        assert is_admissible_source("provided") is True
+        assert is_admissible_source("synthetic") is False
+
+    def test_synthetic_run_is_labeled_and_not_admissible(self):
+        # No data feed → synthetic prices → must never be Tier-1 admissible,
+        # even if the statistics happen to "pass".
+        result = evaluate_fusion_spec(FABER_2007_SPEC)
+        assert result.backtest is not None
+        assert result.backtest.data_source == "synthetic"
+        assert result.rigor is not None
+        assert result.rigor.data_source == "synthetic"
+        assert result.rigor.admissible is False
+        assert result.admissible is False
+
+    def test_real_csv_run_is_labeled_real(self):
+        spec = validate_strategy_spec(FABER_2007_SPEC)
+        metrics = run_dsl_backtest(spec, data_csv_path=_SPY_FIXTURE)
+        assert metrics.data_source == "csv:spy_ohlcv_2004_2026.csv"
+
+    def test_real_data_passing_strategy_is_admissible(self):
+        spec = validate_strategy_spec(FABER_2007_SPEC)
+        metrics = run_dsl_backtest(spec, data_csv_path=_SPY_FIXTURE)
+        verdict = apply_rigor_gate(metrics)
+        # Faber on real SPY passes; on real data that makes it admissible.
+        assert verdict.passing is True
+        assert verdict.admissible is True
+        assert verdict.data_source.startswith("csv:")
+
+    def test_provenance_override_revokes_admissibility(self):
+        # Take a passing real-data run and re-judge it as if the data were
+        # synthetic — admissibility must flip off even though passing stays on.
+        spec = validate_strategy_spec(FABER_2007_SPEC)
+        metrics = run_dsl_backtest(spec, data_csv_path=_SPY_FIXTURE)
+        as_synthetic = apply_rigor_gate(metrics, data_source="synthetic")
+        assert as_synthetic.passing is True
+        assert as_synthetic.admissible is False
+
+    def test_admissibility_requires_passing(self):
+        # Real data but a flat (zero-return) curve → not passing → not admissible.
+        flat = [100_000.0] * 600
+        metrics = BacktestMetrics(
+            sharpe_ratio=0.0,
+            sortino_ratio=0.0,
+            max_drawdown=0.0,
+            cagr=0.0,
+            calmar_ratio=0.0,
+            win_rate=0.0,
+            total_trades=0,
+            avg_holding_period_days=0.0,
+            equity_curve=flat,
+            monthly_returns=[],
+            backtest_start=None,
+            backtest_end=None,
+            data_source="csv:real.csv",
+        )
+        verdict = apply_rigor_gate(metrics)
+        assert verdict.passing is False
+        assert verdict.admissible is False
