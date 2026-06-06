@@ -98,11 +98,11 @@ all downstream prompt outputs without re-explaining the project each time.
   doesn't need one for hackathon scope).
 - **Add fonts, logos and assets:** none externally. The logo is what Prompt 1 below
   generates; fonts are open-source web fonts named in the design system below.
-- **Do NOT upload `ui-mockups/`.** Those are retired static-HTML prototypes from Day
-  1–2 that the team kept only for archival reference. Uploading them would actively
-  steer Claude Design toward stale visuals. The "any other notes" field below tells
-  Claude Design to study `ui/` (the live React app) and ignore `ui-mockups/` — that's
-  the correct mental model.
+- **Upload only `ui/` (the live React app) for visual reference.** The retired
+  Day 1–2 static-HTML prototypes (`ui-mockups/`) were removed from the tree in
+  issue #461, so there is no stale-visual directory left to accidentally upload.
+  The "any other notes" field below points Claude Design at `ui/` — that's the
+  correct mental model.
 
 ### Field: Company name and blurb
 
@@ -136,8 +136,8 @@ Pro), modern sans body (Inter or Geist Sans), monospace for hashes and addresses
 (JetBrains Mono or Geist Mono).
 
 In the linked repo: the live frontend is `ui/` (React 19 + Vite 8 + viem 2.48).
-Ignore `ui-mockups/` — that's a retired set of static-HTML prototypes from Day 1–2,
-kept only for archival reference. Live testnet deploy: https://archimedes-arc.app/.
+The retired Day 1–2 static-HTML prototypes (`ui-mockups/`) were removed in issue
+#461, so `ui/` is the only frontend to study. Live testnet deploy: https://archimedes-arc.app/.
 Architecture diagram: `docs/architecture-diagram.html`. Curated per-asset design
 prompts: `docs/claude-design-prompts.md`. Pitch + demo context:
 `docs/demo-script-pitch-deck-outline.md`.
