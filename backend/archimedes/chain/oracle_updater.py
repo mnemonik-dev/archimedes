@@ -213,7 +213,13 @@ class OracleUpdater:
                     if data.empty:
                         continue
                     if len(symbols) == 1:
-                        price = float(data["Close"].iloc[-1])
+                        close = data["Close"]
+                        # yfinance >=1.0 returns a 1-column DataFrame (MultiIndex
+                        # columns) for single-ticker downloads; squeeze to a Series
+                        # before taking the last value.
+                        if hasattr(close, "columns"):
+                            close = close.iloc[:, 0]
+                        price = float(close.iloc[-1])
                     else:
                         close = data["Close"]
                         if yf_ticker in close.columns:
@@ -270,7 +276,12 @@ class OracleUpdater:
 
             data = await asyncio.to_thread(yf.download, symbol, period="1d", interval="1m", progress=False)
             if not data.empty:
-                return float(data["Close"].iloc[-1])
+                close = data["Close"]
+                # yfinance >=1.0 returns a 1-column DataFrame for single-ticker
+                # downloads; squeeze to a Series before taking the last value.
+                if hasattr(close, "columns"):
+                    close = close.iloc[:, 0]
+                return float(close.iloc[-1])
         except Exception as e:
             logger.warning(f"Failed to fetch {symbol}: {e}")
         return None
