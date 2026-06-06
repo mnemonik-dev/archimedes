@@ -291,9 +291,9 @@ they actually shipped (Day 4):
   `interfaces/` (frozen Protocol classes), `models/` (Strategy, BacktestResult,
   ReasoningTrace, Portfolio dataclasses), `services/` (LocalStrategyProvider etc.)
 - **Frontend:** React 19 + Vite 8 + viem 2.48 + plain CSS. Lives at [`ui/`](ui/) (the
-  earlier `ui-mockups/` static-HTML directory is now retired but still in-tree).
-  Components shipped: `Layout`, `WalletConnect` (MetaMask / Coinbase / generic browser
-  wallet), `Trade`
+  earlier `ui-mockups/` static-HTML directory was retired and removed from the tree in
+  issue #461). Components shipped: `Layout`, `WalletConnect` (MetaMask / Coinbase /
+  generic browser wallet), `Trade`
 - **Analytics engine:** [`analytics-engine/`](analytics-engine/) — uv-managed Python
   package with the backtrader runner. Loads strategy files from
   [`analytics-engine/strategies/`](analytics-engine/strategies/)
