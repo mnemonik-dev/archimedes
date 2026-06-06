@@ -881,21 +881,26 @@ class TestRunRigorGatePaths:
         result = run_rigor_gate("s", _RETURNS_80, num_trials=7)
         assert result.num_trials == 7
 
+
 # ─── CPCV Edge Cases ──────────────────────────────────────────────────
 
 from archimedes.services.rigor_evaluator import compute_cpcv_oos_sharpe
 import numpy as np
 
+
 def test_cpcv_returns_none_for_empty_array():
     assert compute_cpcv_oos_sharpe([]) is None
 
+
 def test_cpcv_returns_none_for_single_asset_zero_variance():
-    assert compute_cpcv_oos_sharpe([[0.01]*100] * 15) is None
+    assert compute_cpcv_oos_sharpe([[0.01] * 100] * 15) is None
+
 
 def test_cpcv_returns_none_for_infinite_values():
     # Numpy calculations on inf cause warnings and usually return nan/inf std
-    res = compute_cpcv_oos_sharpe([[0.01]*50 + [np.inf]*50] * 15)
+    res = compute_cpcv_oos_sharpe([[0.01] * 50 + [np.inf] * 50] * 15)
     assert res is None or res["mean_oos_sharpe"] is None or math.isnan(res["mean_oos_sharpe"])
 
+
 def test_cpcv_returns_none_for_insufficient_splits():
-    assert compute_cpcv_oos_sharpe([[0.01, -0.01]*2] * 15, n_groups=6, test_groups=2) is None
+    assert compute_cpcv_oos_sharpe([[0.01, -0.01] * 2] * 15, n_groups=6, test_groups=2) is None

@@ -321,7 +321,7 @@ def compute_cpcv_oos_sharpe(
         splits = cv_splits
     else:
         splits = list(combinations(range(n_groups), test_groups))
-        
+
     if S != len(splits):
         return None
 
@@ -331,7 +331,7 @@ def compute_cpcv_oos_sharpe(
             return None
     else:
         bounds = np.array_split(np.arange(T), n_groups)
-        
+
     n_paths = math.comb(n_groups - 1, test_groups - 1)
 
     paths = np.zeros((n_paths, T))
