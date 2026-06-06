@@ -38,8 +38,9 @@ _ANNUALIZATION = 252
 
 
 def compute_dsr(
-    daily_returns: list[float],
+    daily_returns: list[float] | np.ndarray,
     num_trials: int,
+    average_correlation: float = 0.0,
 ) -> tuple[float | None, float | None]:
     """Deflated Sharpe Ratio (Bailey & López de Prado 2014).
 
@@ -52,6 +53,9 @@ def compute_dsr(
             if this is the only strategy ever evaluated — no correction
             will be applied. The orchestrator should pass
             len(strategy_library) so the correction is meaningful.
+        average_correlation: The average pairwise correlation between the
+            trials. Used to compute the effective number of independent
+            trials (Bailey-López de Prado variance-of-trials correlation model).
 
     Returns:
         (deflated_sharpe_ratio, dsr_p_value)
@@ -62,6 +66,9 @@ def compute_dsr(
             Gate threshold is 0.95 per passes_rigor_gate.
         Both are None if data is insufficient (T < 4) or degenerate.
     """
+    if num_trials < 1:
+        raise ValueError("num_trials must be >= 1")
+
     arr = np.asarray(daily_returns, dtype=float)
     T = len(arr)
     if T < 4:
@@ -84,7 +91,11 @@ def compute_dsr(
     # shift the denominator by a constant (3/4)·ŜR² and bias every DSR.
     gamma_4 = float(sp_kurtosis(arr, fisher=False))  # raw (Pearson) kurtosis
 
-    dsr, p_val = _dsr_from_stats(SR_hat, T, gamma_3, gamma_4, num_trials)
+    if math.isnan(average_correlation):
+        average_correlation = 0.0
+    average_correlation = max(0.0, min(1.0, average_correlation))
+
+    dsr, p_val = _dsr_from_stats(SR_hat, T, gamma_3, gamma_4, num_trials, average_correlation)
     return dsr, p_val
 
 
@@ -94,6 +105,7 @@ def _dsr_from_stats(
     gamma_3: float,
     gamma_4: float,
     N: int,
+    average_correlation: float = 0.0,
 ) -> tuple[float | None, float | None]:
     """Core DSR formula — exposed for direct unit-testing against spec cases.
 
@@ -105,6 +117,7 @@ def _dsr_from_stats(
             for normal returns. This matches Bailey-LdP (2014) eq. 8 directly;
             do NOT pass Fisher excess kurtosis here (it would bias the denom).
         N: Number of trials in the selection set.
+        average_correlation: Correlation scalar for variance of trials.
 
     Returns:
         (deflated_sharpe_annualized, dsr_p_value) or (None, None).
@@ -122,6 +135,11 @@ def _dsr_from_stats(
         phi_inv_1 = float(norm.ppf(1.0 - 1.0 / N))
         phi_inv_2 = float(norm.ppf(1.0 - 1.0 / (N * math.e)))
         E_max_N = (1.0 - _EULER_MASCHERONI) * phi_inv_1 + _EULER_MASCHERONI * phi_inv_2
+
+        # Apply Bailey-López de Prado correlation adjustment:
+        # E[max] of correlated variables scales by sqrt(1 - rho)
+        if average_correlation > 0.0:
+            E_max_N *= math.sqrt(max(0.0, 1.0 - average_correlation))
 
     # SR_zero: expected best-of-N under the null, scaled to per-bar variance
     # (under iid normal returns, per-bar SR has variance 1/(T-1))
@@ -314,15 +332,12 @@ def compute_cpcv_oos_sharpe(
     S, T = arr.shape
     if n_groups < 2 or not (1 <= test_groups < n_groups):
         return None
-    if T < n_groups * 5:  # need >= ~5 bars per block to form a Sharpe
+    if n_groups * 5 > T:  # need >= ~5 bars per block to form a Sharpe
         return None
 
-    if cv_splits is not None:
-        splits = cv_splits
-    else:
-        splits = list(combinations(range(n_groups), test_groups))
+    splits = cv_splits if cv_splits is not None else list(combinations(range(n_groups), test_groups))
 
-    if S != len(splits):
+    if len(splits) != S:
         return None
 
     if test_bounds is not None:
