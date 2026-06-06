@@ -13,6 +13,15 @@ Flow 10: LP dashboard (add/remove liquidity UI)
 Flow 11: Strategy explorer with paper citations
 """
 
+import pytest
+
+# These flows are aspirational specs beyond the hard commit line. Most of the
+# test bodies are intentionally empty (docstring-only), so without this marker
+# they would report as *passing* — false-green coverage. Skip the whole module
+# so they surface honestly as "not yet implemented" until someone picks them up
+# and drops the marker (or converts an individual test to a real implementation).
+pytestmark = pytest.mark.skip(reason="Aspirational flows 7–11 — specs only, not yet implemented (#444)")
+
 
 # ═══════════════════════════════════════════════════════════════
 # FLOW 7: Community Vault Creation [ASPIRATIONAL]
