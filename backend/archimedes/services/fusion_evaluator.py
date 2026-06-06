@@ -49,6 +49,10 @@ class BacktestMetrics:
     monthly_returns: list[float]
     backtest_start: date | None
     backtest_end: date | None
+    # Provenance of the price series the metrics were computed on. "synthetic"
+    # means random.gauss noise (dev/test only); "csv:<name>" / "provided" mean
+    # real OHLCV. Rigor metrics from a "synthetic" run are NOT admissible.
+    data_source: str = "synthetic"
 
 
 @dataclass(frozen=True)
@@ -62,6 +66,11 @@ class RigorVerdict:
     oos_sharpe: float | None
     look_ahead_clean: bool
     num_trials: int
+    # Provenance carried through from the backtest. ``admissible`` is the
+    # honest gate: a strategy can only be certified Tier-1 if it both passes
+    # the statistics AND those statistics were computed on real market data.
+    data_source: str = "synthetic"
+    admissible: bool = False
 
 
 @dataclass(frozen=True)
@@ -77,11 +86,39 @@ class FusionEvalResult:
     def success(self) -> bool:
         return self.error is None and self.backtest is not None
 
+    @property
+    def admissible(self) -> bool:
+        """True only if rigor passed AND on real (non-synthetic) market data."""
+        return self.rigor is not None and self.rigor.admissible
+
 
 # ── Backtest runner ───────────────────────────────────────────────────
 
 _DEFAULT_CASH = 100_000.0
 _DEFAULT_TX_BPS = 10
+
+# The only price-data provenance that is NOT admissible for Tier-1 rigor
+# certification. Everything else (real CSV, an explicitly provided feed) is
+# trusted to be real market data — the caller owns that contract.
+_SYNTHETIC_SOURCE = "synthetic"
+
+
+def _data_source_label(data_feed: Any, data_csv_path: str | Path | None) -> str:
+    """Honest provenance label for the price series a backtest ran on."""
+    if data_feed is not None:
+        return "provided"
+    if data_csv_path is not None:
+        return f"csv:{Path(data_csv_path).name}"
+    return _SYNTHETIC_SOURCE
+
+
+def is_admissible_source(data_source: str) -> bool:
+    """True unless the metrics were computed on synthetic (random) prices.
+
+    Rigor numbers from synthetic data describe noise, not a strategy — they
+    must never be the basis for Tier-1 admission.
+    """
+    return data_source != _SYNTHETIC_SOURCE
 
 
 def run_dsl_backtest(
@@ -104,6 +141,15 @@ def run_dsl_backtest(
     strategy_cls = interpret_spec(spec)
     cerebro = bt.Cerebro(stdstats=False)
     cerebro.addstrategy(strategy_cls)
+
+    data_source = _data_source_label(data_feed, data_csv_path)
+    if data_source == _SYNTHETIC_SOURCE:
+        logger.warning(
+            "run_dsl_backtest[%s] is using SYNTHETIC price data — rigor metrics "
+            "from this run are NOT admissible for Tier-1 certification. Pass "
+            "data_csv_path or data_feed with real OHLCV for an admissible result.",
+            spec.name,
+        )
 
     if data_feed is None:
         data_feed = _csv_data_feed(Path(data_csv_path)) if data_csv_path is not None else _synthetic_data()
@@ -170,6 +216,7 @@ def run_dsl_backtest(
         monthly_returns=[round(m, 4) for m in monthly_returns],
         backtest_start=date(2004, 1, 2) if data_feed is None else None,
         backtest_end=date(2026, 4, 30) if data_feed is None else None,
+        data_source=data_source,
     )
 
 
@@ -241,6 +288,7 @@ def _run_variant_backtest(
     """Run a single variant backtest given an already-interpreted strategy class."""
     import backtrader as bt
 
+    data_source = _data_source_label(data_feed, data_csv_path)
     cerebro = bt.Cerebro(stdstats=False)
     cerebro.addstrategy(strategy_cls)
 
@@ -305,6 +353,7 @@ def _run_variant_backtest(
         monthly_returns=[round(m, 4) for m in monthly_returns],
         backtest_start=date(2004, 1, 2) if data_csv_path is None else None,
         backtest_end=date(2026, 4, 30) if data_csv_path is None else None,
+        data_source=data_source,
     )
 
 
@@ -315,6 +364,7 @@ def apply_rigor_gate(
     metrics: BacktestMetrics,
     num_trials: int = 10,
     variants_metrics: dict[str, BacktestMetrics] | None = None,
+    data_source: str | None = None,
 ) -> RigorVerdict:
     """Apply rigor gate to fusion backtest metrics.
 
@@ -365,6 +415,18 @@ def apply_rigor_gate(
 
     passing = metrics.sharpe_ratio > 0.0 and dsr_pass and look_ahead_clean and (pbo_score is None or pbo_score < 0.5)
 
+    # Provenance gate: a strategy is only admissible for Tier-1 if it passes
+    # the statistics AND those statistics were computed on real market data.
+    # Default to the metrics' own provenance unless the caller overrides it.
+    source = data_source if data_source is not None else metrics.data_source
+    admissible = passing and is_admissible_source(source)
+    if passing and not admissible:
+        logger.warning(
+            "rigor verdict is PASSING but NOT admissible — metrics came from "
+            "non-real data source %r. Refusing Tier-1 certification.",
+            source,
+        )
+
     return RigorVerdict(
         passing=passing,
         dsr=dsr,
@@ -373,6 +435,8 @@ def apply_rigor_gate(
         oos_sharpe=oos_sharpe,
         look_ahead_clean=look_ahead_clean,
         num_trials=num_trials,
+        data_source=source,
+        admissible=admissible,
     )
 
 
