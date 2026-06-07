@@ -117,15 +117,12 @@ async def evaluate_rigor_gate():
         code = _load_strategy_code(s.strategy_code_path) if s.strategy_code_path else None
         strategy_code_map[s.id] = code
 
-    # Fallback: if no persisted data, try stub-based synthetic returns
-    # (graceful degradation for strategies not yet backtested)
-    for s in strategies:
-        if (s.id not in returns_by_strategy or len(returns_by_strategy[s.id]) < 10) and s.stub_sharpe is not None:
-            returns_by_strategy[s.id] = _synthetic_returns_from_stub(
-                sharpe=s.stub_sharpe,
-                cagr=s.stub_cagr,
-                max_dd=s.stub_max_dd,
-            )
+    # Strategies with no real backtest data report all gate fields as MISSING
+    # (handled in the per-strategy loop below). Do NOT synthesize returns from
+    # stub_sharpe — DSR would trivially pass because the series was constructed
+    # to hit exactly that Sharpe, creating a circular validation that is
+    # meaningless. The stubs remain available for UI display (portfolio page)
+    # but must not feed into the rigor gate.
 
     # Compute PBO across all strategies that have returns
     valid_returns = {k: v for k, v in returns_by_strategy.items() if len(v) >= 10}
@@ -269,29 +266,6 @@ async def compute_pbo_endpoint(req: PBORequest, request: Request, response: Resp
 
 
 # ── Helpers ──────────────────────────────────────────────────
-
-
-def _synthetic_returns_from_stub(
-    sharpe: float,
-    cagr: float | None = None,  # noqa: ARG001 — accepted for forward-compat; current stub only needs sharpe
-    max_dd: float | None = None,  # noqa: ARG001 — accepted for forward-compat; current stub only needs sharpe
-    T: int = 504,  # ~2 years of daily data
-) -> list[float]:
-    """Generate synthetic daily returns matching stub Sharpe.
-
-    This is a hackathon placeholder. In production, the analytics-engine
-    runs the actual backtest and produces real BacktestResult.daily_returns.
-    """
-    import numpy as np
-
-    rng = np.random.default_rng(hash(sharpe) % (2**32))
-
-    # Target daily vol = 1% (reasonable for equity-like assets)
-    daily_vol = 0.01
-    # Target daily mean from annualized Sharpe
-    daily_mean = sharpe * daily_vol / np.sqrt(252)
-
-    return rng.normal(daily_mean, daily_vol, size=T).tolist()
 
 
 def _load_strategy_code(code_path: str) -> str | None:
