@@ -108,7 +108,7 @@ def purged_kfold_splits(
         test_end_ts = t1.index[test_end_pos]
         # The *latest* label-end time within the test window — anything
         # before this in train still has its label observed inside test.
-        max_test_label_end = t1.iloc[test_positions].max()
+        _max_test_label_end = t1.iloc[test_positions].max()
 
         # Start with all-positions, then remove test + purge + embargo.
         all_positions = np.arange(n)
