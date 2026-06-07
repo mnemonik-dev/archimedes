@@ -415,14 +415,14 @@ def apply_rigor_gate(
     # rejected at validation time, long before reaching this evaluator).
     look_ahead_clean = True
 
-    # DSR-passing convention follows the seed strategies' implementation:
-    # the canonical Bailey-LdP DSR is "credibly > 0" via the test
-    # statistic z-score, where ``dsr_p_value`` is the p-value under the
-    # null Sharpe=0. We pass when ``dsr > 0`` (the DSR itself is positive
-    # after correcting for the trials-correction).
-    dsr_pass = dsr is not None and dsr > 0.0
+    # DSR gate: require p-value >= 0.95 (same threshold enforced by the curated
+    # path in run_rigor_gate). Using dsr > 0.0 was too permissive — a z-score of
+    # 0.5 (p ≈ 0.69) would pass here while the same strategy fails the API gate,
+    # creating an inconsistency that could admit under-credentialed Tier-1 strategies
+    # through the fusion path.
+    dsr_pass = dsr_p is not None and dsr_p >= 0.95
 
-    passing = metrics.sharpe_ratio > 0.0 and dsr_pass and look_ahead_clean and (pbo_score is None or pbo_score < 0.5)
+    passing = dsr_pass and look_ahead_clean and (pbo_score is None or pbo_score < 0.5)
 
     # Provenance gate: a strategy is only admissible for Tier-1 if it passes
     # the statistics AND those statistics were computed on real market data.
