@@ -259,6 +259,7 @@ class TestBacktestPortfolioIntegration:
     def test_empty_dataframe_vector(self) -> None:
         import sys
         from unittest.mock import MagicMock
+
         from archimedes.services.portfolio_backtester import _fetch_price_panel
 
         mock_data = MagicMock()
