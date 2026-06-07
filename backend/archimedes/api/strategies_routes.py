@@ -578,7 +578,11 @@ async def get_portfolio_advisor(
             mu_ann = s.real_cagr if s.real_cagr is not None else 0.08
             vol_ann = abs(mu_ann / sr) if sr != 0 else 0.20
             full_kelly = mu_ann / max(vol_ann**2, 1e-6)
-            base_kelly = min(0.5 * full_kelly, 0.5)
+            # Shrink full Kelly by the ratio OOS/IS Sharpe so the fraction
+            # reflects walk-forward edge rather than inflated in-sample edge.
+            # Falls back to half-Kelly when no OOS Sharpe is stored.
+            sr_oos = s.out_of_sample_sharpe if s.out_of_sample_sharpe is not None else sr
+            base_kelly = min(0.5 * (sr_oos / max(sr, 1e-6)) * full_kelly, 0.5)
 
             active = [sig for sig in strat_signals.signals if sig.signal != _Signal.FLAT and sig.weight > 0]
             active.sort(key=lambda x: x.weight, reverse=True)
