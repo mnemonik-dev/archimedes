@@ -5,7 +5,9 @@ Verified) strategies from curve-fit noise:
 
   1. Deflated Sharpe Ratio — Bailey & López de Prado (2014)
   2. Probability of Backtest Overfitting via CSCV — Bailey et al. (2014)
-  3. Walk-forward out-of-sample Sharpe
+  3. Out-of-sample Sharpe — single chronological hold-out today (see
+     compute_oos_sharpe); rolling Combinatorial Purged CV (compute_cpcv_oos_sharpe)
+     is the principled upgrade, wired once a combinatorial OOS matrix exists
   4. Look-ahead static audit (AST-based)
 
 All functions are pure computation: no I/O, no web framework, no on-chain
@@ -245,14 +247,25 @@ def compute_oos_sharpe(
 
     Splits the return series chronologically: the first train_fraction of
     bars are in-sample; the remainder are the OOS test set. The OOS Sharpe
-    must be ≥ 50% of the full-sample Sharpe to pass passes_rigor_gate.
+    must clear the absolute floor (> 0) and the cliff check (OOS/IS ≥ 0.5)
+    in RigorGateResult.passes_all.
+
+    NOTE — this is a single chronological hold-out, NOT a rolling walk-forward
+    re-estimation. There is no per-window refit and no purge/embargo gap at the
+    train/test boundary, so signal state from lookback indicators (e.g. an
+    SMA-200 or TSMOM-252 window) can straddle the split. Rolling Combinatorial
+    Purged CV is the principled upgrade and is implemented separately in
+    ``compute_cpcv_oos_sharpe`` (wired into ``run_rigor_gate`` once the
+    analytics-engine emits a combinatorial OOS matrix; reported as MISSING
+    until then).
 
     Args:
         daily_returns: Full per-bar return series.
         train_fraction: Fraction reserved for in-sample training (0 < f < 1).
 
     Returns:
-        Annualized OOS Sharpe, or None if insufficient OOS data (< 5 bars).
+        Annualized OOS Sharpe, or None if the OOS slice is shorter than one
+        trading month (< 21 bars) or the full series has < 10 bars.
     """
     arr = np.asarray(daily_returns, dtype=float)
     T = len(arr)
