@@ -12,7 +12,9 @@ import {
   VAULT_ABI,
   ASSETS,
   CIRCLE_PROVIDER_ID,
+  USDC_DECIMALS,
 } from '../config'
+import { parseUnits } from 'viem'
 import { executeUserOp, encodeCall } from '../circle-tx-executor'
 
 const ARCSCAN_TX = 'https://testnet.arcscan.app/tx'
@@ -121,7 +123,7 @@ function EoaDepositFlow({ vaultAddress, depositAmount = '100', strategy, onClose
     updateStep(0, 'error', null)
     try {
       const walletClient = await getWalletClient()
-      const parsedAmount = BigInt(Math.round(parseFloat(amount) * 1e6))
+      const parsedAmount = parseUnits(amount, USDC_DECIMALS)
       if (parsedAmount <= 0n) throw new Error('Amount must be greater than 0')
 
       const hash = await walletClient.writeContract({
@@ -151,7 +153,7 @@ function EoaDepositFlow({ vaultAddress, depositAmount = '100', strategy, onClose
       const walletClient = await getWalletClient()
       const userAddr = getAddress()
       if (!userAddr) throw new Error('Wallet address not available')
-      const parsedAmount = BigInt(Math.round(parseFloat(amount) * 1e6))
+      const parsedAmount = parseUnits(amount, USDC_DECIMALS)
 
       const hash = await walletClient.writeContract({
         address: vaultAddress,
@@ -411,7 +413,7 @@ function PasskeyDepositFlow({ vaultAddress, depositAmount = '100', strategy, onC
       if (!smartAccount || !client) {
         throw new Error('Passkey wallet not initialized — please reconnect.')
       }
-      const parsedAmount = BigInt(Math.round(parseFloat(amount) * 1e6))
+      const parsedAmount = parseUnits(amount, USDC_DECIMALS)
       if (parsedAmount <= 0n) throw new Error('Amount must be greater than 0')
 
       const { tokens, weights } = defaultAllocations()
