@@ -1,9 +1,10 @@
 import { apiGet } from '../api'
 import { useState, useEffect, useCallback } from 'react'
+import { isAddress, parseUnits } from 'viem'
 import {
   publicClient, getWalletClient, getAddress,
   USDC, TOKEN_ABI, VAULT_ABI,
-  ASSETS,
+  ASSETS, USDC_DECIMALS,
 } from '../config'
 import VaultChat from './VaultChat'
 
@@ -184,10 +185,19 @@ export default function VaultDetail({ address, onBack }) {
 
   const deposit = async () => {
     if (!address || !depositAmt) return
+    // The vault address comes from the URL (deep-link); never route a USDC
+    // approve/deposit to an unvalidated address — a phishing link like
+    // /portfolio/vaults/0xATTACKER would otherwise receive the approval.
+    if (!isAddress(address)) {
+      setStatus('Invalid vault address — refusing to send funds.')
+      return
+    }
     setBusy(true); setStatus('')
     try {
       const w = await getWalletClient()
-      const amount = BigInt(Math.round(parseFloat(depositAmt) * 1e6))
+      // parseUnits is exact for decimal strings; float math (parseFloat * 1e6)
+      // is lossy for large/many-decimal inputs.
+      const amount = parseUnits(depositAmt, USDC_DECIMALS)
       setStatus('Approving USDC…')
       await w.writeContract({ address: USDC, abi: TOKEN_ABI, functionName: 'approve', args: [address, amount] })
       setStatus('Depositing…')
