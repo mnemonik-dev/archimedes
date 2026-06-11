@@ -79,7 +79,7 @@ async def list_vaults(
 @limiter.limit("5/minute")
 async def create_vault(
     req: VaultCreateRequest,
-    request: Request,
+    request: Request,  # noqa: ARG001 — slowapi @limiter.limit inspects param name
     response: Response,  # noqa: ARG001 — slowapi @limiter.limit inspects param name
     wallet: str = Depends(require_verified_wallet),  # noqa: ARG001 — SIWE gate; raises 401 if unauthenticated
 ):
@@ -131,7 +131,7 @@ async def get_vault_detail(address: str):
 @limiter.limit("10/minute")
 async def store_vault_metadata(
     req: VaultMetadataRequest,
-    request: Request,
+    request: Request,  # noqa: ARG001 — slowapi @limiter.limit inspects param name
     response: Response,  # noqa: ARG001 — slowapi @limiter.limit inspects param name
     wallet: str = Depends(require_verified_wallet),
 ):
@@ -166,7 +166,9 @@ async def store_vault_metadata(
 
         # Fire-and-forget on-chain strategy anchoring (best-effort, non-fatal)
         if req.strategy_ids:
-            asyncio.create_task(_anchor_strategies_async(req.strategy_ids))
+            asyncio.create_task(  # noqa: RUF006 — intentional fire-and-forget; anchoring is best-effort and non-fatal
+                _anchor_strategies_async(req.strategy_ids)
+            )
 
         return VaultMetadataResponse(**meta.to_dict())
     except HTTPException:

@@ -131,10 +131,7 @@ class ChainExecutor:
                 t0 = await pool.functions.token0().call()
 
                 # Identify USDC-side reserve (6 decimals)
-                if chain_client.to_checksum(t0) == usdc_addr:
-                    usdc_reserve = r0 / 1e6
-                else:
-                    usdc_reserve = r1 / 1e6
+                usdc_reserve = r0 / 1e6 if chain_client.to_checksum(t0) == usdc_addr else r1 / 1e6
 
                 if usdc_reserve < MIN_HEALTHY_LIQUIDITY_USDC:
                     raise InsufficientLiquidityError(
@@ -168,7 +165,7 @@ class ChainExecutor:
             norm = hexstr
         else:
             wait_arg = tx_hash
-            norm = tx_hash.hex() if not tx_hash.hex().startswith("0x") else tx_hash.hex()
+            norm = tx_hash.hex()
             norm = norm if norm.startswith("0x") else "0x" + norm
 
         receipt = await chain_client.w3.eth.wait_for_transaction_receipt(wait_arg)

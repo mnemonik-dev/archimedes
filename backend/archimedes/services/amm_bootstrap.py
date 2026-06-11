@@ -43,7 +43,7 @@ async def bootstrap_amm_liquidity(usdc_per_pool: float | None = None) -> dict:
             wallet_usdc = balance_raw / 1e6
             # Count empty pools
             empty_count = 0
-            for sym, addr in synth_addresses.items():
+            for _sym, addr in synth_addresses.items():
                 if not addr:
                     continue
                 try:

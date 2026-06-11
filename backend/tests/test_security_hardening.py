@@ -188,10 +188,10 @@ async def test_chat_post_rate_limited():
     # Enable rate limiting for this test
     app.state.limiter.enabled = True
     # Reset limiter storage so prior test state doesn't interfere
-    try:
+    import contextlib
+
+    with contextlib.suppress(Exception):
         app.state.limiter.reset()
-    except Exception:
-        pass
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             hit_429 = False
