@@ -28,6 +28,7 @@ from archimedes.api.vault_schemas import (
 )
 from archimedes.chain.executor import chain_executor
 from archimedes.models.chat import VaultMetadata
+from archimedes.services.strategy_sizer import kelly_weighted_allocations, scale_to_budget, size_strategies
 
 vaults_router = APIRouter(prefix="/api/vaults", tags=["vaults"])
 
@@ -240,7 +241,15 @@ async def derive_vault_allocations(address: str, req: SetAllocationsRequest, req
         synth_assets,
     )
     usdc_floor = req.usdc_floor_pct / 100.0
-    target_weights = strategy_evaluator.aggregate_signals(all_signals, usdc_floor=usdc_floor)
+
+    # Strategy-level Kelly sizing (roadmap Priority 3.1): each gate-passing
+    # strategy receives passport-half-Kelly × risk-profile multiplier of the
+    # capital; CANDIDATEs and gate-failers size to zero (the gate is not
+    # bypassable via deployment); unclaimed budget stays in USDC.
+    sized_fractions = size_strategies(strategies, req.risk_profile)
+    sized_fractions = scale_to_budget(sized_fractions, 1.0 - usdc_floor)
+    excluded = sorted(sid for sid, frac in sized_fractions.items() if frac <= 0.0)
+    target_weights = kelly_weighted_allocations(all_signals, sized_fractions, usdc_floor=usdc_floor)
 
     allocations: list[AllocationTarget] = []
 
@@ -276,4 +285,7 @@ async def derive_vault_allocations(address: str, req: SetAllocationsRequest, req
         allocations=allocations,
         total_bps=sum(a.weight_bps for a in allocations),
         strategy_count=len(strategies),
+        risk_profile=req.risk_profile,
+        sized_strategies={sid: frac for sid, frac in sized_fractions.items() if frac > 0.0},
+        excluded_strategy_ids=excluded,
     )
