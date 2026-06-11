@@ -8,6 +8,8 @@ from typing import Any
 import backtrader as bt
 import pandas as pd
 
+from archimedes_analytics_engine.costs import CostModel, TurnoverAnalyzer
+
 ANNUALIZATION = 252
 RF_ANNUAL = 0.05  # 5% annual risk-free rate
 RF_DAILY = RF_ANNUAL / ANNUALIZATION
@@ -35,6 +37,13 @@ class BacktestResult:
     daily_returns: list[float] = field(default_factory=list)
     transaction_cost_bps: int = 10
     slippage_bps: int = 0
+    # Turnover / cost-realism metrics (see costs.py for conventions).
+    turnover_annualized: float | None = None  # one-way, x/year
+    traded_notional: float = 0.0  # two-way, total over the backtest
+    total_commission_paid: float = 0.0
+    cost_drag_annual_pct: float | None = None  # annualized commission as % of avg equity
+    break_even_cost_bps: float | None = None  # per-side bps at which gross CAGR is consumed
+    gross_sharpe_ratio: float | None = None  # Sharpe with commissions added back (not slippage)
     walk_forward_split: float | None = None
     out_of_sample_sharpe: float | None = None
     look_ahead_audit_passed: bool = False
@@ -119,10 +128,109 @@ def _trade_stats(
     return int(total_closed), float(win_rate), profit_factor, avg_len_f
 
 
+def _sharpe_bt_convention(daily_returns: list[float]) -> float | None:
+    """Sharpe under the same convention as the bt.analyzers.SharpeRatio config in
+    _add_analyzers (annualized, geometric daily risk-free, population stddev), so
+    gross-vs-net Sharpe comparisons are apples-to-apples (zero-cost => equal)."""
+    if len(daily_returns) < 2:
+        return None
+    rf_daily_geo = (1.0 + RF_ANNUAL) ** (1.0 / ANNUALIZATION) - 1.0
+    excess = [r - rf_daily_geo for r in daily_returns]
+    dev = statistics.pstdev(excess)
+    if dev == 0:
+        return None
+    return (statistics.fmean(excess) / dev) * math.sqrt(ANNUALIZATION)
+
+
+def _cost_metrics(
+    *,
+    turnover_analysis: dict,
+    daily_returns: list[float],
+    equity_curve: list[float],
+    bars: int,
+) -> dict[str, float | None]:
+    """Derive turnover / cost-drag / break-even / gross-Sharpe from the
+    TurnoverAnalyzer output. Conventions documented in costs.py."""
+    traded_notional = float(turnover_analysis.get("traded_notional", 0.0))
+    commission_paid = float(turnover_analysis.get("commission_paid", 0.0))
+    bar_commissions = turnover_analysis.get("bar_commissions", [])
+
+    metrics: dict[str, float | None] = {
+        "turnover_annualized": None,
+        "traded_notional": traded_notional,
+        "total_commission_paid": commission_paid,
+        "cost_drag_annual_pct": None,
+        "break_even_cost_bps": None,
+        "gross_sharpe_ratio": None,
+    }
+
+    avg_equity = statistics.fmean(equity_curve) if equity_curve else 0.0
+    years = bars / ANNUALIZATION
+    if avg_equity <= 0 or years <= 0:
+        return metrics
+
+    turnover_annualized = (traded_notional / 2.0) / avg_equity / years
+    metrics["turnover_annualized"] = turnover_annualized
+    metrics["cost_drag_annual_pct"] = (commission_paid / avg_equity / years) * 100.0
+
+    # Gross (commissions-added-back) return series. Positional alignment with
+    # daily_returns holds because both analyzers fire once per bar; if it ever
+    # doesn't, report None rather than misreport.
+    if len(bar_commissions) != len(daily_returns) or not daily_returns:
+        return metrics
+
+    gross_returns: list[float] = []
+    for i, net_r in enumerate(daily_returns):
+        prev_equity = equity_curve[i]  # equity_curve[0] is initial cash
+        if prev_equity <= 0:
+            return metrics
+        gross_returns.append(net_r + float(bar_commissions[i]) / prev_equity)
+
+    metrics["gross_sharpe_ratio"] = _sharpe_bt_convention(gross_returns)
+
+    gross_growth = 1.0
+    for g in gross_returns:
+        gross_growth *= 1.0 + g
+    if gross_growth > 0:
+        gross_cagr = gross_growth ** (1.0 / years) - 1.0
+        if turnover_annualized > 0:
+            # Annual cost at per-side cost c = 2 * one-way turnover * c.
+            metrics["break_even_cost_bps"] = max(gross_cagr / (2.0 * turnover_annualized) * 10_000.0, 0.0)
+
+    return metrics
+
+
 def _lookahead_audit_passed(cerebro: bt.Cerebro) -> bool:
     coc = getattr(cerebro.broker.p, "coc", False)
     coo = getattr(cerebro.broker.p, "coo", False)
     return not coc and not coo
+
+
+def _configure_broker(
+    cerebro: bt.Cerebro,
+    *,
+    initial_cash: float,
+    transaction_cost_bps: int,
+    slippage_bps: int,
+    cost_model: CostModel | None,
+    feed_names: list[str],
+) -> tuple[int, int]:
+    """Install cash + costs on the broker; shared by all runners.
+
+    When ``cost_model`` is given it supersedes the flat ``transaction_cost_bps``
+    / ``slippage_bps`` arguments (per-feed overrides included). Returns the
+    (transaction_cost_bps, slippage_bps) actually recorded on the result —
+    the model's defaults when a model is used; per-symbol detail stays in the
+    model, not the summary fields.
+    """
+    cerebro.broker.setcash(initial_cash)
+    if cost_model is not None:
+        cost_model.apply_to_broker(cerebro, feed_names)
+        return int(round(cost_model.default_bps)), int(round(cost_model.slippage_bps))
+    cerebro.broker.setcommission(commission=transaction_cost_bps / 10_000)
+    if slippage_bps > 0:
+        cerebro.broker.set_slippage_perc(perc=slippage_bps / 10_000)
+    return transaction_cost_bps, slippage_bps
 
 
 def run_backtest(
@@ -132,12 +240,17 @@ def run_backtest(
     initial_cash: float,
     transaction_cost_bps: int = 10,
     slippage_bps: int = 0,
+    cost_model: CostModel | None = None,
 ) -> BacktestResult:
     cerebro = bt.Cerebro(stdstats=False)
-    cerebro.broker.setcash(initial_cash)
-    cerebro.broker.setcommission(commission=transaction_cost_bps / 10_000)
-    if slippage_bps > 0:
-        cerebro.broker.set_slippage_perc(perc=slippage_bps / 10_000)
+    transaction_cost_bps, slippage_bps = _configure_broker(
+        cerebro,
+        initial_cash=initial_cash,
+        transaction_cost_bps=transaction_cost_bps,
+        slippage_bps=slippage_bps,
+        cost_model=cost_model,
+        feed_names=[],
+    )
 
     feed = bt.feeds.PandasData(dataname=prices)
     cerebro.adddata(feed)
@@ -204,6 +317,13 @@ def _extract_result(
 
     look_ahead_passed = _lookahead_audit_passed(cerebro)
 
+    cost_metrics = _cost_metrics(
+        turnover_analysis=strategy.analyzers.turnover.get_analysis(),
+        daily_returns=daily_returns,
+        equity_curve=equity_curve,
+        bars=bars,
+    )
+
     return BacktestResult(
         final_value=final_value,
         total_return_pct=total_return_pct,
@@ -222,6 +342,12 @@ def _extract_result(
         daily_returns=daily_returns,
         transaction_cost_bps=transaction_cost_bps,
         slippage_bps=slippage_bps,
+        turnover_annualized=cost_metrics["turnover_annualized"],
+        traded_notional=cost_metrics["traded_notional"],
+        total_commission_paid=cost_metrics["total_commission_paid"],
+        cost_drag_annual_pct=cost_metrics["cost_drag_annual_pct"],
+        break_even_cost_bps=cost_metrics["break_even_cost_bps"],
+        gross_sharpe_ratio=cost_metrics["gross_sharpe_ratio"],
         look_ahead_audit_passed=look_ahead_passed,
         bars=bars,
         backtest_start=backtest_start,
@@ -241,6 +367,7 @@ def _add_analyzers(cerebro: bt.Cerebro) -> None:
     )
     cerebro.addanalyzer(bt.analyzers.DrawDown, _name="dd")
     cerebro.addanalyzer(bt.analyzers.TradeAnalyzer, _name="trades")
+    cerebro.addanalyzer(TurnoverAnalyzer, _name="turnover")
 
 
 def run_pairs_backtest(
@@ -253,6 +380,7 @@ def run_pairs_backtest(
     name_b: str = "leg_b",
     transaction_cost_bps: int = 10,
     slippage_bps: int = 0,
+    cost_model: CostModel | None = None,
 ) -> BacktestResult:
     """Run a two-asset (pairs / relative-value) strategy in a single cerebro.
 
@@ -268,10 +396,14 @@ def run_pairs_backtest(
     aligned_b = prices_b.loc[common_index].sort_index()
 
     cerebro = bt.Cerebro(stdstats=False)
-    cerebro.broker.setcash(initial_cash)
-    cerebro.broker.setcommission(commission=transaction_cost_bps / 10_000)
-    if slippage_bps > 0:
-        cerebro.broker.set_slippage_perc(perc=slippage_bps / 10_000)
+    transaction_cost_bps, slippage_bps = _configure_broker(
+        cerebro,
+        initial_cash=initial_cash,
+        transaction_cost_bps=transaction_cost_bps,
+        slippage_bps=slippage_bps,
+        cost_model=cost_model,
+        feed_names=[name_a, name_b],
+    )
 
     cerebro.adddata(bt.feeds.PandasData(dataname=aligned_a), name=name_a)
     cerebro.adddata(bt.feeds.PandasData(dataname=aligned_b), name=name_b)
@@ -301,6 +433,7 @@ def run_multi_backtest(
     names: list[str] | None = None,
     transaction_cost_bps: int = 10,
     slippage_bps: int = 0,
+    cost_model: CostModel | None = None,
 ) -> BacktestResult:
     """Run an N-asset (cross-sectional / portfolio) strategy in a single cerebro.
 
@@ -327,10 +460,14 @@ def run_multi_backtest(
         raise ValueError("price frames share no common dates; cannot align feeds")
 
     cerebro = bt.Cerebro(stdstats=False)
-    cerebro.broker.setcash(initial_cash)
-    cerebro.broker.setcommission(commission=transaction_cost_bps / 10_000)
-    if slippage_bps > 0:
-        cerebro.broker.set_slippage_perc(perc=slippage_bps / 10_000)
+    transaction_cost_bps, slippage_bps = _configure_broker(
+        cerebro,
+        initial_cash=initial_cash,
+        transaction_cost_bps=transaction_cost_bps,
+        slippage_bps=slippage_bps,
+        cost_model=cost_model,
+        feed_names=feed_names,
+    )
 
     for prices, name in zip(prices_list, feed_names, strict=True):
         aligned = prices.loc[common_index].sort_index()
