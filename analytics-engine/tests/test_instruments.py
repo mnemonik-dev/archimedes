@@ -5,13 +5,13 @@ from archimedes_analytics_engine.instruments import (
 
 
 def test_operations_include_required_assets() -> None:
-    assert set(OPERATION_TO_SYMBOL.keys()) == {
-        "SPY",
-        "NIKKEI",
-        "GOLD",
-        "TREASURY",
-        "OIL",
-    }
+    # The original five operation assets must always be present.
+    assert {"SPY", "NIKKEI", "GOLD", "TREASURY", "OIL"} <= set(OPERATION_TO_SYMBOL.keys())
+
+
+def test_operations_include_pairs_legs() -> None:
+    # ETF legs added for the Gatev et al. (2006) relative-value pairs strategy.
+    assert {"GLD", "GDX", "IVV"} <= set(OPERATION_TO_SYMBOL.keys())
 
 
 def test_resolve_operations_rejects_unknown() -> None:

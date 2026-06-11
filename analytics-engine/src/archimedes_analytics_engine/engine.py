@@ -142,24 +142,35 @@ def run_backtest(
     feed = bt.feeds.PandasData(dataname=prices)
     cerebro.adddata(feed)
     cerebro.addstrategy(strategy_cls)
-    cerebro.addanalyzer(bt.analyzers.TimeReturn, _name="timereturn")
-    cerebro.addanalyzer(
-        bt.analyzers.TimeReturn,
-        _name="monthly",
-        timeframe=bt.TimeFrame.Months,
-    )
-    cerebro.addanalyzer(
-        bt.analyzers.SharpeRatio,
-        _name="sharpe",
-        timeframe=bt.TimeFrame.Days,
-        annualize=True,
-        riskfreerate=RF_ANNUAL,
-    )
-    cerebro.addanalyzer(bt.analyzers.DrawDown, _name="dd")
-    cerebro.addanalyzer(bt.analyzers.TradeAnalyzer, _name="trades")
+    _add_analyzers(cerebro)
 
     strategy = cerebro.run()[0]
 
+    bars = len(prices)
+    return _extract_result(
+        cerebro=cerebro,
+        strategy=strategy,
+        initial_cash=initial_cash,
+        bars=bars,
+        backtest_start=prices.index[0].isoformat() if bars else None,
+        backtest_end=prices.index[-1].isoformat() if bars else None,
+        transaction_cost_bps=transaction_cost_bps,
+        slippage_bps=slippage_bps,
+    )
+
+
+def _extract_result(
+    *,
+    cerebro: bt.Cerebro,
+    strategy: bt.Strategy,
+    initial_cash: float,
+    bars: int,
+    backtest_start: str | None,
+    backtest_end: str | None,
+    transaction_cost_bps: int,
+    slippage_bps: int,
+) -> BacktestResult:
+    """Pull metrics off a finished cerebro run. Shared by single- and multi-asset runners."""
     final_value = float(cerebro.broker.getvalue())
     total_return_pct = ((final_value / initial_cash) - 1.0) * 100.0
 
@@ -180,7 +191,6 @@ def run_backtest(
     max_dd_pct = float(max_dd_pct_raw) if max_dd_pct_raw is not None else None
     max_dd_len = int(max_dd_len_raw) if max_dd_len_raw is not None else None
 
-    bars = len(prices)
     cagr = _compute_cagr(initial_cash, final_value, bars)
 
     calmar: float | None = None
@@ -191,9 +201,6 @@ def run_backtest(
 
     trades_analysis = strategy.analyzers.trades.get_analysis()
     total_trades, win_rate, profit_factor, avg_len = _trade_stats(trades_analysis)
-
-    backtest_start = prices.index[0].isoformat() if bars else None
-    backtest_end = prices.index[-1].isoformat() if bars else None
 
     look_ahead_passed = _lookahead_audit_passed(cerebro)
 
@@ -219,6 +226,70 @@ def run_backtest(
         bars=bars,
         backtest_start=backtest_start,
         backtest_end=backtest_end,
+    )
+
+
+def _add_analyzers(cerebro: bt.Cerebro) -> None:
+    cerebro.addanalyzer(bt.analyzers.TimeReturn, _name="timereturn")
+    cerebro.addanalyzer(bt.analyzers.TimeReturn, _name="monthly", timeframe=bt.TimeFrame.Months)
+    cerebro.addanalyzer(
+        bt.analyzers.SharpeRatio,
+        _name="sharpe",
+        timeframe=bt.TimeFrame.Days,
+        annualize=True,
+        riskfreerate=RF_ANNUAL,
+    )
+    cerebro.addanalyzer(bt.analyzers.DrawDown, _name="dd")
+    cerebro.addanalyzer(bt.analyzers.TradeAnalyzer, _name="trades")
+
+
+def run_pairs_backtest(
+    prices_a: pd.DataFrame,
+    prices_b: pd.DataFrame,
+    *,
+    strategy_cls: type[bt.Strategy],
+    initial_cash: float,
+    name_a: str = "leg_a",
+    name_b: str = "leg_b",
+    transaction_cost_bps: int = 10,
+    slippage_bps: int = 0,
+) -> BacktestResult:
+    """Run a two-asset (pairs / relative-value) strategy in a single cerebro.
+
+    Both price frames are inner-joined on their datetime index first so the two
+    feeds are bar-aligned — the strategy can rely on ``self.datas[0]`` and
+    ``self.datas[1]`` advancing together. Metrics are computed on portfolio value,
+    so the existing analyzer + extraction path is reused unchanged.
+    """
+    common_index = prices_a.index.intersection(prices_b.index)
+    if len(common_index) == 0:
+        raise ValueError("prices_a and prices_b share no common dates; cannot align pair feeds")
+    aligned_a = prices_a.loc[common_index].sort_index()
+    aligned_b = prices_b.loc[common_index].sort_index()
+
+    cerebro = bt.Cerebro(stdstats=False)
+    cerebro.broker.setcash(initial_cash)
+    cerebro.broker.setcommission(commission=transaction_cost_bps / 10_000)
+    if slippage_bps > 0:
+        cerebro.broker.set_slippage_perc(perc=slippage_bps / 10_000)
+
+    cerebro.adddata(bt.feeds.PandasData(dataname=aligned_a), name=name_a)
+    cerebro.adddata(bt.feeds.PandasData(dataname=aligned_b), name=name_b)
+    cerebro.addstrategy(strategy_cls)
+    _add_analyzers(cerebro)
+
+    strategy = cerebro.run()[0]
+
+    bars = len(common_index)
+    return _extract_result(
+        cerebro=cerebro,
+        strategy=strategy,
+        initial_cash=initial_cash,
+        bars=bars,
+        backtest_start=common_index[0].isoformat() if bars else None,
+        backtest_end=common_index[-1].isoformat() if bars else None,
+        transaction_cost_bps=transaction_cost_bps,
+        slippage_bps=slippage_bps,
     )
 
 
