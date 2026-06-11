@@ -123,3 +123,66 @@ def test_second_wave_pair_files_load_and_run(stem: str) -> None:
     assert isinstance(result, BacktestResult)
     assert result.bars == 300
     assert result.look_ahead_audit_passed is True
+
+
+def _cointegrated_pair(n: int = 600, seed: int = 7, beta: float = 1.2, alpha: float = 4.0, half_life: float = 20.0):
+    """Deterministic cointegrated pair: B is a random walk, the A-vs-B residual
+    is a mean-reverting OU process. Used to exercise the trade path of the
+    stat-arb strategies hermetically (seeded RNG, no network)."""
+    import numpy as np
+
+    rng = np.random.RandomState(seed)
+    b = 60.0 + np.cumsum(rng.normal(0.0, 0.6, n))
+    phi = float(np.exp(-np.log(2.0) / half_life))
+    spread = np.zeros(n)
+    for t in range(1, n):
+        spread[t] = phi * spread[t - 1] + rng.normal(0.0, 1.5)
+    a = alpha + beta * b + spread
+
+    def _frame(close):
+        idx = pd.date_range("2015-01-01", periods=n, freq="D")
+        return pd.DataFrame(
+            {
+                "Open": close - 0.2,
+                "High": close + 0.4,
+                "Low": close - 0.4,
+                "Close": close,
+                "Volume": [1_000] * n,
+            },
+            index=idx,
+        )
+
+    return _frame(a), _frame(b)
+
+
+# Phase 1.1/1.2 stat-arb strategies — new trading logic on the existing 2-feed
+# engine. Each test loads the strategy file (proving the metadata block + single
+# strategy class resolve) and runs it on a deterministic cointegrated pair where
+# the trade path is guaranteed to fire (no network).
+@pytest.mark.parametrize(
+    ("stem", "expected_cls"),
+    [
+        ("engle_granger_1987_cointegration_pairs", "CointegrationPairsTrading"),
+        ("elliott_2005_kalman_pairs", "KalmanPairsTrading"),
+    ],
+)
+def test_statarb_pair_files_load_and_trade(stem: str, expected_cls: str) -> None:
+    import sys
+    from pathlib import Path
+
+    strategies_dir = Path(__file__).parent.parent / "strategies"
+    sys.path.insert(0, str(strategies_dir))
+    sys.path.insert(0, str(strategies_dir.parent / "src"))
+    from archimedes_analytics_engine.strategy_loader import load_strategy
+
+    bundle = load_strategy(strategies_dir / f"{stem}.py")
+    assert bundle.cls.__name__ == expected_cls
+
+    a, b = _cointegrated_pair()
+    result = run_pairs_backtest(a, b, strategy_cls=bundle.cls, initial_cash=100_000.0)
+    assert isinstance(result, BacktestResult)
+    assert result.bars == 600
+    assert result.look_ahead_audit_passed is True
+    # On a genuinely mean-reverting cointegrated pair, both strategies must open
+    # at least one spread position — i.e. the trade path is actually exercised.
+    assert result.total_trades > 0

@@ -64,16 +64,29 @@ def test_new_single_asset_strategies_loaded(provider):
 
 
 def test_library_has_expanded(provider):
-    # 6 legacy + 7 wave-1 (1 pairs + 6 single-asset) + 3 second-wave pairs = 16.
-    assert len(provider.list_strategies()) >= 16
+    # 6 legacy + 7 wave-1 + 3 second-wave distance pairs + 2 stat-arb pairs = 18.
+    assert len(provider.list_strategies()) >= 18
 
 
 # ── Second wave (Phase 1.3): additional economic pairs ────────
 
 
 def _pair_by_universe(provider, universe: set[str]):
-    """Find the strategy whose asset_universe matches the given set, or None."""
-    return next((s for s in provider.list_strategies() if set(s.asset_universe) == universe), None)
+    """Find the Gatev *distance* strategy whose asset_universe matches the set.
+
+    Scoped to the distance paper title because some universes (EWA/EWC, GLD/GDX)
+    are now shared with the Phase 1.1/1.2 stat-arb strategies — matching on
+    universe alone would be ambiguous.
+    """
+    return next(
+        (
+            s
+            for s in provider.list_strategies()
+            if set(s.asset_universe) == universe
+            and s.paper_title == "Pairs Trading: Performance of a Relative-Value Arbitrage Rule"
+        ),
+        None,
+    )
 
 
 @pytest.mark.parametrize("universe", [{"KO", "PEP"}, {"EWA", "EWC"}, {"GLD", "SLV"}])
@@ -101,6 +114,57 @@ def test_second_wave_pairs_have_distinct_ids(provider):
     ids = [_pair_by_universe(provider, u).id for u in ({"KO", "PEP"}, {"EWA", "EWC"}, {"GLD", "SLV"})]
     # Same paper anchor but distinct methodology text → distinct deterministic IDs.
     assert len(set(ids)) == 3
+
+
+# ── Phase 1.1/1.2: cointegration + Kalman stat-arb pairs ──────
+
+
+def _strategy_by_title(provider, title_fragment: str):
+    return next((s for s in provider.list_strategies() if title_fragment in s.paper_title), None)
+
+
+def test_cointegration_strategy_loaded(provider):
+    strat = _strategy_by_title(provider, "Co-integration and Error Correction")
+    assert strat is not None, "Engle-Granger cointegration strategy not discoverable"
+    assert set(strat.asset_universe) == {"EWA", "EWC"}
+    assert strat.regime_tag == "regime_neutral"
+    # Methodology paper — no tradeable claim, and it fails the rigor gate on real
+    # data, so it stays an honest CANDIDATE.
+    assert strat.status == StrategyStatus.CANDIDATE
+    assert strat.passes_rigor_gate is False
+    assert strat.paper_claimed_sharpe is None
+
+
+def test_kalman_strategy_loaded(provider):
+    # "Pairs Trading" (Elliott et al. 2005) on GLD/GDX — distinct from the Gatev
+    # "Pairs Trading: Performance of a Relative-Value Arbitrage Rule" title.
+    strat = next(
+        (s for s in provider.list_strategies() if s.paper_title == "Pairs Trading"),
+        None,
+    )
+    assert strat is not None, "Elliott Kalman strategy not discoverable"
+    assert set(strat.asset_universe) == {"GLD", "GDX"}
+    assert strat.regime_tag == "regime_neutral"
+    assert strat.status == StrategyStatus.CANDIDATE
+    assert strat.passes_rigor_gate is False
+    assert strat.paper_claimed_sharpe is None
+
+
+def test_statarb_pairs_distinct_from_distance_flagship(provider):
+    # Elliott Kalman shares GLD/GDX with the Gatev distance flagship on purpose,
+    # but they are different strategies (different paper, methodology) → distinct IDs.
+    kalman = next((s for s in provider.list_strategies() if s.paper_title == "Pairs Trading"), None)
+    flagship = next(
+        (
+            s
+            for s in provider.list_strategies()
+            if s.paper_title == "Pairs Trading: Performance of a Relative-Value Arbitrage Rule"
+            and set(s.asset_universe) == {"GLD", "GDX"}
+        ),
+        None,
+    )
+    assert kalman is not None and flagship is not None
+    assert kalman.id != flagship.id
 
 
 # ── STATUS parsing ────────────────────────────────────────────
