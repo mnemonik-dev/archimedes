@@ -3,4 +3,5 @@ __all__ = [
     "costs",
     "engine",
     "instruments",
+    "walk_forward",
 ]
