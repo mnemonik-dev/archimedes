@@ -6,6 +6,10 @@ OPERATION_TO_SYMBOL: dict[str, str] = {
     "GOLD": "GC=F",
     "TREASURY": "TLT",
     "OIL": "CL=F",
+    # ETF legs for relative-value / pairs strategies (Gatev et al. 2006).
+    "GLD": "GLD",  # SPDR Gold Shares — tradeable gold ETF leg
+    "GDX": "GDX",  # VanEck Gold Miners ETF — co-moves with GLD, the divergent leg
+    "IVV": "IVV",  # iShares Core S&P 500 — near-cointegrated with SPY (sanity-check pair)
 }
 
 
