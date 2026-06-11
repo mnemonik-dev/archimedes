@@ -331,6 +331,35 @@ def _annualized_sharpe_arr(arr: np.ndarray) -> float | None:
     return float(((arr.mean() - _RF_DAILY) / sigma) * math.sqrt(_ANNUALIZATION))
 
 
+def resolve_num_trials(
+    provenance: str,
+    n_variants_tried: int | None,
+    library_size: int,
+) -> int:
+    """#537 PROTOTYPE — DO NOT MERGE without team sign-off (Dan).
+
+    Provenance-based ``num_trials`` for the DSR multiple-testing penalty
+    (issue #537, option 3 — see also #547, which the convention question
+    gates on):
+
+    - ``"paper_grounded"``: N = the parameter variants *actually tried* for
+      this strategy — auditable via the walk-forward harness's
+      ``n_param_combos`` and the fixture spec catalog, not asserted. Falls
+      back to ``library_size`` when no trial count was recorded: unrecorded
+      search history is treated as mined (conservative default).
+    - anything else (``"fusion"``, ``"library_selected"``, …): N = full
+      library size — the winner was selected from the shelf, so it competes
+      against the shelf.
+
+    The DSR p ≥ 0.95 bar itself is untouched (anti-goal in #537); this only
+    changes the N input, and the passport must surface which N was used and
+    why.
+    """
+    if provenance == "paper_grounded" and n_variants_tried is not None and n_variants_tried >= 1:
+        return n_variants_tried
+    return max(1, library_size)
+
+
 def compute_average_pairwise_correlation(
     returns: dict[str, list[float]] | np.ndarray | list[list[float]],
 ) -> float:
