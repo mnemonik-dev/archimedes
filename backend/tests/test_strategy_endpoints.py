@@ -64,8 +64,8 @@ def test_new_single_asset_strategies_loaded(provider):
 
 
 def test_library_has_expanded(provider):
-    # 6 legacy + 7 wave-1 + 3 distance pairs + 2 stat-arb pairs + 3 Phase 2 = 21.
-    assert len(provider.list_strategies()) >= 21
+    # 6 legacy + 7 wave-1 + 3 distance pairs + 2 stat-arb pairs + 3 Phase 2 + 1 PCA = 22.
+    assert len(provider.list_strategies()) >= 22
 
 
 # ── Second wave (Phase 1.3): additional economic pairs ────────
@@ -186,6 +186,24 @@ def test_phase2_strategies_loaded(provider, title_fragment, expected_regime):
     assert strat.regime_tag == expected_regime
     # Honest CANDIDATEs: none clears the rigor gate on real data, and none cites a
     # like-for-like single-basket number, so paper_claimed_sharpe is null.
+    assert strat.status == StrategyStatus.CANDIDATE
+    assert strat.passes_rigor_gate is False
+    assert strat.paper_claimed_sharpe is None
+
+
+# ── Phase 3: PCA / eigenportfolio stat-arb ────────────────────
+
+
+def test_pca_statarb_loaded(provider):
+    strat = next(
+        (s for s in provider.list_strategies() if s.paper_title == "Statistical Arbitrage in the U.S. Equities Market"),
+        None,
+    )
+    assert strat is not None, "Avellaneda-Lee PCA stat-arb not discoverable"
+    assert len(strat.asset_universe) == 5
+    assert strat.regime_tag == "regime_neutral"
+    # Honest CANDIDATE: a 5-asset PCA basket isn't truly market-neutral and fails
+    # the gate hard (it posts a >100% paper drawdown). Stays CANDIDATE, null claim.
     assert strat.status == StrategyStatus.CANDIDATE
     assert strat.passes_rigor_gate is False
     assert strat.paper_claimed_sharpe is None

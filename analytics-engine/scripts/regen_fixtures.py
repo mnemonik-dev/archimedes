@@ -95,6 +95,8 @@ NEW_MULTI_SPECS: list[dict] = [
     {"stem": "jegadeesh_titman_1993_cross_sectional_momentum", "symbols": _UNIVERSE_5, "tx_cost_bps": 10},
     {"stem": "antonacci_2014_dual_momentum", "symbols": _UNIVERSE_5, "tx_cost_bps": 10},
     {"stem": "maillard_2010_risk_parity", "symbols": _UNIVERSE_5, "tx_cost_bps": 10},
+    # Phase 3 (2026-06-11): PCA / eigenportfolio stat-arb (N-feed + heavier math).
+    {"stem": "avellaneda_lee_2010_pca_statarb", "symbols": _UNIVERSE_5, "tx_cost_bps": 10},
 ]
 
 
