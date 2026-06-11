@@ -82,6 +82,9 @@ NEW_PAIR_SPECS: list[dict] = [
     {"stem": "gatev_2006_pairs_ko_pep", "pair": ("KO", "PEP"), "tx_cost_bps": 10},
     {"stem": "gatev_2006_pairs_ewa_ewc", "pair": ("EWA", "EWC"), "tx_cost_bps": 10},
     {"stem": "gatev_2006_pairs_gld_slv", "pair": ("GLD", "SLV"), "tx_cost_bps": 10},
+    # Phase 1.1/1.2 (2026-06-11): proper stat-arb on the existing 2-feed engine.
+    {"stem": "engle_granger_1987_cointegration_pairs", "pair": ("EWA", "EWC"), "tx_cost_bps": 10},
+    {"stem": "elliott_2005_kalman_pairs", "pair": ("GLD", "GDX"), "tx_cost_bps": 10},
 ]
 
 
