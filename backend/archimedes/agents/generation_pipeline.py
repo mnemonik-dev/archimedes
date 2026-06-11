@@ -554,7 +554,7 @@ async def _run_live_candidate(
     # user-visible risk profile so the agent sees the regime steer.
     regime_suffix = _REGIME_PROMPT_SUFFIX.get(regime, "")
     if regime_suffix:
-        agent._regime_context = regime_suffix  # Consumed by _build_tool_user_prompt if available
+        agent._regime_context = regime_suffix  # noqa: SLF001 — deliberate: consumed by _build_tool_user_prompt if available
 
     portfolio = await asyncio.wait_for(
         asyncio.to_thread(
