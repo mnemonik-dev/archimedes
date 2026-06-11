@@ -53,6 +53,11 @@ class SetAllocationsRequest(BaseModel):
 
     strategy_ids: list[str] = Field(default_factory=list)
     usdc_floor_pct: float = Field(20.0, ge=0, le=80, description="Min USDC allocation (%)")
+    risk_profile: str = Field(
+        "moderate",
+        pattern="^(fixed_income|conservative|moderate|aggressive|hyper_risky)$",
+        description="Maps to the Kelly γ table (RISK_AVERSION) for strategy-level sizing",
+    )
 
 
 class SetAllocationsResponse(BaseModel):
@@ -61,3 +66,13 @@ class SetAllocationsResponse(BaseModel):
     allocations: list[AllocationTarget]
     total_bps: int = Field(..., description="Should equal 10000")
     strategy_count: int = Field(..., description="Number of strategies used")
+    # Kelly-sizing transparency (additive; defaults keep old consumers working):
+    risk_profile: str = "moderate"
+    sized_strategies: dict[str, float] = Field(
+        default_factory=dict,
+        description="Per-strategy capital fraction = passport half-Kelly × profile multiplier (post budget scaling)",
+    )
+    excluded_strategy_ids: list[str] = Field(
+        default_factory=list,
+        description="Selected strategies sized to zero (rigor-gate CANDIDATE/fail, or no stored kelly_fraction)",
+    )
