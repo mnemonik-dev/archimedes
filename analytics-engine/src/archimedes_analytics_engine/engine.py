@@ -241,6 +241,7 @@ def run_backtest(
     transaction_cost_bps: int = 10,
     slippage_bps: int = 0,
     cost_model: CostModel | None = None,
+    strategy_params: dict | None = None,
 ) -> BacktestResult:
     cerebro = bt.Cerebro(stdstats=False)
     transaction_cost_bps, slippage_bps = _configure_broker(
@@ -254,7 +255,7 @@ def run_backtest(
 
     feed = bt.feeds.PandasData(dataname=prices)
     cerebro.adddata(feed)
-    cerebro.addstrategy(strategy_cls)
+    cerebro.addstrategy(strategy_cls, **(strategy_params or {}))
     _add_analyzers(cerebro)
 
     strategy = cerebro.run()[0]
@@ -381,6 +382,7 @@ def run_pairs_backtest(
     transaction_cost_bps: int = 10,
     slippage_bps: int = 0,
     cost_model: CostModel | None = None,
+    strategy_params: dict | None = None,
 ) -> BacktestResult:
     """Run a two-asset (pairs / relative-value) strategy in a single cerebro.
 
@@ -407,7 +409,7 @@ def run_pairs_backtest(
 
     cerebro.adddata(bt.feeds.PandasData(dataname=aligned_a), name=name_a)
     cerebro.adddata(bt.feeds.PandasData(dataname=aligned_b), name=name_b)
-    cerebro.addstrategy(strategy_cls)
+    cerebro.addstrategy(strategy_cls, **(strategy_params or {}))
     _add_analyzers(cerebro)
 
     strategy = cerebro.run()[0]
@@ -434,6 +436,7 @@ def run_multi_backtest(
     transaction_cost_bps: int = 10,
     slippage_bps: int = 0,
     cost_model: CostModel | None = None,
+    strategy_params: dict | None = None,
 ) -> BacktestResult:
     """Run an N-asset (cross-sectional / portfolio) strategy in a single cerebro.
 
@@ -472,7 +475,7 @@ def run_multi_backtest(
     for prices, name in zip(prices_list, feed_names, strict=True):
         aligned = prices.loc[common_index].sort_index()
         cerebro.adddata(bt.feeds.PandasData(dataname=aligned), name=name)
-    cerebro.addstrategy(strategy_cls)
+    cerebro.addstrategy(strategy_cls, **(strategy_params or {}))
     _add_analyzers(cerebro)
 
     strategy = cerebro.run()[0]
