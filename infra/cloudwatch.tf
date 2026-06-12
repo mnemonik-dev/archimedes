@@ -55,10 +55,6 @@ resource "aws_cloudwatch_metric_alarm" "ec2_cpu_high" {
   tags                = { Project = var.project_name }
 }
 
-# Requires the CloudWatch agent on the instance to publish mem_used_percent
-# (namespace CWAgent). If the agent is not installed this alarm sits in
-# INSUFFICIENT_DATA — harmless, and a useful nudge to install it. See the
-# runbook for the agent install snippet.
 resource "aws_cloudwatch_metric_alarm" "ec2_status_check_failed" {
   alarm_name          = "${var.project_name}-ec2-status-check-failed"
   alarm_description   = "EC2 instance/system status check failed — host unhealthy."
@@ -202,9 +198,9 @@ resource "aws_cloudwatch_dashboard" "ops" {
       {
         type = "metric", x = 0, y = 0, width = 12, height = 6,
         properties = {
-          title  = "EC2 CPU",
-          region = var.aws_region,
-          view   = "timeSeries",
+          title   = "EC2 CPU",
+          region  = var.aws_region,
+          view    = "timeSeries",
           metrics = [["AWS/EC2", "CPUUtilization", "InstanceId", aws_instance.archimedes.id]]
         }
       },
@@ -223,10 +219,10 @@ resource "aws_cloudwatch_dashboard" "ops" {
       {
         type = "metric", x = 0, y = 6, width = 12, height = 6,
         properties = {
-          title  = "ALB target latency (p95)",
-          region = var.aws_region,
-          view   = "timeSeries",
-          stat   = "p95",
+          title   = "ALB target latency (p95)",
+          region  = var.aws_region,
+          view    = "timeSeries",
+          stat    = "p95",
           metrics = [["AWS/ApplicationELB", "TargetResponseTime", "LoadBalancer", aws_lb.main.arn_suffix, "TargetGroup", aws_lb_target_group.backend.arn_suffix]]
         }
       },
