@@ -263,7 +263,18 @@ async def get_portfolio_cvar():
         return PortfolioCVaRResponse(
             strategy_count=len(strategies),
             lookback_days=0,
-            levels=[],
+            levels=[
+                CVaRLevel(
+                    confidence=c,
+                    var_historical=0.0,
+                    cvar_historical=0.0,
+                    var_parametric=0.0,
+                    cvar_parametric=0.0,
+                    fat_tails=False,
+                    sample_size=0,
+                )
+                for c in (0.90, 0.95, 0.99)
+            ],
         )
 
     # Equal-weight portfolio daily returns: average across strategies
@@ -304,6 +315,12 @@ async def get_portfolio_cvar():
         lookback_days=n,
         levels=levels,
     )
+
+
+def _strategy_delta(sharpe: float, cagr: float, tau: float = 30 / 365, r: float = 0.045, q: float = 0.02) -> float:
+    """ATM call delta for a strategy whose implied vol is abs(cagr)/sharpe."""
+    vol = abs(cagr) / sharpe if sharpe > 0 else 0.20
+    return _bs_atm_greeks(vol, tau, r, q)["delta"]
 
 
 def _bs_atm_greeks(sigma: float, tau: float, r: float, q: float) -> dict[str, float]:
