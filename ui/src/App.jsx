@@ -11,6 +11,9 @@ import StrategyPassport from './components/StrategyPassport'
 import CorpusExplorer from './components/CorpusExplorer'
 import Reasoning from './components/Reasoning'
 import Architecture from './components/Architecture'
+import RiskAnalysis from './components/RiskAnalysis'
+import PortfolioAdvisorPanels from './components/PortfolioAdvisorPanels'
+import BacktestVisualizer from './components/BacktestVisualizer'
 import VaultDetail from './components/VaultDetail'
 import OnboardingTour, { hasCompletedOnboarding } from './components/OnboardingTour'
 import WalletGate from './components/WalletGate'
@@ -29,6 +32,7 @@ const PAGE_TO_PATH = {
   architecture: '/architecture',
   library:   '/library',
   corpus:    '/corpus',
+  quant:     '/quant',
   portfolio: '/portfolio',
   reasoning: '/reasoning',
   learnings: '/learnings',
@@ -170,6 +174,7 @@ export default function App() {
       architecture:   'Architecture · Archimedes',
       library:        'Library · Archimedes',
       corpus:         'Corpus · Archimedes',
+      quant:          'Quant Lab · Archimedes',
       portfolio:      'Portfolio · Archimedes',
       reasoning:      'Reasoning · Archimedes',
       learnings:      'Learnings · Archimedes',
@@ -222,6 +227,22 @@ export default function App() {
       )
       case 'strategy':     return <StrategyPassport strategyId={selectedStrategy} onNavigate={navigateToPage} walletAddr={walletAddr} />
       case 'corpus':       return <CorpusExplorer />
+      case 'quant':        return (
+        <div className="quant-lab">
+          <div className="max-w-[720px] mb-6">
+            <h2 className="serif text-[2rem] mb-2.5">Quant Lab</h2>
+            <p className="body">
+              Interactive risk, optimization, and backtest visualizations. These
+              panels render with illustrative sample data until wired to a live
+              vault or backtest — the math (VaR/CVaR, rolling Sharpe, Kelly,
+              drawdown, walk-forward) is computed client-side from the series shown.
+            </p>
+          </div>
+          <RiskAnalysis />
+          <div className="mt-8"><PortfolioAdvisorPanels /></div>
+          <div className="mt-8"><BacktestVisualizer /></div>
+        </div>
+      )
       case 'portfolio':    return (
         <WalletGate
           walletAddr={walletAddr}
