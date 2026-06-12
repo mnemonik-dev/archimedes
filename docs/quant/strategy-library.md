@@ -12,7 +12,7 @@
 > adaptation caveat, that caveat is reproduced here. For strategies whose full
 > methodology is non-trivial, see the file header for the complete write-up.
 
-This page documents the **25 strategy files** in the library as of this writing.
+This page documents the **31 strategy files** in the library as of this writing.
 Each carries an academic or practitioner anchor, a `REGIME_TAG`
 (`bull` / `bear` / `regime_neutral`), and the honest paper-vs-implementation
 delta. Admission to Tier 1 still requires passing the four-gate
@@ -109,6 +109,33 @@ carry crash risk at trend reversals.
   Data-snooping caveat (Sullivan, Timmermann & White 1999) applies; the performance
   claim we stand behind is the post-gate one, `paper_claimed_*` null. *(See file
   header.)*
+
+### Blitz, Huij & Martens (2011) — residual momentum
+- **File:** `blitz_hanauer_2010_rmom.py`
+- **Paper:** *Residual Momentum*, Journal of Empirical Finance, 2011.
+- **Anomaly:** standard momentum conflates alpha with market-beta exposure; rank
+  assets instead by their **beta-adjusted** formation-window return (the residual
+  after subtracting `beta × market_return`). The paper reports a higher Sharpe than
+  total-return momentum, lower correlation with conventional momentum factors.
+- **Regime:** `bull`.
+- **v1 caveat:** the paper's results are for a broad equity cross-section; the v1
+  adaptation ranks a 5-asset basket with a rolling single-factor OLS beta vs
+  `datas[0]` (SPY), so `paper_claimed_*` are null. With few assets the beta
+  adjustment can amplify rather than reduce noise. Note the filename says
+  `blitz_hanauer_2010` but the documented anchor is Blitz, Huij & Martens (2011).
+  *(See file header.)*
+
+### Novy-Marx (2012) — intermediate-horizon "quality" momentum
+- **File:** `novy_marx_2012_quality_momentum.py`
+- **Paper:** *Is Momentum Really Momentum?*, Journal of Financial Economics, 2012.
+- **Anomaly:** the months-7–12 formation window (skipping recent months) drives most
+  of the standard 12-1 momentum signal; short-horizon continuation is largely noise.
+- **Regime:** `bull` (quality leg partially defends in bear).
+- **v1 caveat:** the composite is 50% intermediate-horizon momentum + 50% a
+  **price-based quality score** (information ratio over 63 bars) — the quality
+  filter is an Archimedes addition layered on the paper's refined momentum window,
+  not the fundamental quality of the AQR QMJ paper. US-stock cross-section results
+  don't transfer to the 5-asset basket; `paper_claimed_*` null. *(See file header.)*
 
 ---
 
@@ -207,6 +234,21 @@ diverged should revert. Built to be **regime-neutral** because the bet is on the
   documented anchor and methodology are the Fama–French (1988) D/P study. Treat as a
   yield-tilt proxy. *(See file header.)*
 
+### Asness, Moskowitz & Pedersen (2013) — cross-asset value
+- **File:** `asness_moskowitz_2013_value.py`
+- **Paper:** *Value and Momentum Everywhere*, Journal of Finance, 2013.
+- **Anomaly:** value and momentum premia exist across eight asset classes (equities,
+  indices, bonds, currencies, commodities); for asset classes, "cheap" is proxied by
+  long-horizon return reversal. The paper reports a value-factor Sharpe of ~0.6
+  averaged across classes — and that value and momentum are **negatively
+  correlated**, making them natural complements.
+- **Regime:** `bear` (value mean-reverts as expensive assets de-rate).
+- **v1 caveat:** without fundamental ratios, cheapness is a **price-based proxy**
+  (negative deviation of price from its rolling mean) per the paper's Appendix
+  Table AI proxies — cheapness relative to recent history, not intrinsic value.
+  Universe is 5 assets vs the paper's 40+ markets; `paper_claimed_*` null. *(See
+  file header.)*
+
 ---
 
 ## Sleeve: Quality / defensive
@@ -222,6 +264,51 @@ diverged should revert. Built to be **regime-neutral** because the bet is on the
 - **v1 caveat:** the paper is a *critique-and-prescription* on factor investing, not
   a single mechanical strategy; the implementation operationalizes its defensive
   prescription. *(See file header.)*
+
+### Ang, Hodrick, Xing & Zhang (2006) — low idiosyncratic volatility
+- **File:** `ang_hodrick_2006_low_idiovol.py`
+- **Paper:** *The Cross-Section of Volatility and Expected Returns*, Journal of
+  Finance, 2006.
+- **Anomaly:** stocks with high idiosyncratic volatility earn anomalously **low**
+  subsequent returns — the paper reports a −1.06%/month value-weighted quintile
+  spread on US stocks 1963–2000, contradicting the risk-return tradeoff. Long
+  low-idiovol, short high-idiovol.
+- **Regime:** `bear` (low-vol anomaly strongest in defensive/risk-off regimes).
+- **v1 caveat:** residuals come from a rolling **single-factor CAPM** vs `datas[0]`
+  (SPY), not the paper's Fama–French three-factor model, so the idiovol estimate is
+  noisier. The paper's −1.06%/month is context for a broad stock cross-section, not
+  a benchmark for the 5-asset basket; `paper_claimed_*` null. Short-selling costs
+  are not modelled. *(See file header.)*
+
+### Frazzini & Pedersen (2014) — Betting Against Beta (BAB)
+- **File:** `frazzini_pedersen_2014_bab.py`
+- **Paper:** *Betting Against Beta*, Journal of Financial Economics, 2014.
+- **Anomaly:** the Security Market Line is empirically flat or inverted —
+  leverage-constrained investors bid up high-beta assets, compressing their
+  risk-adjusted returns. Long low-beta (levered to unit beta), short high-beta
+  (delevered).
+- **Regime:** `bear` (low-beta legs — Treasuries, gold — give flight-to-quality
+  exposure when high-beta assets draw down).
+- **v1 caveat:** ranks the 5-asset basket on a rolling 63-day OLS beta vs SPY with
+  equal weight in each leg — **no explicit leverage rescaling to unit beta** is
+  applied; only the long-low/short-high sign survives. Broad US-stock results don't
+  transfer; `paper_claimed_*` null, and with so few assets each leg may hold only
+  one or two names. *(See file header.)*
+
+### Asness, Frazzini & Pedersen (2019) — Quality Minus Junk (price-based proxy)
+- **File:** `novy_marx_2013_qmj.py`
+- **Paper:** *Quality Minus Junk*, Review of Accounting Studies, 2019.
+- **Anomaly:** a composite quality score (profitability, safety, growth, payout from
+  accounting fundamentals) earns a Sharpe of ~1.0 long-quality/short-junk on US
+  stocks 1956–2012, largely independent of market, value, and momentum factors.
+- **Regime:** `regime_neutral` (quality premium persistent across regimes; strongest
+  when junk sells off).
+- **v1 caveat:** the engine has no fundamental data, so the four accounting
+  dimensions are replaced by a single **price-based information-ratio proxy**
+  (mean/std of daily returns) capturing only the profitability + safety dimensions —
+  a loose approximation, not a replication; `paper_claimed_*` null. Note the
+  filename says `novy_marx_2013` but the documented anchor is Asness, Frazzini &
+  Pedersen (2019). *(See file header.)*
 
 ---
 
