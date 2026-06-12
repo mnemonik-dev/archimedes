@@ -27,6 +27,7 @@ const NAV = [
   { group: 'Strategy', items: [
     { id: 'generate', label: 'Generate', icon: 'i-lucide-sparkles' },
     { id: 'library',  label: 'Library',  icon: 'i-lucide-line-chart' },
+    { id: 'quant',    label: 'Quant Lab', icon: 'i-lucide-flask-conical' },
   ]},
   { group: 'Position', items: [
     { id: 'portfolio', label: 'Portfolio', icon: 'i-lucide-layout-dashboard' },
@@ -42,6 +43,7 @@ export const PAGE_LABELS = {
   architecture: 'Architecture',
   library: 'Library',
   corpus: 'Corpus',
+  quant: 'Quant Lab',
   portfolio: 'Portfolio',
   reasoning: 'Reasoning',
   learnings: 'Learnings',
