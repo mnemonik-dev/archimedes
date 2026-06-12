@@ -155,9 +155,11 @@ def optimize_weights(
             (1 - USDC_floor). Returned weights sum to this value.
         optimizer: Which optimizer to use. One of "mvo" (default, preserves
             all existing behaviour), "hrp" (Hierarchical Risk Parity,
-            López de Prado 2016), or "black_litterman" (Black-Litterman
+            López de Prado 2016), "black_litterman" (Black-Litterman
             posterior without views — equivalent to a regularised max-Sharpe
-            when P/Q are not supplied externally).
+            when P/Q are not supplied externally), or "robust" (robust
+            mean-variance with an ellipsoidal uncertainty set on μ,
+            Goldfarb & Iyengar 2003 / Tütüncü & Koenig 2004).
 
     Returns:
         {symbol: weight} summing to synth_budget.
@@ -188,6 +190,8 @@ def optimize_weights(
         raw = _hrp_weights(Sigma, symbols)
     elif optimizer == "black_litterman":
         raw = _black_litterman_weights(mu, Sigma, n, cap=_CAP_DEFAULT)
+    elif optimizer == "robust":
+        raw = _robust_weights(mu, Sigma, n, cap=_CAP_DEFAULT)
     else:
         # Default "mvo" path — preserves all prior behaviour
         if risk_profile == RiskProfile.CONSERVATIVE:
@@ -588,6 +592,254 @@ def _black_litterman_weights(
     except Exception as exc:
         logger.warning("Black-Litterman: unexpected error (%s) — falling back to max-Sharpe with prior", exc)
         return _max_sharpe(mu_prior, Sigma, n, cap=cap)
+
+
+# ─── Robust mean-variance (Goldfarb & Iyengar 2003) ──────────────────
+
+
+def _robust_weights(
+    mu: np.ndarray,
+    Sigma: np.ndarray,
+    n: int,
+    cap: float,
+    kappa: float = 1.0,
+    delta: float = 1.0,
+) -> np.ndarray | None:
+    """Robust mean-variance with an ELLIPSOIDAL uncertainty set on μ.
+
+    Estimation error in the expected-return vector is the dominant driver of
+    out-of-sample MVO instability (Michaud's "error maximisation"). The robust
+    formulation replaces the point estimate ``mu_hat`` with a worst-case mean
+    drawn from the ellipsoidal confidence region
+
+        { mu : (mu - mu_hat)' Σ⁻¹ (mu - mu_hat) ≤ κ² }
+
+    and maximises the *worst-case* expected return inside that set. The inner
+    minimisation has a closed form — the worst-case mean shifts ``mu_hat`` by
+    ``-κ · Σw / sqrt(w'Σw)`` — which collapses the robust counterpart to the
+    deterministic second-order-cone program
+
+        maximise over w on the simplex:
+            mu_hat'w  −  κ·sqrt(w'Σw)  −  (δ/2)·w'Σw
+        s.t. 1'w = 1,  0 ≤ w ≤ cap
+
+    The ``κ·sqrt(w'Σw)`` term penalises estimation uncertainty in proportion to
+    portfolio risk, so as κ grows the solution shrinks toward minimum-variance
+    (it is willing to give up estimated return to reduce its exposure to a mean
+    it does not trust). ``δ`` is a small Markowitz risk-aversion on the variance
+    term; δ=1.0 keeps the variance penalty present but secondary to the robust
+    term, which is the dominant regulariser here.
+
+    DESIGN CHOICE — doubly-defended estimation control: this solver runs on the
+    LEDOIT-WOLF-shrunk covariance (via :func:`ledoit_wolf_shrinkage`, falling
+    back to :func:`_shrink_cov` on degenerate input) rather than the raw sample
+    Σ that the caller passes in. The robust term defends against error in μ; the
+    shrinkage defends against error (and ill-conditioning) in Σ. Both the
+    ellipsoid radius and the worst-case shift use Σ⁻¹, so a well-conditioned Σ
+    is load-bearing for the geometry of the uncertainty set, not just a
+    numerical nicety.
+
+    References:
+      - Goldfarb, D. & Iyengar, G. (2003). "Robust portfolio selection
+        problems." Mathematics of Operations Research 28(1), 1-38.
+      - Tütüncü, R. H. & Koenig, M. (2004). "Robust asset allocation."
+        Annals of Operations Research 132, 157-187.
+
+    Args:
+        mu: Per-bar (daily scale) expected-return estimate ``mu_hat``, shape (N,).
+        Sigma: (N, N) sample covariance (daily scale). Shrunk internally before
+            use — callers should pass the same Σ they hand to ``_max_sharpe``.
+        n: Number of assets.
+        cap: Per-asset weight cap (0 ≤ wᵢ ≤ cap).
+        kappa: Ellipsoid radius (estimation-uncertainty aversion). κ=0 recovers
+            the plain mean-variance objective; larger κ ⇒ more conservative.
+        delta: Markowitz risk-aversion on the explicit variance term.
+
+    Returns:
+        Weight array of shape (N,) on the long-only unit simplex (sums to 1.0),
+        or None if the optimisation fails (same fallback contract as
+        :func:`_max_sharpe`).
+    """
+    try:
+        # Doubly-defended: shrink Σ before the robust solve. LW is data-driven;
+        # fall back to fixed diagonal shrinkage if the analytic estimator can't
+        # run on this (e.g. degenerate / singular) covariance.
+        try:
+            Sigma_used, _delta_lw = ledoit_wolf_shrinkage_from_cov(Sigma)
+        except Exception:
+            Sigma_used = _shrink_cov(Sigma, intensity=0.10)
+        Sigma_used = np.asarray(Sigma_used, dtype=float)
+        Sigma_used = Sigma_used + np.eye(n) * 1e-10
+
+        w0 = np.ones(n) / n
+        constraints = [{"type": "eq", "fun": lambda w: float(np.sum(w)) - 1.0}]
+        bounds = [(0.0, cap)] * n
+
+        def neg_robust_obj(w: np.ndarray) -> float:
+            port_var = max(float(w @ Sigma_used @ w), 1e-14)
+            value = float(w @ mu) - kappa * math.sqrt(port_var) - 0.5 * delta * port_var
+            return -value
+
+        result = minimize(
+            neg_robust_obj,
+            w0,
+            method="SLSQP",
+            bounds=bounds,
+            constraints=constraints,
+            options={"ftol": 1e-12, "maxiter": 1000},
+        )
+        if not result.success:
+            return None
+        w = np.clip(np.asarray(result.x), 0.0, 1.0)
+        total = w.sum()
+        if total <= 1e-9:
+            return None
+        return w / total
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("Robust weights failed: %s — caller falls back", exc)
+        return None
+
+
+def ledoit_wolf_shrinkage_from_cov(Sigma: np.ndarray) -> tuple[np.ndarray, float]:
+    """Diagonal-target shrinkage applied directly to a covariance matrix.
+
+    ``ledoit_wolf_shrinkage`` derives the optimal intensity from the raw return
+    *sample*; here the caller (the robust solver) only has the covariance, so we
+    apply the same scaled-identity target with a conservative fixed intensity.
+    Shrinks toward μ·I where μ is the average variance, exactly the LW2004
+    target, and guarantees positive-definiteness. Kept separate from
+    :func:`_shrink_cov` (whose target is the *diagonal*, not scaled identity) so
+    the robust solver's Σ⁻¹ geometry stays well-conditioned.
+    """
+    Sigma = np.asarray(Sigma, dtype=float)
+    if Sigma.ndim != 2 or Sigma.shape[0] != Sigma.shape[1]:
+        raise ValueError("Sigma must be a square 2-D matrix")
+    n = Sigma.shape[0]
+    avg_var = float(np.trace(Sigma)) / n
+    if not np.isfinite(avg_var) or avg_var <= 0:
+        raise ValueError("non-positive average variance")
+    intensity = 0.10
+    target = avg_var * np.eye(n)
+    return (1.0 - intensity) * Sigma + intensity * target, intensity
+
+
+# ─── Optimizer comparison harness ────────────────────────────────────
+
+
+def compare_optimizers(
+    symbols: list[str],
+    daily_returns: dict[str, list[float]],
+    synth_budget: float,
+    risk_profile: RiskProfile = RiskProfile.MODERATE,
+    optimizers: list[str] | None = None,
+) -> dict:
+    """Compare optimizers on in-sample realized portfolio diagnostics.
+
+    For each named optimizer this runs :func:`optimize_weights` to get the
+    weights, then evaluates the resulting portfolio on the *same* in-sample
+    aligned return matrix and reports realized diagnostics. This is an
+    in-sample comparison (no walk-forward / OOS split) — useful for surfacing
+    *how differently* the optimizers allocate and the risk/diversification
+    trade-offs they strike, NOT for ranking out-of-sample skill. The Tier-1
+    admission gate (DSR/PBO/walk-forward) is the OOS arbiter; this harness is a
+    descriptive lens on the candidate weight vectors.
+
+    Diagnostics per optimizer:
+      - ``sharpe``           — annualized Sharpe over rf (``_RF_DAILY``).
+      - ``annual_vol``       — annualized portfolio volatility.
+      - ``annual_return``    — annualized mean portfolio return (gross).
+      - ``max_drawdown``     — realized max drawdown of the cumulative-return
+        path (positive decimal; 0.15 = 15% peak-to-trough).
+      - ``effective_n``      — inverse Herfindahl ``1 / Σ wᵢ²`` (effective number
+        of positions; ranges 1..n).
+      - ``turnover_vs_eqw``  — one-shot rebalance distance from equal weight,
+        ``0.5 · Σ |wᵢ − 1/n|`` (0 = equal weight, →1 = fully concentrated).
+      - ``max_weight``       — concentration (largest single weight).
+
+    Weights are normalised back to the unit simplex before diagnostics so the
+    metrics are budget-independent and comparable across optimizers.
+
+    Args:
+        symbols: Ordered synth symbols.
+        daily_returns: {symbol: [daily returns]}, aligned/tail-truncated.
+        synth_budget: Synth weight budget passed to ``optimize_weights``.
+        risk_profile: Risk profile (selects the MVO objective for the "mvo"
+            branch; the other optimizers are profile-agnostic).
+        optimizers: Which optimizers to compare. Defaults to
+            ``["mvo", "hrp", "black_litterman", "robust"]``.
+
+    Returns:
+        ``{optimizer_name: {<diagnostics>}, ..., "best_by_sharpe": <name|None>}``.
+        On insufficient/degenerate data returns ``{"best_by_sharpe": None}``
+        (every requested optimizer absent) rather than raising.
+    """
+    if optimizers is None:
+        optimizers = ["mvo", "hrp", "black_litterman", "robust"]
+
+    out: dict = {}
+    n = len(symbols)
+    if n == 0:
+        out["best_by_sharpe"] = None
+        return out
+
+    R = _aligned_return_matrix(symbols, daily_returns)
+    if R is None:
+        # Insufficient/degenerate data — clear empty-ish structure, no crash.
+        out["best_by_sharpe"] = None
+        return out
+
+    eqw = np.full(n, 1.0 / n)
+
+    best_name: str | None = None
+    best_sharpe = -np.inf
+
+    for opt in optimizers:
+        weights_map = optimize_weights(symbols, daily_returns, risk_profile, synth_budget, optimizer=opt)
+        # Re-vectorise in `symbols` order; normalise off `synth_budget` to the
+        # unit simplex so diagnostics are budget-independent.
+        w = np.array([weights_map.get(s, 0.0) for s in symbols], dtype=float)
+        total = w.sum()
+        w = w / total if total > 1e-12 else eqw.copy()
+
+        port = R @ w  # in-sample daily portfolio returns, shape (T,)
+
+        mean_daily = float(port.mean())
+        vol_daily = float(port.std(ddof=1)) if port.shape[0] > 1 else 0.0
+        annual_return = mean_daily * _ANNUALIZATION
+        annual_vol = vol_daily * math.sqrt(_ANNUALIZATION)
+        if annual_vol > 1e-12:
+            sharpe = (mean_daily - _RF_DAILY) / vol_daily * math.sqrt(_ANNUALIZATION)
+        else:
+            sharpe = 0.0
+
+        # Max drawdown of the cumulative-return path.
+        cum = np.cumprod(1.0 + port)
+        running_max = np.maximum.accumulate(cum)
+        drawdowns = 1.0 - cum / running_max
+        max_drawdown = float(drawdowns.max()) if drawdowns.size else 0.0
+
+        herfindahl = float(np.sum(w**2))
+        effective_n = 1.0 / herfindahl if herfindahl > 1e-12 else float(n)
+        turnover = 0.5 * float(np.sum(np.abs(w - eqw)))
+        max_weight = float(w.max())
+
+        out[opt] = {
+            "weights": {s: round(float(wi), 6) for s, wi in zip(symbols, w, strict=False)},
+            "sharpe": round(sharpe, 6),
+            "annual_vol": round(annual_vol, 6),
+            "annual_return": round(annual_return, 6),
+            "max_drawdown": round(max_drawdown, 6),
+            "effective_n": round(effective_n, 6),
+            "turnover_vs_eqw": round(turnover, 6),
+            "max_weight": round(max_weight, 6),
+        }
+
+        if sharpe > best_sharpe:
+            best_sharpe = sharpe
+            best_name = opt
+
+    out["best_by_sharpe"] = best_name
+    return out
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────

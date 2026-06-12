@@ -22,7 +22,9 @@ from archimedes.services.portfolio_optimizer import (
     _gmv,
     _max_expected_return,
     _max_sharpe,
+    _robust_weights,
     _shrink_cov,
+    compare_optimizers,
     compute_efficient_frontier,
     correlation_pairs,
     expected_max_drawdown_1y,
@@ -705,3 +707,153 @@ class TestDisplayFor:
         unknown = "sXXXXXXUNKNOWN_DOES_NOT_EXIST"
         result = _display_for(unknown)
         assert result == unknown
+
+
+# ---------------------------------------------------------------------------
+# Section 16 — TestRobustOptimizer
+# ---------------------------------------------------------------------------
+
+
+def _well_conditioned_cov(n: int, seed: int = 13) -> tuple[np.ndarray, np.ndarray]:
+    """(mu, Sigma) for a well-conditioned n-asset daily return set."""
+    rng = np.random.default_rng(seed)
+    X = rng.normal(0.0005, 0.01, (300, n))
+    mu = X.mean(axis=0)
+    Sigma = np.cov(X.T, ddof=1) + np.eye(n) * 1e-8
+    return mu, Sigma
+
+
+class TestRobustOptimizer:
+    def test_simplex_valid_weights(self):
+        n = 4
+        mu, Sigma = _well_conditioned_cov(n, seed=21)
+        w = _robust_weights(mu, Sigma, n, cap=_CAP_DEFAULT, kappa=1.0)
+        assert w is not None
+        assert w.shape == (n,)
+        assert abs(w.sum() - 1.0) < 1e-6
+        assert np.all(w >= -1e-9)
+        assert np.all(w <= _CAP_DEFAULT + 1e-6)
+
+    def test_three_assets_also_valid(self):
+        n = 3
+        mu, Sigma = _well_conditioned_cov(n, seed=44)
+        w = _robust_weights(mu, Sigma, n, cap=_CAP_DEFAULT, kappa=0.5)
+        assert w is not None
+        assert abs(w.sum() - 1.0) < 1e-6
+        assert np.all(w >= -1e-9)
+
+    def test_higher_kappa_more_conservative(self):
+        # One low-vol asset (idx 0) and one high-vol asset (idx 1). The high-vol
+        # asset has the SLIGHTLY higher mean, so at low kappa the optimizer
+        # chases its return; as kappa grows the robust term penalises portfolio
+        # risk in proportion to estimation uncertainty and shifts toward the
+        # low-vol asset. A per-asset cap forces an interior (non-corner) optimum
+        # so the shift is visible rather than both solutions pinning to a bound.
+        mu = np.array([0.0006, 0.0012])  # high-vol asset has higher mean
+        Sigma = np.array([[0.0001, 0.0], [0.0, 0.0064]])  # vol 1% vs 8%
+        n = 2
+        # cap=1.0 leaves the optimum interior (no binding cap) so the κ-driven
+        # shift toward the low-vol asset is visible rather than pinned to a bound.
+        w_low_kappa = _robust_weights(mu, Sigma, n, cap=1.0, kappa=0.0)
+        w_high_kappa = _robust_weights(mu, Sigma, n, cap=1.0, kappa=10.0)
+        assert w_low_kappa is not None and w_high_kappa is not None
+        # Low-vol asset (idx 0) should carry MORE weight at high kappa.
+        assert w_high_kappa[0] > w_low_kappa[0] + 1e-6
+
+    def test_degenerate_singular_cov_handled(self):
+        # Perfectly collinear assets → singular sample covariance. Must either
+        # return None or fall back gracefully to simplex-valid weights, never
+        # crash or emit NaNs.
+        n = 3
+        Sigma = np.ones((n, n))  # rank-1, singular
+        mu = np.array([0.001, 0.001, 0.001])
+        w = _robust_weights(mu, Sigma, n, cap=_CAP_DEFAULT, kappa=1.0)
+        if w is not None:
+            assert abs(w.sum() - 1.0) < 1e-6
+            assert np.all(np.isfinite(w))
+            assert np.all(w >= -1e-9)
+
+    def test_optimize_weights_robust_sums_to_budget(self):
+        returns = _make_returns(3, 80)
+        syms = list(returns.keys())
+        budget = 0.85
+        result = optimize_weights(syms, returns, RiskProfile.MODERATE, synth_budget=budget, optimizer="robust")
+        assert len(result) == len(syms)
+        assert sum(result.values()) == pytest.approx(budget, rel=1e-3)
+        assert all(v >= -1e-8 for v in result.values())
+
+
+# ---------------------------------------------------------------------------
+# Section 17 — TestCompareOptimizers
+# ---------------------------------------------------------------------------
+
+
+_DIAG_KEYS = {
+    "weights",
+    "sharpe",
+    "annual_vol",
+    "annual_return",
+    "max_drawdown",
+    "effective_n",
+    "turnover_vs_eqw",
+    "max_weight",
+}
+
+
+class TestCompareOptimizers:
+    def test_entry_for_every_optimizer_with_all_keys(self):
+        returns = _make_returns(4, 120)
+        syms = list(returns.keys())
+        result = compare_optimizers(syms, returns, synth_budget=1.0)
+        for opt in ["mvo", "hrp", "black_litterman", "robust"]:
+            assert opt in result, f"missing optimizer {opt}"
+            assert _DIAG_KEYS.issubset(result[opt].keys())
+
+    def test_best_by_sharpe_is_a_key(self):
+        returns = _make_returns(4, 120)
+        syms = list(returns.keys())
+        result = compare_optimizers(syms, returns, synth_budget=1.0)
+        best = result["best_by_sharpe"]
+        assert best in ["mvo", "hrp", "black_litterman", "robust"]
+
+    def test_effective_n_in_range_and_max_weight_capped(self):
+        returns = _make_returns(4, 120)
+        syms = list(returns.keys())
+        n = len(syms)
+        result = compare_optimizers(syms, returns, synth_budget=1.0)
+        for opt in ["mvo", "black_litterman", "robust"]:
+            diag = result[opt]
+            assert 1.0 - 1e-6 <= diag["effective_n"] <= n + 1e-6
+            # Constrained solvers respect the per-asset cap (post-normalisation
+            # the cap can scale up by 1/synth_used, but with budget=1.0 it holds).
+            assert diag["max_weight"] <= _CAP_DEFAULT + 1e-6
+
+    def test_custom_optimizer_subset(self):
+        returns = _make_returns(3, 100)
+        syms = list(returns.keys())
+        result = compare_optimizers(syms, returns, synth_budget=1.0, optimizers=["mvo", "robust"])
+        assert set(result.keys()) == {"mvo", "robust", "best_by_sharpe"}
+
+    def test_insufficient_data_returns_empty_structure(self):
+        # Below _MIN_BARS → no crash, best_by_sharpe None, no optimizer entries.
+        returns = {"A": [0.001] * 5, "B": [0.001] * 5}
+        result = compare_optimizers(["A", "B"], returns, synth_budget=1.0)
+        assert result == {"best_by_sharpe": None}
+
+    def test_empty_symbols_returns_empty_structure(self):
+        result = compare_optimizers([], {}, synth_budget=1.0)
+        assert result == {"best_by_sharpe": None}
+
+    def test_correlated_pair_plus_independent_not_fully_concentrated(self):
+        # Two perfectly-correlated assets + one independent. A diversifying
+        # allocator (HRP / robust) must not dump ~100% into a single asset.
+        rng = np.random.default_rng(101)
+        base = rng.normal(0.0005, 0.01, 150)
+        a = base + rng.normal(0, 1e-5, 150)  # ~identical to base
+        b = base + rng.normal(0, 1e-5, 150)  # ~identical to a
+        c = rng.normal(0.0005, 0.01, 150)  # independent
+        returns = {"A": a.tolist(), "B": b.tolist(), "C": c.tolist()}
+        result = compare_optimizers(["A", "B", "C"], returns, synth_budget=1.0)
+        for opt in ["hrp", "robust"]:
+            assert result[opt]["max_weight"] < 0.99, f"{opt} concentrated everything in one asset"
+            assert result[opt]["effective_n"] > 1.0
