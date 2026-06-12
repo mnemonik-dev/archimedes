@@ -1040,7 +1040,13 @@ class TestRunRigorGateCpcvWiring:
 
 
 class TestMonteCarloDSR:
-    """Tests for monte_carlo_dsr_pvalue — circular block bootstrap."""
+    """Tests for monte_carlo_dsr_pvalue — NULL-imposed circular block bootstrap.
+
+    The test is a one-sided bootstrap hypothesis test: H0 Sharpe ≤ threshold.
+    The null is imposed by shifting the series mean (Davison & Hinkley 1997 §4.2),
+    so a genuinely high-Sharpe series produces a LOW p-value and a zero-skill
+    series produces p ≈ 0.5.
+    """
 
     def test_returns_expected_keys(self):
         from archimedes.services.rigor_evaluator import monte_carlo_dsr_pvalue
@@ -1048,7 +1054,14 @@ class TestMonteCarloDSR:
         rng = np.random.default_rng(0)
         daily = list(rng.normal(0.001, 0.01, 300))
         result = monte_carlo_dsr_pvalue(daily, dsr_threshold=0.0, n_trials=200, seed=42)
-        for key in ("pvalue", "bootstrap_sharpe_mean", "bootstrap_sharpe_std", "n_trials", "passes_at_5pct"):
+        for key in (
+            "pvalue",
+            "observed_sharpe",
+            "bootstrap_sharpe_mean",
+            "bootstrap_sharpe_std",
+            "n_trials",
+            "passes_at_5pct",
+        ):
             assert key in result, f"Missing key: {key}"
 
     def test_pvalue_in_unit_interval(self):
@@ -1060,15 +1073,51 @@ class TestMonteCarloDSR:
         assert 0.0 <= result["pvalue"] <= 1.0
 
     def test_strong_positive_series_low_pvalue(self):
-        """A series with very high Sharpe should have a low empirical p-value
-        (rarely beaten by bootstrap replicates)."""
+        """A series with very high Sharpe is rarely reproduced by the zero-skill
+        null world → low p-value. This only works because the null is imposed
+        (mean shifted to rf); resampling the raw series would give p ≈ 0.5."""
         from archimedes.services.rigor_evaluator import monte_carlo_dsr_pvalue
 
         # 0.3% daily return, 0.5% daily vol → annualised Sharpe ≈ 9
         rng = np.random.default_rng(2)
         daily = list(rng.normal(0.003, 0.005, 500))
         result = monte_carlo_dsr_pvalue(daily, dsr_threshold=0.0, n_trials=500, seed=99)
-        assert result["pvalue"] < 0.10, f"Expected low p-value for high-Sharpe series, got {result['pvalue']}"
+        assert result["pvalue"] < 0.05, f"Expected low p-value for high-Sharpe series, got {result['pvalue']}"
+        assert result["observed_sharpe"] > 5.0
+
+    def test_zero_skill_series_pvalue_near_half(self):
+        """A mean-zero-excess series tested against a zero-Sharpe null: observed
+        Sharpe ≈ null Sharpe, so p-value should sit around 0.5 (not extreme)."""
+        from archimedes.services.rigor_evaluator import monte_carlo_dsr_pvalue
+
+        rng = np.random.default_rng(11)
+        # mean exactly the daily rf so excess Sharpe ≈ 0
+        rf_daily = 0.05 / 252
+        daily = list(rng.normal(rf_daily, 0.01, 600))
+        result = monte_carlo_dsr_pvalue(daily, dsr_threshold=0.0, n_trials=500, seed=5)
+        assert 0.2 < result["pvalue"] < 0.8, f"Zero-skill series should give p≈0.5, got {result['pvalue']}"
+
+    def test_higher_threshold_raises_pvalue(self):
+        """Pinning the null to a higher Sharpe hurdle makes a fixed observed
+        Sharpe less significant → larger p-value (monotone in threshold)."""
+        from archimedes.services.rigor_evaluator import monte_carlo_dsr_pvalue
+
+        rng = np.random.default_rng(4)
+        daily = list(rng.normal(0.0015, 0.01, 500))
+        p_low = monte_carlo_dsr_pvalue(daily, dsr_threshold=0.0, n_trials=500, seed=3)["pvalue"]
+        p_high = monte_carlo_dsr_pvalue(daily, dsr_threshold=2.0, n_trials=500, seed=3)["pvalue"]
+        assert p_high >= p_low, f"Higher null hurdle must not lower the p-value ({p_high} < {p_low})"
+
+    def test_null_bootstrap_centered_on_threshold(self):
+        """By construction the null bootstrap Sharpe distribution centers near
+        the threshold it was pinned to."""
+        from archimedes.services.rigor_evaluator import monte_carlo_dsr_pvalue
+
+        rng = np.random.default_rng(8)
+        daily = list(rng.normal(0.002, 0.01, 600))
+        result = monte_carlo_dsr_pvalue(daily, dsr_threshold=0.0, n_trials=800, seed=2)
+        # Null pinned to Sharpe 0 → bootstrap mean Sharpe should be near 0
+        assert abs(result["bootstrap_sharpe_mean"]) < 0.75
 
     def test_degenerate_constant_series_returns_nan(self):
         from archimedes.services.rigor_evaluator import monte_carlo_dsr_pvalue
