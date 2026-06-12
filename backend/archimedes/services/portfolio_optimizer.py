@@ -23,6 +23,7 @@ from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
+from scipy.cluster.hierarchy import leaves_list, linkage
 from scipy.optimize import minimize
 
 from archimedes.models.portfolio import RiskProfile
@@ -140,6 +141,7 @@ def optimize_weights(
     daily_returns: dict[str, list[float]],
     risk_profile: RiskProfile,
     synth_budget: float,
+    optimizer: str = "mvo",
 ) -> dict[str, float]:
     """Compute optimal synth-asset weights for a vault risk profile.
 
@@ -151,6 +153,11 @@ def optimize_weights(
         risk_profile: Vault risk profile — selects the MVO objective.
         synth_budget: Total weight budget for synth assets, i.e.
             (1 - USDC_floor). Returned weights sum to this value.
+        optimizer: Which optimizer to use. One of "mvo" (default, preserves
+            all existing behaviour), "hrp" (Hierarchical Risk Parity,
+            López de Prado 2016), or "black_litterman" (Black-Litterman
+            posterior without views — equivalent to a regularised max-Sharpe
+            when P/Q are not supplied externally).
 
     Returns:
         {symbol: weight} summing to synth_budget.
@@ -164,7 +171,8 @@ def optimize_weights(
 
     if R is None:
         logger.warning(
-            "Insufficient return data for MVO (%s) — using equal weight",
+            "Insufficient return data for %s (%s) — using equal weight",
+            optimizer,
             risk_profile.value,
         )
         return _equal_weight(symbols, synth_budget)
@@ -176,23 +184,31 @@ def optimize_weights(
         Sigma = np.array([[float(Sigma)]])
     Sigma += np.eye(n) * 1e-8  # numerical regularization
 
-    if risk_profile == RiskProfile.CONSERVATIVE:
-        raw = _gmv(Sigma, n, cap=_CAP_DEFAULT)
-    elif risk_profile in (RiskProfile.MODERATE, RiskProfile.AGGRESSIVE):
-        raw = _max_sharpe(mu, Sigma, n, cap=_CAP_DEFAULT)
+    if optimizer == "hrp":
+        raw = _hrp_weights(Sigma, symbols)
+    elif optimizer == "black_litterman":
+        raw = _black_litterman_weights(mu, Sigma, n, cap=_CAP_DEFAULT)
     else:
-        raw = _max_expected_return(mu, n, cap=_CAP_HYPER)
+        # Default "mvo" path — preserves all prior behaviour
+        if risk_profile == RiskProfile.CONSERVATIVE:
+            raw = _gmv(Sigma, n, cap=_CAP_DEFAULT)
+        elif risk_profile in (RiskProfile.MODERATE, RiskProfile.AGGRESSIVE):
+            raw = _max_sharpe(mu, Sigma, n, cap=_CAP_DEFAULT)
+        else:
+            raw = _max_expected_return(mu, n, cap=_CAP_HYPER)
 
     if raw is None:
         logger.warning(
-            "scipy optimization failed for %s — using equal weight",
+            "%s optimization failed for %s — using equal weight",
+            optimizer,
             risk_profile.value,
         )
         return _equal_weight(symbols, synth_budget)
 
     scaled = {sym: round(float(w) * synth_budget, 6) for sym, w in zip(symbols, raw, strict=False)}
     logger.info(
-        "MVO [%s]: %s",
+        "%s [%s]: %s",
+        optimizer.upper(),
         risk_profile.value,
         "  ".join(f"{s}={w:.1%}" for s, w in scaled.items()),
     )
@@ -357,6 +373,221 @@ def _max_expected_return(mu: np.ndarray, n: int, cap: float) -> np.ndarray | Non
     if total <= 0:
         return None
     return w / total
+
+
+# ─── HRP — Hierarchical Risk Parity (López de Prado 2016) ────────────
+
+
+def _quasi_diag(link: np.ndarray) -> list[int]:
+    """Extract the seriated leaf order from a scipy linkage matrix.
+
+    Performs the same recursive unrolling as ``scipy.cluster.hierarchy.leaves_list``
+    but is kept here for documentation clarity. In practice we call
+    ``scipy.cluster.hierarchy.leaves_list`` directly.
+
+    Reference: de Prado (2016), "Building Diversified Portfolios that
+    Outperform Out-of-Sample", Journal of Portfolio Management 42(4), pp. 59-69.
+    """
+    return list(leaves_list(link))
+
+
+def _hrp_recurse(cov: np.ndarray, order: list[int]) -> np.ndarray:
+    """Recursive bisection HRP weight allocator.
+
+    Splits *order* into two halves, computes the variance of each half as an
+    equal-weighted sub-portfolio, then allocates weight inversely proportional
+    to sub-portfolio variance. Recurses until each sub-portfolio contains a
+    single asset.
+
+    Args:
+        cov: Full covariance matrix (shape N×N). Rows/cols match the original
+            symbol ordering, NOT the seriated order.
+        order: Current list of asset indices (in seriated order) to allocate
+            weight across. Indices refer to rows/cols of *cov*.
+
+    Returns:
+        Weight vector of length ``len(order)`` in the same index ordering as
+        *order*.
+    """
+    n = len(order)
+    if n == 1:
+        return np.array([1.0])
+
+    half = n // 2
+    left_idx = order[:half]
+    right_idx = order[half:]
+
+    def _cluster_var(idx: list[int]) -> float:
+        """Variance of an equal-weighted sub-portfolio of the given assets."""
+        k = len(idx)
+        w = np.full(k, 1.0 / k)
+        sub_cov = cov[np.ix_(idx, idx)]
+        return float(w @ sub_cov @ w)
+
+    var_left = _cluster_var(left_idx)
+    var_right = _cluster_var(right_idx)
+    # Inverse-variance allocation between the two clusters
+    total_inv = 1.0 / max(var_left, 1e-14) + 1.0 / max(var_right, 1e-14)
+    alpha_left = (1.0 / max(var_left, 1e-14)) / total_inv  # weight for left cluster
+
+    w_left = _hrp_recurse(cov, left_idx) * alpha_left
+    w_right = _hrp_recurse(cov, right_idx) * (1.0 - alpha_left)
+    return np.concatenate([w_left, w_right])
+
+
+def _hrp_weights(Sigma: np.ndarray, symbols: list[str]) -> np.ndarray | None:
+    """Hierarchical Risk Parity weights (López de Prado 2016).
+
+    Steps:
+      1. Cov → corr
+      2. Distance matrix ``d_ij = sqrt(0.5 * (1 - corr_ij))``
+      3. Single-linkage hierarchical clustering via scipy
+      4. Quasi-diagonalisation (seriation) via ``leaves_list``
+      5. Recursive-bisection inverse-variance allocation
+      6. Weights returned in the original ``symbols`` order
+
+    Reference: de Prado (2016), "Building Diversified Portfolios that
+    Outperform Out-of-Sample", *Journal of Portfolio Management* 42(4), 59-69.
+
+    Args:
+        Sigma: (N, N) covariance matrix (daily-scale, already regularised).
+        symbols: Asset labels corresponding to Sigma rows/cols (used only for
+            logging; weights are returned in their order).
+
+    Returns:
+        Weight array of shape (N,) in the same order as *symbols*, or None if
+        the computation fails (degenerate covariance, clustering error, etc.).
+    """
+    n = Sigma.shape[0]
+    if n == 1:
+        return np.array([1.0])
+
+    try:
+        # Cov → corr
+        std = np.sqrt(np.diag(Sigma))
+        std_safe = np.where(std > 1e-12, std, 1e-12)
+        corr = Sigma / np.outer(std_safe, std_safe)
+        np.clip(corr, -1.0, 1.0, out=corr)
+
+        # Distance matrix (upper triangle condensed vector for scipy)
+        dist_sq = 0.5 * (1.0 - corr)
+        np.clip(dist_sq, 0.0, None, out=dist_sq)
+        dist = np.sqrt(dist_sq)
+
+        # Condensed upper-triangle vector (scipy format)
+        condensed: list[float] = []
+        for i in range(n):
+            for j in range(i + 1, n):
+                condensed.append(float(dist[i, j]))
+        condensed_arr = np.array(condensed, dtype=float)
+
+        # Single-linkage hierarchical clustering
+        link = linkage(condensed_arr, method="single")
+
+        # Seriated leaf order
+        order = _quasi_diag(link)
+
+        # Recursive-bisection allocation
+        weights_ordered = _hrp_recurse(Sigma, order)
+
+        # Map back to original symbol order
+        # 'order' tells us: weights_ordered[k] is the weight for original asset order[k]
+        raw = np.zeros(n)
+        for k, orig_idx in enumerate(order):
+            raw[orig_idx] = weights_ordered[k]
+
+        # Normalise (should already sum to 1 up to float precision)
+        total = raw.sum()
+        if total <= 1e-9:
+            return None
+        return raw / total
+
+    except Exception as exc:
+        logger.warning("HRP weights failed: %s — falling back to equal weight", exc)
+        return None
+
+
+# ─── Black-Litterman (He & Litterman 1999) ───────────────────────────
+
+
+def _black_litterman_weights(
+    mu_prior: np.ndarray,
+    Sigma: np.ndarray,
+    n: int,
+    cap: float,
+    P: np.ndarray | None = None,
+    Q: np.ndarray | None = None,
+    tau: float = 0.025,
+) -> np.ndarray | None:
+    """Black-Litterman posterior weights (He & Litterman 1999).
+
+    When no views (P, Q) are supplied the posterior mean collapses to the
+    prior mean and we simply run max-Sharpe with the prior — identical to the
+    standard MVO path but kept here so ``optimizer='black_litterman'`` is always
+    a valid code path even without proprietary views.
+
+    When views are supplied the posterior mean is:
+
+        mu_BL = [ (τΣ)⁻¹ + Pᵀ(τΣP)⁻¹P ]⁻¹
+                  × [ (τΣ)⁻¹ μ_prior + Pᵀ(τΣP)⁻¹ Q ]
+
+    This is the standard Black-Litterman formula (Idzorek 2005 notation).
+    The posterior covariance is not currently exposed to the optimizer —
+    Sigma is used as-is, which is a common simplification in practice.
+
+    Reference: He, G. & Litterman, R. (1999). "The intuition behind
+    Black-Litterman model portfolios." Goldman Sachs Investment Management.
+
+    Args:
+        mu_prior: Per-bar (daily scale) prior expected return vector, shape (N,).
+        Sigma: (N, N) covariance matrix (daily scale, regularised).
+        n: Number of assets.
+        cap: Per-asset weight cap passed to ``_max_sharpe``.
+        P: View matrix, shape (K, N) — K views, each a long/short portfolio.
+            None means no views.
+        Q: View returns, shape (K,) — expected return for each view.
+            None means no views.
+        tau: Uncertainty scalar on the prior. Smaller τ = more weight on the
+            prior; larger τ = more weight on the views. Default 0.025 (He &
+            Litterman's original choice for daily data).
+
+    Returns:
+        Optimal weight array of shape (N,), or None if optimisation fails.
+    """
+    try:
+        if P is None or Q is None:
+            # No views: use prior mean directly (posterior = prior)
+            return _max_sharpe(mu_prior, Sigma, n, cap=cap)
+
+        P = np.asarray(P, dtype=float)
+        Q = np.asarray(Q, dtype=float)
+        K = P.shape[0]
+        if P.shape[1] != n or Q.shape[0] != K:
+            logger.warning("Black-Litterman: P/Q shape mismatch — falling back to max-Sharpe with prior")
+            return _max_sharpe(mu_prior, Sigma, n, cap=cap)
+
+        # Uncertainty matrix for the views (diagonal, proportional to τΣ)
+        # Standard assumption: Ω = diag(P τΣ Pᵀ) as in Idzorek (2005)
+        tau_Sigma = tau * Sigma
+        Omega = np.diag(np.diag(P @ tau_Sigma @ P.T))
+
+        # Posterior precision matrix
+        inv_tau_Sigma = np.linalg.inv(tau_Sigma)
+        inv_Omega = np.linalg.inv(Omega)
+        posterior_precision = inv_tau_Sigma + P.T @ inv_Omega @ P
+
+        # Posterior mean
+        posterior_mean_unnorm = inv_tau_Sigma @ mu_prior + P.T @ inv_Omega @ Q
+        mu_bl = np.linalg.solve(posterior_precision, posterior_mean_unnorm)
+
+        return _max_sharpe(mu_bl, Sigma, n, cap=cap)
+
+    except np.linalg.LinAlgError as exc:
+        logger.warning("Black-Litterman: linear algebra failure (%s) — falling back to max-Sharpe with prior", exc)
+        return _max_sharpe(mu_prior, Sigma, n, cap=cap)
+    except Exception as exc:
+        logger.warning("Black-Litterman: unexpected error (%s) — falling back to max-Sharpe with prior", exc)
+        return _max_sharpe(mu_prior, Sigma, n, cap=cap)
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────
