@@ -96,9 +96,9 @@ class NovyMarxQualityMomentum(bt.Strategy):
     """
 
     params = (
-        ("lookback", 252),      # formation window for momentum
-        ("skip", 21),           # skip most-recent bars (short-term reversal control)
-        ("ir_window", 63),      # rolling window for information ratio (quality proxy)
+        ("lookback", 252),  # formation window for momentum
+        ("skip", 21),  # skip most-recent bars (short-term reversal control)
+        ("ir_window", 63),  # rolling window for information ratio (quality proxy)
         ("rebalance_every", 21),
         ("long_frac", 0.4),
         ("short_frac", 0.4),
@@ -181,9 +181,9 @@ class NovyMarxQualityMomentum(bt.Strategy):
 
         mom_z = self._zscore(mom_raw)
         ir_z = self._zscore(ir_raw)
-        composite = [0.5 * mz + 0.5 * qz for mz, qz in zip(mom_z, ir_z)]
+        composite = [0.5 * mz + 0.5 * qz for mz, qz in zip(mom_z, ir_z, strict=True)]
 
-        scored = sorted(zip(composite, valid_datas), key=lambda x: x[0], reverse=True)
+        scored = sorted(zip(composite, valid_datas, strict=True), key=lambda x: x[0], reverse=True)
         n_long = max(1, int(round(n * float(self.params.long_frac))))
         n_short = max(1, int(round(n * float(self.params.short_frac))))
         if n_long + n_short > n:

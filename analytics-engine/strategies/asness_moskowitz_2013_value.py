@@ -92,7 +92,7 @@ class AsnessMoskowitzValue(bt.Strategy):
     """
 
     params = (
-        ("value_window", 252),   # rolling mean window for cheapness proxy
+        ("value_window", 252),  # rolling mean window for cheapness proxy
         ("rebalance_every", 21),
         ("long_frac", 0.4),
         ("short_frac", 0.4),
