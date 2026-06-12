@@ -20,9 +20,6 @@ import {
 } from '../utils/riskMath'
 import './BacktestVisualizer.css'
 
-function fmtPct(v, d = 2) {
-  return v != null && Number.isFinite(v) ? `${(v * 100).toFixed(d)}%` : '—'
-}
 function fmt(v, d = 2) {
   return v != null && Number.isFinite(v) ? v.toFixed(d) : '—'
 }

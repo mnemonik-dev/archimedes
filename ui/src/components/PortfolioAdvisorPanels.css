@@ -105,3 +105,31 @@
   margin-top: 5px;
   color: var(--text-4);
 }
+
+/* optimizer result weights */
+.pap-weights {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pap-weight-row {
+  display: grid;
+  grid-template-columns: 64px 1fr 56px;
+  align-items: center;
+  gap: 10px;
+}
+.pap-weight-track {
+  height: 8px;
+  background: rgba(255, 255, 255, 0.07);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.pap-weight-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 4px;
+  transition: width 0.4s ease;
+}
+.pap-weight-row .caption {
+  text-align: right;
+}

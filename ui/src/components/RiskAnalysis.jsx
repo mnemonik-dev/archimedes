@@ -24,9 +24,12 @@ import './RiskAnalysis.css'
 function fmtPct(v, d = 2) {
   return v != null && Number.isFinite(v) ? `${(v * 100).toFixed(d)}%` : '—'
 }
-function fmt(v, d = 2) {
-  return v != null && Number.isFinite(v) ? v.toFixed(d) : '—'
-}
+
+const SHARPE_WINDOWS = [
+  { w: 30, color: 'var(--accent)', label: '30d' },
+  { w: 60, color: '#60a5fa', label: '60d' },
+  { w: 90, color: 'var(--positive)', label: '90d' },
+]
 
 // ─── default mock data ──────────────────────────────────────
 function buildDefaultData() {
@@ -157,14 +160,8 @@ function RollingSharpePlot({ returns }) {
   const PAD_T = 12
   const PAD_B = 22
 
-  const windows = [
-    { w: 30, color: 'var(--accent)', label: '30d' },
-    { w: 60, color: '#60a5fa', label: '60d' },
-    { w: 90, color: 'var(--positive)', label: '90d' },
-  ]
-
   const { lines, yTicks, zeroY } = useMemo(() => {
-    const computed = windows.map((cfg) => ({ ...cfg, series: rollingSharpe(returns, cfg.w) }))
+    const computed = SHARPE_WINDOWS.map((cfg) => ({ ...cfg, series: rollingSharpe(returns, cfg.w) }))
     const all = computed.flatMap((c) => c.series.filter((v) => v != null))
     const lo = Math.min(-1, ...all)
     const hi = Math.max(1, ...all)

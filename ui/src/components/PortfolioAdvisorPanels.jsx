@@ -15,15 +15,16 @@ import { apiPost } from '../api'
 import { kellyFraction, seededRng } from '../utils/riskMath'
 import './PortfolioAdvisorPanels.css'
 
-// TODO: confirm the exact backend optimizer route. The advisor read path is
-// GET /api/strategies/advisor; the POST optimize endpoint is wired here as a
-// clearly-named constant so a backend owner can point it at the real handler.
+// Backed by POST /api/portfolio/optimize (portfolio_routes.py), a thin route
+// over services/portfolio_optimizer.optimize_weights. Returns 503 when price
+// history is unavailable — handled by the error branch below.
 const OPTIMIZE_ENDPOINT = '/api/portfolio/optimize'
 
 const OPTIMIZERS = [
   { id: 'mvo', label: 'MVO', full: 'Mean-Variance Optimization (Markowitz)' },
   { id: 'hrp', label: 'HRP', full: 'Hierarchical Risk Parity (López de Prado)' },
   { id: 'bl', label: 'Black-Litterman', full: 'Black-Litterman equilibrium + views' },
+  { id: 'robust', label: 'Robust', full: 'Robust MVO — ellipsoidal uncertainty on μ (Goldfarb & Iyengar)' },
 ]
 
 function fmtPct(v, d = 1) {
@@ -81,8 +82,25 @@ function OptimizerSelector() {
         </div>
       )}
       {status === 'done' && result?.weights && (
-        <div className="caption" style={{ marginTop: 8, color: 'var(--text-2)' }}>
-          Returned {Object.keys(result.weights).length} weights from the {active.label} optimizer.
+        <div style={{ marginTop: 12 }}>
+          <div className="caption" style={{ color: 'var(--text-2)', marginBottom: 6 }}>
+            {active.label} allocation — USDC floor {fmtPct(result.usdc_weight)}, synth sleeve{' '}
+            {Object.keys(result.weights).length} assets:
+          </div>
+          <div className="pap-weights">
+            {Object.entries(result.weights)
+              .sort((a, b) => b[1] - a[1])
+              .filter(([, w]) => w > 0.0005)
+              .map(([sym, w]) => (
+                <div key={sym} className="pap-weight-row">
+                  <span className="mono" style={{ fontSize: '0.8rem' }}>{sym}</span>
+                  <div className="pap-weight-track">
+                    <div className="pap-weight-fill" style={{ width: `${Math.min(100, w * 100).toFixed(1)}%` }} />
+                  </div>
+                  <span className="mono caption">{fmtPct(w)}</span>
+                </div>
+              ))}
+          </div>
         </div>
       )}
     </div>
