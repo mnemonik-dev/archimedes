@@ -868,6 +868,263 @@ def run_rigor_gate(
     return result
 
 
+# ─── 6b. Regime-conditional rigor analysis ───────────────────────────
+
+
+def classify_regimes(
+    market_returns: list[float] | np.ndarray,
+    vol_window: int = 21,
+    n_regimes: int = 2,
+) -> np.ndarray:
+    """Label each day by volatility regime using rolling realized volatility.
+
+    A strategy's edge may be regime-dependent — strong in calm markets and
+    fragile in stressed ones (or vice versa). This labels each bar by the
+    *market benchmark's* recent volatility so that ``regime_conditional_*``
+    can slice the strategy's own returns by the regime the market was in.
+
+    Method (a deliberately simple vol-quantile proxy):
+      1. Compute the rolling standard deviation of ``market_returns`` over a
+         trailing ``vol_window``.
+      2. **Shift the rolling-vol series by one bar** so the label assigned to
+         day *t* uses only volatility realized through day *t − 1*. This avoids
+         look-ahead: the regime label for a bar never peeks at that bar's own
+         return (which the strategy is being evaluated on for the same day).
+      3. Split the (shifted) rolling-vol values into ``n_regimes`` buckets by
+         quantile — for ``n_regimes=2``, label 0 = "calm" (rolling-vol at or
+         below the median) and label 1 = "stressed" (above the median).
+      4. The first ``vol_window`` bars lack a full trailing window (and the
+         extra shift consumes one more), so they get label ``-1`` =
+         "unclassified" and are excluded from every downstream regime stat.
+
+    This is intentionally a coarse realized-vol regime proxy, NOT a fitted
+    regime model. A proper Markov-switching / HMM treatment (Ang & Bekaert
+    2002, "International Asset Allocation With Regime Shifts", Review of
+    Financial Studies 15(4): 1137-1187 — which motivates conditioning asset
+    behavior on latent volatility regimes) is out of scope here; we surface a
+    transparent, reproducible vol bucketing instead of an opaque fitted state.
+
+    Args:
+        market_returns: Per-bar benchmark return series (the regime driver).
+        vol_window: Trailing window (bars) for realized volatility. Default 21
+            (~one trading month).
+        n_regimes: Number of volatility buckets (>= 1). Labels are
+            ``0 .. n_regimes-1`` in ascending volatility order.
+
+    Returns:
+        Integer ``np.ndarray`` of length ``len(market_returns)``. Entries are
+        ``-1`` for unclassified leading bars, else the regime id in
+        ``0 .. n_regimes-1``. Returns an all-``-1`` array (no crash) when the
+        series is too short to form a single full window or ``n_regimes < 1``.
+    """
+    arr = np.asarray(market_returns, dtype=float)
+    T = len(arr)
+    labels = np.full(T, -1, dtype=int)
+
+    if T == 0 or n_regimes < 1 or vol_window < 1:
+        return labels
+
+    # Rolling std (ddof=1) over a trailing window; entries before a full window
+    # exist remain NaN. Build via a simple stride-free loop for numpy-only clarity.
+    roll_vol = np.full(T, np.nan, dtype=float)
+    for i in range(vol_window - 1, T):
+        window = arr[i - vol_window + 1 : i + 1]
+        if window.size >= 2:
+            roll_vol[i] = float(window.std(ddof=1))
+
+    # Shift by one bar so day t's label uses vol realized through t-1 (no look-ahead).
+    shifted = np.full(T, np.nan, dtype=float)
+    shifted[1:] = roll_vol[:-1]
+
+    valid_mask = np.isfinite(shifted)
+    valid_vals = shifted[valid_mask]
+    if valid_vals.size == 0:
+        return labels
+
+    if n_regimes == 1:
+        labels[valid_mask] = 0
+        return labels
+
+    # Quantile cut-points partition the valid rolling-vol values into n_regimes
+    # buckets of (approximately) equal mass. np.digitize maps each value to a
+    # bucket in 0 .. n_regimes-1. A degenerate (constant-vol) series yields
+    # identical edges; digitize then collapses everything into a single bucket
+    # without crashing.
+    quantiles = np.quantile(valid_vals, np.linspace(0.0, 1.0, n_regimes + 1)[1:-1])
+    bucket = np.digitize(valid_vals, quantiles, right=False)
+    bucket = np.clip(bucket, 0, n_regimes - 1).astype(int)
+    labels[valid_mask] = bucket
+    return labels
+
+
+def regime_conditional_sharpe(
+    strategy_returns: list[float] | np.ndarray,
+    regime_labels: list[int] | np.ndarray,
+) -> dict[int, dict]:
+    """Per-regime annualized Sharpe (and mean/vol/count) of a strategy.
+
+    Slices the strategy's own daily returns by the market regime each day fell
+    in (per ``classify_regimes``) and reports the strategy's annualized Sharpe,
+    annualized mean return, annualized vol, and day-count within each regime.
+
+    Args:
+        strategy_returns: Per-bar strategy return series.
+        regime_labels: Integer regime labels aligned to the same bars (``-1``
+            for unclassified). Truncated to the shorter of the two lengths.
+
+    Returns:
+        ``{regime_id: {"sharpe", "ann_return", "ann_vol", "n_days"}}`` for each
+        regime id present (excluding ``-1``). ``sharpe`` is ``None`` for any
+        regime with < 2 days or zero variance. Empty dict if no classified days.
+    """
+    s = np.asarray(strategy_returns, dtype=float)
+    r = np.asarray(regime_labels, dtype=int)
+    n = min(len(s), len(r))
+    if n == 0:
+        return {}
+    s = s[:n]
+    r = r[:n]
+
+    out: dict[int, dict] = {}
+    for regime_id in sorted({int(x) for x in r if int(x) != -1}):
+        sub = s[r == regime_id]
+        n_days = int(sub.size)
+        if n_days < 2 or float(np.ptp(sub)) == 0.0:
+            out[regime_id] = {
+                "sharpe": None,
+                "ann_return": round(float(sub.mean()) * _ANNUALIZATION, 6) if n_days >= 1 else None,
+                "ann_vol": 0.0 if n_days >= 1 else None,
+                "n_days": n_days,
+            }
+            continue
+        sigma = float(sub.std(ddof=1))
+        sharpe = _annualized_sharpe_arr(sub)
+        out[regime_id] = {
+            "sharpe": round(sharpe, 6) if sharpe is not None else None,
+            "ann_return": round(float(sub.mean()) * _ANNUALIZATION, 6),
+            "ann_vol": round(sigma * math.sqrt(_ANNUALIZATION), 6),
+            "n_days": n_days,
+        }
+    return out
+
+
+def regime_robustness_score(
+    strategy_returns: list[float] | np.ndarray,
+    regime_labels: list[int] | np.ndarray,
+) -> dict:
+    """Regime-fragility score — does the edge survive across volatility regimes?
+
+    A strategy that earns its Sharpe in only one regime (e.g. only in calm
+    markets) is fragile: the moment the market shifts, the edge evaporates.
+    This surfaces that fragility *transparently* rather than burying it behind
+    a single aggregate Sharpe, consistent with the repo's honest-framing
+    principle (paper-claim deltas and per-regime numbers are shown, not hidden).
+
+    Motivation: Ang & Bekaert (2002), "International Asset Allocation With
+    Regime Shifts", Review of Financial Studies 15(4): 1137-1187 — asset
+    behavior (and therefore a strategy's edge) is regime-dependent, so a single
+    full-sample Sharpe can mask regime-specific failure.
+
+    Args:
+        strategy_returns: Per-bar strategy return series.
+        regime_labels: Integer regime labels aligned to the same bars.
+
+    Returns:
+        Dict with keys:
+          ``per_regime``        — the ``regime_conditional_sharpe`` dict.
+          ``min_regime_sharpe`` — lowest per-regime Sharpe (None if none computable).
+          ``max_regime_sharpe`` — highest per-regime Sharpe (None if none computable).
+          ``sharpe_dispersion`` — ``max - min`` (None if < 2 computable regimes).
+          ``consistency``       — a ``[0, 1]`` score; high = the edge holds across
+            regimes. Convention: when ``max > 0`` it is
+            ``min(1, max(0, min_sharpe / max_sharpe))`` (so a regime with
+            negative or near-zero Sharpe drives consistency toward 0). When
+            ``max <= 0`` (the strategy is non-positive in *every* regime) there
+            is no regime in which it works, so consistency is ``0.0``.
+          ``robust``            — ``bool``: the strict honest gate
+            ``min_regime_sharpe > 0`` (positive Sharpe in *every* classified
+            regime). ``False`` when no regimes are computable.
+    """
+    per_regime = regime_conditional_sharpe(strategy_returns, regime_labels)
+    sharpes = [v["sharpe"] for v in per_regime.values() if v.get("sharpe") is not None]
+
+    if not sharpes:
+        return {
+            "per_regime": per_regime,
+            "min_regime_sharpe": None,
+            "max_regime_sharpe": None,
+            "sharpe_dispersion": None,
+            "consistency": 0.0,
+            "robust": False,
+        }
+
+    min_sharpe = float(min(sharpes))
+    max_sharpe = float(max(sharpes))
+    dispersion = round(max_sharpe - min_sharpe, 6) if len(sharpes) >= 2 else None
+
+    if max_sharpe > 0.0:
+        consistency = min(1.0, max(0.0, min_sharpe / max_sharpe))
+    else:
+        # Non-positive in every regime: there is no regime in which the edge
+        # works, so there is no consistency to credit.
+        consistency = 0.0
+
+    return {
+        "per_regime": per_regime,
+        "min_regime_sharpe": round(min_sharpe, 6),
+        "max_regime_sharpe": round(max_sharpe, 6),
+        "sharpe_dispersion": dispersion,
+        "consistency": round(float(consistency), 6),
+        "robust": bool(min_sharpe > 0.0),
+    }
+
+
+def regime_conditional_dsr(
+    strategy_returns: list[float] | np.ndarray,
+    regime_labels: list[int] | np.ndarray,
+    num_trials: int = 1,
+) -> dict[int, dict]:
+    """Per-regime Deflated Sharpe Ratio — does the DSR evidence hold within each regime?
+
+    Runs the existing ``compute_dsr`` on the strategy's return subset *within*
+    each market regime, so the deflated-Sharpe evidence can be inspected regime
+    by regime rather than only on the blended full sample. Reuses ``compute_dsr``
+    directly, so the same minimum-length guard (T < 4 → ``None``) applies per
+    regime subset — a regime with too few bars reports ``None`` DSR honestly
+    instead of fabricating significance from a handful of points.
+
+    Args:
+        strategy_returns: Per-bar strategy return series.
+        regime_labels: Integer regime labels aligned to the same bars.
+        num_trials: Number of trials in the selection set, passed through to
+            ``compute_dsr`` for the multiple-testing correction (default 1).
+
+    Returns:
+        ``{regime_id: {"deflated_sharpe", "dsr_p_value", "n_days"}}`` for each
+        regime id present (excluding ``-1``). ``deflated_sharpe`` and
+        ``dsr_p_value`` are ``None`` when the regime subset is too short or
+        degenerate. Empty dict if no classified days.
+    """
+    s = np.asarray(strategy_returns, dtype=float)
+    r = np.asarray(regime_labels, dtype=int)
+    n = min(len(s), len(r))
+    if n == 0:
+        return {}
+    s = s[:n]
+    r = r[:n]
+
+    out: dict[int, dict] = {}
+    for regime_id in sorted({int(x) for x in r if int(x) != -1}):
+        sub = s[r == regime_id]
+        dsr, p_val = compute_dsr(sub, num_trials)
+        out[regime_id] = {
+            "deflated_sharpe": dsr,
+            "dsr_p_value": p_val,
+            "n_days": int(sub.size),
+        }
+    return out
+
+
 # ─── 7. Monte Carlo DSR significance via circular block bootstrap ─────
 
 
