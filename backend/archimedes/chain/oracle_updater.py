@@ -41,6 +41,16 @@ CRYPTO_MAP = {
 CIRCLE_API_BASE = "https://api.circle.com/v1/w3s"
 CIRCLE_BLOCKCHAIN = "ARC-TESTNET"
 
+# ─── Sanity bounds for on-chain pushes (audit #13 / issue #508) ───
+# Max allowed move vs the last known good price, in basis points.
+# Default mirrors PriceOracle.sol's maxDeviationBps (2000 bps = 20%) so the
+# backend rejects a corrupted upstream price before spending a tx the
+# contract would revert anyway. Override via ORACLE_MAX_DEVIATION_BPS.
+DEFAULT_MAX_DEVIATION_BPS = 2000
+# Max age of the upstream observation before we refuse to push it on-chain.
+# Override via ORACLE_MAX_UPSTREAM_STALENESS_SECONDS.
+DEFAULT_MAX_UPSTREAM_STALENESS_SECONDS = 900  # 15 minutes
+
 
 def _encrypt_entity_secret(entity_secret_hex: str, public_key_pem: str) -> str:
     """Encrypt entity secret with Circle's RSA public key (OAEP/SHA-256).
@@ -74,6 +84,15 @@ class OracleUpdater:
         self._api_key: str = os.getenv("CIRCLE_API_KEY", "")
         self._entity_secret: str = os.getenv("CIRCLE_ENTITY_SECRET", "")
         self._wallet_id: str = os.getenv("WALLET_ID", "")
+
+        # Sanity bounds (audit #13 / issue #508)
+        self._max_deviation_bps: int = int(os.getenv("ORACLE_MAX_DEVIATION_BPS", str(DEFAULT_MAX_DEVIATION_BPS)))
+        self._max_upstream_staleness_s: int = int(
+            os.getenv("ORACLE_MAX_UPSTREAM_STALENESS_SECONDS", str(DEFAULT_MAX_UPSTREAM_STALENESS_SECONDS))
+        )
+        # Last price (6-dec int) we successfully submitted, per symbol —
+        # fallback deviation reference when the on-chain read fails.
+        self._last_pushed_price_int: dict[str, int] = {}
 
     # ─── Public API ──────────────────────────────────────────────
 
@@ -124,9 +143,18 @@ class OracleUpdater:
                     logger.debug(f"No oracle address for {price.symbol} — skipping")
                     continue
 
+                price_int = int(price.price_usd * 1e6)  # 6 decimals, matches PriceOracle.sol
+
+                # Sanity gate (audit #13 / issue #508): refuse to push prices
+                # that are non-positive, stale upstream, or deviate too far
+                # from the last known good price.
+                rejection = await self._validate_for_push(price, price_int)
+                if rejection is not None:
+                    logger.warning(f"Refusing to push {price.symbol} price {price.price_usd}: {rejection}")
+                    continue
+
                 try:
                     ciphertext = _encrypt_entity_secret(self._entity_secret, public_key)
-                    price_int = int(price.price_usd * 1e6)  # 6 decimals, matches PriceOracle.sol
 
                     payload = {
                         "idempotencyKey": str(uuid.uuid4()),
@@ -151,6 +179,7 @@ class OracleUpdater:
                         if resp.status == 201:
                             tx_id = body["data"]["id"]
                             tx_ids.append(tx_id)
+                            self._last_pushed_price_int[price.symbol] = price_int
                             logger.info(f"Pushed {price.symbol} price {price.price_usd:.2f} → Circle tx {tx_id}")
                         else:
                             logger.error(f"Circle API error for {price.symbol} ({resp.status}): {body}")
@@ -180,6 +209,62 @@ class OracleUpdater:
         return self._price_cache.get(symbol)
 
     # ─── Private helpers ──────────────────────────────────────────
+
+    async def _validate_for_push(self, price: AssetPrice, price_int: int) -> str | None:
+        """Sanity-check a price before pushing on-chain (audit #13 / issue #508).
+
+        Returns a human-readable rejection reason, or None when the price is
+        safe to push. Checks, in order:
+
+        1. Zero/non-positive guard — the 6-decimal int must be > 0 (the
+           contract rejects zero; sub-microdollar floats truncate to 0).
+        2. Upstream staleness — the observation must be younger than
+           ``ORACLE_MAX_UPSTREAM_STALENESS_SECONDS`` (default 15 min).
+        3. Deviation cap — the move vs the last known good price (on-chain
+           read, falling back to the last successfully pushed value) must be
+           within ``ORACLE_MAX_DEVIATION_BPS`` (default 2000 = 20%, mirroring
+           PriceOracle.sol's maxDeviationBps). First-ever pushes with no
+           reference are allowed.
+
+        TODO(#508): multi-source corroboration. Each symbol currently has
+        exactly one upstream source (yfinance for equities/futures, CoinGecko
+        for sBTC), so requiring N corroborating sources cannot be implemented
+        honestly today. When a second independent feed is added, require
+        agreement within the deviation cap across >= 2 sources before pushing.
+        """
+        if price_int <= 0:
+            return f"non-positive on-chain price ({price.price_usd} → {price_int})"
+
+        observed = price.timestamp if price.timestamp.tzinfo else price.timestamp.replace(tzinfo=UTC)
+        age_s = (datetime.now(UTC) - observed).total_seconds()
+        if age_s > self._max_upstream_staleness_s:
+            return f"stale upstream data ({age_s:.0f}s old > {self._max_upstream_staleness_s}s cap)"
+
+        reference_int = await self._get_reference_price_int(price.symbol)
+        if reference_int is not None:
+            deviation_bps = abs(price_int - reference_int) * 10_000 / reference_int
+            if deviation_bps > self._max_deviation_bps:
+                return (
+                    f"deviation {deviation_bps:.0f} bps vs last known price "
+                    f"{reference_int / 1e6:.2f} exceeds {self._max_deviation_bps} bps cap"
+                )
+
+        return None
+
+    async def _get_reference_price_int(self, symbol: str) -> int | None:
+        """Last known good price (6-dec int): on-chain first, then last pushed.
+
+        Returns None when no reference exists (first-ever push for a symbol).
+        """
+        try:
+            from archimedes.chain.contracts import get_contract_loader
+
+            onchain = await get_contract_loader().oracle_for(symbol).functions.price().call()
+            if onchain and int(onchain) > 0:
+                return int(onchain)
+        except Exception as e:
+            logger.warning(f"Could not read on-chain reference price for {symbol}: {e}")
+        return self._last_pushed_price_int.get(symbol)
 
     async def _get_circle_public_key(self, session: aiohttp.ClientSession) -> str | None:
         """Fetch Circle's RSA public key (cached per instance)."""
