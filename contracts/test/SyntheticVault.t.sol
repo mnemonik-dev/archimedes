@@ -287,7 +287,7 @@ contract SyntheticVaultTest is Test {
         // Price spikes +50% — beyond the 20% mint-side buffer, so total liability
         // (totalSupply * price) now exceeds vault collateral.
         vm.prank(owner);
-        oracle.setPrice((INITIAL_PRICE * 150) / 100);
+        oracle.forceSetPrice((INITIAL_PRICE * 150) / 100);
 
         uint256 collateralBefore = usdc.balanceOf(address(vault)) - vault.protocolFees();
         uint256 liability = (sTSLA.totalSupply() * oracle.getPrice()) / 1e18;
@@ -329,7 +329,7 @@ contract SyntheticVaultTest is Test {
         vm.stopPrank();
 
         vm.prank(owner);
-        oracle.setPrice(INITIAL_PRICE * 2); // +100%
+        oracle.forceSetPrice(INITIAL_PRICE * 2); // +100%
 
         uint256 collateralBefore = usdc.balanceOf(address(vault)) - vault.protocolFees();
 
@@ -384,7 +384,7 @@ contract SyntheticVaultTest is Test {
         vm.stopPrank();
 
         vm.prank(owner);
-        oracle.setPrice((INITIAL_PRICE * 150) / 100);
+        oracle.forceSetPrice((INITIAL_PRICE * 150) / 100);
 
         uint256 preview = vault.previewBurn(synthOut);
         vm.prank(alice);
