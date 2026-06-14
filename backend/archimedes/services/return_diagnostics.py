@@ -349,6 +349,7 @@ def runs_test(returns: object) -> dict:
 
 
 def diagnose(returns: object, lags: int = 10, vr_q: int = 2) -> dict:
+    # TODO(issue #621): wire into run_rigor_gate to enforce IID assumption check
     """Run all three IID / random-walk diagnostics and aggregate.
 
     Parameters
