@@ -179,13 +179,18 @@ class TestValidateTradeLiquidity:
         # Should pass — USDC (token1) has $10k
         asyncio.run(executor._validate_trade_liquidity([trade]))
 
-    def test_non_fatal_on_unexpected_error(self, executor, mock_loader):
-        """Unexpected errors during pool read are non-fatal (logged, trade allowed)."""
+    def test_fails_closed_on_unexpected_error(self, executor, mock_loader):
+        """Unexpected probe errors (RPC/ABI) fail closed — leg is skipped, not allowed.
+
+        B4 (AUDIT_2026-06-14.md): a probe failure must NOT be treated as "liquidity
+        OK". It raises InsufficientLiquidityError (probe-failure variant) so the
+        caller skips this leg the same way it would for a confirmed thin pool.
+        """
         trade = _make_trade()
         mock_loader.amm_router.functions.getPool.return_value.call = AsyncMock(side_effect=RuntimeError("RPC timeout"))
 
-        # Should NOT raise — non-fatal
-        asyncio.run(executor._validate_trade_liquidity([trade]))
+        with pytest.raises(InsufficientLiquidityError, match="probe failed"):
+            asyncio.run(executor._validate_trade_liquidity([trade]))
 
 
 # ── execute_trades ────────────────────────────────────────────
