@@ -293,6 +293,9 @@ def compute_oos_sharpe(
 ) -> float | None:
     """Annualized Sharpe on the held-out OOS slice (no shuffling).
 
+    Note: uses ddof=1 (sample stddev); analytics-engine uses ddof=0 — the two OOS Sharpe
+    numbers differ by sqrt(N/(N-1)) and are not directly comparable.
+
     Splits the return series chronologically: the first train_fraction of
     bars are in-sample; the remainder are the OOS test set. The OOS Sharpe
     must clear the absolute floor (> 0) and the cliff check (OOS/IS ≥ 0.5)
