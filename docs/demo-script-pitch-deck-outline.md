@@ -154,7 +154,7 @@ A **research-grounded strategy-generation instrument**:
   compounding, content-hashed library; every reasoning trace resolves down to the origin
   paper and is anchored on Arc (`ReasoningTraceRegistry`). Verifiable/falsifiable after
   the trade resolves.
-- **Live on Arc testnet** — 10 contracts (chain ID `5042002`), multi-wallet UI, fusion
+- **Live on Arc testnet** — 11 contracts (chain ID `5042002`), multi-wallet UI, fusion
   wired to `POST /api/strategies/generate`. Honest about what's converging.
 
 ### Slide 4: Live demo (90s)
