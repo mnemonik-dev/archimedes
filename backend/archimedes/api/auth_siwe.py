@@ -35,14 +35,15 @@ logger = logging.getLogger(__name__)
 
 auth_router = APIRouter(prefix="/api/auth", tags=["auth"])
 
-# Session signing key — derived from EMAIL_ENCRYPTION_KEY or a random per-boot key.
-# In production, EMAIL_ENCRYPTION_KEY is required (fail-closed in main.py), so
-# sessions persist across restarts. In dev, a random key means sessions reset on restart.
+# Session signing key — prefer SIWE_SESSION_KEY (dedicated session-signing secret);
+# falls back to EMAIL_ENCRYPTION_KEY for backwards compatibility. Production enforces
+# EMAIL_ENCRYPTION_KEY at boot (main.py RuntimeError), so the secrets.token_hex(32)
+# path is local-dev only.
 # Multi-worker note: main.py:~127 raises RuntimeError at boot if PUBLIC_DOMAIN is set
 # (production) and EMAIL_ENCRYPTION_KEY is unset, so the secrets.token_hex(32) fallback
 # is only reachable in single-worker local dev -- per-worker secret divergence (which
 # would break cross-worker session-cookie verification) can't occur there.
-_SESSION_SECRET = os.getenv("EMAIL_ENCRYPTION_KEY", secrets.token_hex(32))
+_SESSION_SECRET = os.getenv("SIWE_SESSION_KEY") or os.getenv("EMAIL_ENCRYPTION_KEY", secrets.token_hex(32))
 _SESSION_TTL_SECONDS = 24 * 60 * 60  # 24 hours
 _NONCE_TTL_SECONDS = 300  # 5 minutes
 _CLOCK_SKEW_SECONDS = 120  # tolerate small client/server clock drift on Issued At
