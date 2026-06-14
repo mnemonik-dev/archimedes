@@ -708,6 +708,7 @@ def classify_regimes(
     return labels
 
 
+# DEAD CODE — unwired from run_rigor_gate; see issue #621
 def regime_conditional_sharpe(
     strategy_returns: list[float] | np.ndarray,
     regime_labels: list[int] | np.ndarray,
@@ -830,6 +831,7 @@ def regime_robustness_score(
     }
 
 
+# DEAD CODE — unwired from run_rigor_gate; see issue #621
 def regime_conditional_dsr(
     strategy_returns: list[float] | np.ndarray,
     regime_labels: list[int] | np.ndarray,
