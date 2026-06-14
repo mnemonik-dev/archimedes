@@ -125,7 +125,10 @@ contract SyntheticVault is Ownable, ReentrancyGuard {
 
         // Pro-rata solvency cap: under stress, scale the claim by C/L so redemption
         // order cannot redistribute value between holders (see @dev above).
-        uint256 available = usdc.balanceOf(address(this)) - protocolFees;
+        // Safe subtraction: protocolFees should never exceed balance, but fee rounding
+        // over many small operations could cause a transient underflow; clamp to 0.
+        uint256 _burnBal = usdc.balanceOf(address(this));
+        uint256 available = _burnBal > protocolFees ? _burnBal - protocolFees : 0;
         uint256 totalLiability = (synthToken.totalSupply() * assetPrice) / (10 ** SYNTH_DECIMALS);
         if (totalLiability > available) {
             usdcValue = (usdcValue * available) / totalLiability;
