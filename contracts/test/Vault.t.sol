@@ -689,6 +689,83 @@ contract VaultTest is Test {
         assertGe(usdc.balanceOf(alice), 950_000 * 10**6 + 30_000 * 10**6 - 50_000 * 10**6);
     }
 
+    /// @dev Audit finding 1a (2026-06-14): with the old fixed-0.5% liquidation
+    ///      buffer (`liquidationTarget = shortfall + shortfall/200`), a
+    ///      redemption that needs to liquidate a meaningful slice of an
+    ///      oracle-aligned pool reverted `InsufficientLiquidity()` even though
+    ///      the vault's non-USDC holdings were comfortably worth more than the
+    ///      shortfall — because the realized swap output (oracle-fair price
+    ///      minus the 30bps AMM fee and constant-product price impact) landed
+    ///      a few bps below `shortfall`, while the buffer only covered ~0.5%.
+    ///      The fixed liquidationTarget = ceil(shortfall * BPS / (BPS -
+    ///      maxSlippageBps)) ties the buffer to the same oracle-floor
+    ///      `_oracleMinOut` enforces, so `usdcAfter >= shortfall` holds by
+    ///      construction. This test reproduces the exact pre-fix failure mode
+    ///      at maxSlippageBps = 100 (the vault's default, > the ~50bps
+    ///      breakeven for the old formula) and asserts the redemption now
+    ///      succeeds.
+    function test_withdraw_liquidation_slippage_buffer_covers_oracle_floor() public {
+        // Fresh synth + oracle + AMM pool, oracle-aligned at 2 USDC / token
+        // (10,000,000 USDC : 5,000,000 token, same ratio as TSLA_PRICE).
+        MockToken sSYNTH = new MockToken("Synthetic SYNTH", "sSYNTH");
+        PriceOracle synthOracle = new PriceOracle("sSYNTH", TSLA_PRICE, owner);
+
+        router.createPool(address(usdc), address(sSYNTH));
+        uint256 poolUsdc = 10_000_000 * 10**6;
+        uint256 poolSynth = 5_000_000 * 1e18;
+        usdc.mint(address(this), poolUsdc);
+        sSYNTH.mint(address(this), poolSynth);
+        usdc.approve(address(router), poolUsdc);
+        sSYNTH.approve(address(router), poolSynth);
+        router.addLiquidity(address(usdc), address(sSYNTH), poolUsdc, poolSynth, 0);
+
+        address[] memory oracleTokens = new address[](1);
+        oracleTokens[0] = address(sSYNTH);
+        address[] memory oracles = new address[](1);
+        oracles[0] = address(synthOracle);
+        vm.prank(agent);
+        vault.setTokenOracles(oracleTokens, oracles);
+
+        // maxSlippageBps = 100 (1%) — the vault's default, and > the ~50bps
+        // breakeven where the old fixed-0.5% buffer stopped covering the
+        // oracle floor (set explicitly so the scenario is self-documenting).
+        vm.prank(agent);
+        vault.setMaxSlippageBps(100);
+
+        _depositAsAlice(50_000 * 10**6);
+
+        // Negligible rebalance-buy (1 USDC) just to register sSYNTH in
+        // heldTokens — disturbs the fresh pool by < 1e-7 of its depth.
+        address[] memory tokensIn = new address[](1);
+        tokensIn[0] = address(sSYNTH);
+        uint256[] memory amountsIn = new uint256[](1);
+        amountsIn[0] = 1 * 10**6;
+        address[] memory tokensOut = new address[](0);
+        uint256[] memory amountsOut = new uint256[](0);
+        vm.prank(agent);
+        vault.rebalance(tokensIn, amountsIn, tokensOut, amountsOut);
+
+        // Top up the vault's sSYNTH holding directly so the position is
+        // large enough that liquidating ~30k USDC worth doesn't get capped
+        // by totalNonUsdcValue, while the AMM pool itself stays essentially
+        // at its oracle-aligned starting ratio.
+        sSYNTH.mint(address(vault), 100_000 * 1e18);
+
+        // Withdraw enough to force liquidating ~30,000 USDC of sSYNTH against
+        // the oracle-aligned pool. At maxSlippageBps = 100 the realized output
+        // (~0.997 * shortfall * 100/99, fee + price impact) lands just below
+        // `shortfall` under the old fixed-0.5% buffer — InsufficientLiquidity()
+        // — but at/above `shortfall` under the new oracle-floor-tied buffer.
+        uint256 usdcOnHand = usdc.balanceOf(address(vault));
+        uint256 withdrawAmount = usdcOnHand + 30_000 * 10**6;
+
+        uint256 aliceBefore = usdc.balanceOf(alice);
+        vm.prank(alice);
+        vault.withdraw(withdrawAmount, alice, alice);
+
+        assertEq(usdc.balanceOf(alice), aliceBefore + withdrawAmount);
+    }
+
     /// @dev Withdrawal-driven liquidation against a manipulated pool must
     ///      revert — rebalance/liquidation authority cannot be converted into
     ///      a bad-price drain.

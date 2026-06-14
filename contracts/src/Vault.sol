@@ -511,8 +511,16 @@ contract Vault is IVault, ERC20, Ownable, ReentrancyGuard, Pausable {
 
         if (totalNonUsdcValue == 0) revert InsufficientLiquidity();
 
-        // Add 0.5% buffer for slippage
-        uint256 liquidationTarget = shortfall + (shortfall / 200);
+        // Size the liquidation so that even the worst-case oracle-floor output
+        // (_oracleMinOut guarantees >= expectedOut * (BPS - maxSlippageBps) / BPS)
+        // still covers `shortfall`. Solving usdcAfter_min >= shortfall for the
+        // pre-slippage target gives liquidationTarget = shortfall * BPS /
+        // (BPS - maxSlippageBps), rounded up (ceiling division) so a 1-wei
+        // floor-division remainder can't leave us a wei short. Division is
+        // always safe: maxSlippageBps <= MAX_SLIPPAGE_CAP_BPS = 500 < BPS = 10000,
+        // so (BPS - maxSlippageBps) is always >= 9500 > 0.
+        uint256 denominator = BPS - maxSlippageBps;
+        uint256 liquidationTarget = (shortfall * BPS + denominator - 1) / denominator;
 
         // Second pass: sell proportionally from each non-USDC token
         for (uint256 i = 0; i < heldTokens.length; i++) {
