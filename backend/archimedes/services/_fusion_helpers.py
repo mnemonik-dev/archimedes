@@ -10,7 +10,6 @@ Contains pure functions for:
 
 from __future__ import annotations
 
-import math
 import tempfile
 from datetime import date, timedelta
 from pathlib import Path

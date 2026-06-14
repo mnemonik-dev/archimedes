@@ -28,10 +28,10 @@ import numpy as np
 from archimedes.services._rigor_helpers import (
     _ANNUALIZATION,
     _RF_DAILY,
+    _annualized_sharpe_arr,
     benjamini_hochberg_fdr,
     bonferroni_correction,
     classify_regimes,
-    compute_average_pairwise_correlation,
     compute_cpcv_oos_sharpe,
     compute_dsr,
     compute_in_sample_sharpe,
