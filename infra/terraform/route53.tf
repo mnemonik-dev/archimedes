@@ -21,5 +21,5 @@ resource "aws_route53_record" "apex" {
   name    = "archimedes-arc.app"
   type    = "A"
   ttl     = 300
-  records = [aws_instance.archimedes.public_ip]
+  records = [aws_eip.archimedes.public_ip]
 }
