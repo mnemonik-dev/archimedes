@@ -147,11 +147,21 @@ class ChainExecutor:
             except InsufficientLiquidityError:
                 raise
             except Exception as exc:
+                # Fail closed: a probe error (RPC failure, ABI decode error, etc.)
+                # means we could NOT determine whether this pool has healthy
+                # liquidity — treat that the same as "confirmed insufficient"
+                # rather than letting the trade through unguarded. The message
+                # is worded distinctly ("probe failed") so logs/operators can
+                # tell a probe failure apart from a confirmed-thin-pool result,
+                # even though the caller-visible effect (skip this leg) matches.
                 logger.warning(
-                    "liquidity check failed for %s (non-fatal, allowing trade): %s",
+                    "liquidity probe failed for %s — skipping leg (fail-closed): %s",
                     trade.symbol,
                     exc,
                 )
+                raise InsufficientLiquidityError(
+                    f"Liquidity probe failed for {trade.symbol} (treating as insufficient): {exc}"
+                ) from exc
 
     async def _confirm_receipt(self, tx_hash: str | bytes) -> str:
         """Wait for a tx receipt and raise TradeRevertedError if it reverted.
