@@ -1213,9 +1213,13 @@ class TestBenjaminiHochbergFDR:
         pvalues = list(rng.uniform(0, 1, 20))
         result = benjamini_hochberg_fdr(pvalues, fdr_level=0.05)
         adj = result["adjusted_pvalues"]
-        sorted_adj = sorted(adj)
         # All adjusted p-values must be in [0,1]
         assert all(0.0 <= p <= 1.0 for p in adj)
+        # adjusted_pvalues is returned in original input order; re-order by
+        # ascending p-value (BH's natural rank order) and check the
+        # running-minimum step enforced non-decreasing values.
+        sorted_adj = [a for _, a in sorted(zip(pvalues, adj, strict=True))]
+        assert all(sorted_adj[i] <= sorted_adj[i + 1] for i in range(len(sorted_adj) - 1))
 
 
 class TestBonferroniCorrection:
