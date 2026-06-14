@@ -150,11 +150,15 @@ contract SyntheticVault is Ownable, ReentrancyGuard {
 
     // ─── Views ───────────────────────────────────────────────────────
 
-    function previewMint(uint256 amountUsdc) external view returns (uint256) {
+    /// @notice Mirror mint()'s zero-amount guards exactly so callers can rely on
+    ///         previewMint to detect inputs that would revert before submitting a tx.
+    function previewMint(uint256 amountUsdc) external view returns (uint256 synthAmount) {
+        if (amountUsdc == 0) revert ZeroAmount();
         uint256 assetPrice = oracle.getPrice();
         uint256 fee = (amountUsdc * mintFeeBps) / BPS;
         uint256 netUsdc = amountUsdc - fee;
-        return (netUsdc * (10 ** SYNTH_DECIMALS) * BPS) / (assetPrice * collateralRatio);
+        synthAmount = (netUsdc * (10 ** SYNTH_DECIMALS) * BPS) / (assetPrice * collateralRatio);
+        if (synthAmount == 0) revert ZeroAmount();
     }
 
     function previewBurn(uint256 synthAmount) external view returns (uint256) {
