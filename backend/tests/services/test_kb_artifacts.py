@@ -1,13 +1,16 @@
-"""Tests for kb_artifacts service and corpus graph/kg endpoints (Issue #152).
+"""Tests for the kb_artifacts service and the /api/corpus/graph endpoint (Issue #152).
 
 Verifies:
-  - S3 + local artifact loading with graceful fallback
-  - In-memory cache with TTL
-  - /api/corpus/graph returns SPECTER2-backed scatter when artifacts exist
-  - /api/corpus/graph returns 503 when no artifacts
-  - /api/papers/corpus/graph upgrades to SPECTER2 when available
-  - /api/papers/corpus/kg reads kg_graph.json when available
-  - Metadata-derived fallback when no S3 artifacts
+  - In-memory artifact cache with TTL (set/get/expire/invalidate)
+  - S3 + local manifest/kg_graph/embeddings/clusters loading, with S3-to-local fallback
+  - UMAP projection computed and cached from embeddings
+  - /api/corpus/graph (corpus_routes.py) returns 503 when no KB artifacts exist
+  - /api/corpus/graph returns a SPECTER2-backed scatter (points + topics) when
+    artifacts exist
+
+The legacy /api/papers/corpus/* endpoints were deleted in Issue #201/#382; their
+test coverage was removed from this file (see the trailing NOTE) and is not
+re-added here.
 """
 
 from __future__ import annotations

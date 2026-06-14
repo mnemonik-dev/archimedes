@@ -111,6 +111,19 @@ is a team decision (Chuan, as repo admin, owns it).
 > These runbooks are **authored, not drilled.** Run a game-day (see the DR
 > drill checklist) before trusting the measured RTO/RPO.
 
+## Per-deploy artifacts
+
+- **`deploy_output.json`** (repo root) is written by
+  [`backend/archimedes/scripts/deploy_contracts.py`](../backend/archimedes/scripts/deploy_contracts.py)
+  on every contract deploy and goes stale the moment any contract is
+  redeployed — it is gitignored and untracked (audit 06-14 finding I3: the
+  previously-tracked copy's `synthTokens`/`synthOracles`/`vaults` addresses
+  no longer matched the live deploy). It is per-deploy operator output, not a
+  source of truth. The authoritative current addresses live in
+  [`ui/src/config.js`](../ui/src/config.js) (frontend) and
+  [`backend/archimedes/chain/client.py`](../backend/archimedes/chain/client.py)
+  (backend) — update both of those after any redeploy.
+
 ## Security Notes
 
 - **No `.pem` files in git.** `infra/*.pem` is in `.gitignore`.

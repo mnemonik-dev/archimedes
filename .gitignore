@@ -72,6 +72,13 @@ archimedes_chat.db
 *.sqlite
 *.sqlite3
 
+# Per-deploy contract-address dump — written by
+# backend/archimedes/scripts/deploy_contracts.py on every redeploy and goes
+# stale the moment a contract is redeployed. NOT a source of truth — see
+# infra/README.md "Per-deploy artifacts"; ui/src/config.js and
+# backend/archimedes/chain/client.py are authoritative (audit 06-14 I3).
+/deploy_output.json
+
 # Misc
 *.log
 .pytest_cache/

@@ -121,7 +121,7 @@ arc-canteen status
 
 **What we have:**
 
-- ✅ **10 contracts deployed on Arc testnet** — `AMMPool`, `AMMRouter`, `AssetRegistry`, `PriceOracle`, `ReasoningTraceRegistry`, `SyntheticFactory`, `SyntheticToken`, `SyntheticVault`, `Vault`, `VaultFactory`. Updated Day-10 with the multi-asset NAV vault (`Vault.sol` now prices all holdings via oracles in `totalAssets()`).
+- ✅ **11 contracts deployed on Arc testnet** — `AMMPool`, `AMMRouter`, `AssetRegistry`, `PriceOracle`, `ReasoningTraceRegistry`, `StrategyRegistry`, `SyntheticFactory`, `SyntheticToken`, `SyntheticVault`, `Vault`, `VaultFactory`. Updated Day-10 with the multi-asset NAV vault (`Vault.sol` now prices all holdings via oracles in `totalAssets()`).
 - ✅ **Circle Developer-Controlled Wallets** — `chain/circle_signer.py` (246 lines) is the production signing path. **No raw private keys** for vault operations; the oracle owner wallet is a Circle-managed wallet.
 - ✅ **USDC as exclusive settlement** — every flow priced in USDC, no native-token gas friction.
 - ✅ **Multi-wallet UX in frontend** — MetaMask, Coinbase, generic browser wallet via `viem`.
@@ -214,7 +214,7 @@ The Day-3 forcing function was *build the end-to-end loop*. That's now built. Th
 | ---------------------- | -------------------------------------------------------------------- |
 | Agentic Sophistication | LLM agent loop picks instruments, anchored to strategy passports; autonomous rebalance + reasoning trace |
 | Traction               | Real on-chain transactions by real users; logged via `update-traction` |
-| Circle Tool Usage      | USDC settlement + Circle Wallets + 10 contracts + multi-asset NAV     |
+| Circle Tool Usage      | USDC settlement + Circle Wallets + 11 contracts + multi-asset NAV     |
 | Innovation             | Strategy passport + selection-bias gate + paper-claim delta visible + corpus explorer  |
 | Arc OSS Showcase       | 12 forkable primitives (the original 7 + Xia 2026 protocols + StockBench adapter + paper-qa wrap + episodic memory + security pillar), each with how-to-fork docs |
 

@@ -3,9 +3,10 @@
 > **Status:** Day-10 update (2026-05-22). The Day-3 (2026-05-13) ecosystem pivot
 > spec — the foundation of the Synthetic Protocol + AMM Exchange + Vault Factory +
 > Agent-as-a-Service four-layer architecture — is **substantially shipped** as of
-> Day-10. **Shipped:** all 10 contracts deployed on Arc testnet (`AMMPool`,
+> Day-10. **Shipped:** all 11 contracts deployed on Arc testnet (`AMMPool`,
 > `AMMRouter`, `AssetRegistry`, `PriceOracle`, `ReasoningTraceRegistry`,
-> `SyntheticFactory`, `SyntheticToken`, `SyntheticVault`, `Vault`, `VaultFactory`)
+> `StrategyRegistry`, `SyntheticFactory`, `SyntheticToken`, `SyntheticVault`, `Vault`,
+> `VaultFactory`)
 > + Day-10 multi-asset NAV vault upgrade so `totalAssets()` prices all holdings
 > via oracles. **Deferred to roadmap:** Tier-2 community vaults (cut from MVP
 > per the strip-to-spine page tree); cross-chain RWA bridging via CCTP/Gateway;
