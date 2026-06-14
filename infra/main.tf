@@ -176,3 +176,19 @@ resource "aws_instance" "archimedes" {
     ignore_changes = [ami] # Don't recreate on AMI updates
   }
 }
+
+# ---------------------------------------------------------------------------
+# Elastic IP — ensures DNS stays valid through EC2 replacements
+# ---------------------------------------------------------------------------
+
+resource "aws_eip" "archimedes" {
+  instance = aws_instance.archimedes.id
+  domain   = "vpc"
+
+  tags = {
+    Name    = "${var.project_name}-eip"
+    Project = var.project_name
+  }
+
+  depends_on = [aws_instance.archimedes]
+}
