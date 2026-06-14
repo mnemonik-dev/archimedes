@@ -1,4 +1,4 @@
-# Quality gate — runs on every PR to main.
+# Quality gate — runs on every PR to main and on direct pushes to main.
 #
 # Hard block:
 #   backend-tests  — pytest unit suite (no DB/Redis required)
@@ -14,6 +14,11 @@ name: Quality Gate
 
 on:
   pull_request:
+    branches: [main]
+  # Also runs on direct pushes to main so test results are visible in CI history
+  # (the agentic CI system pushes directly to main; this surfaces test status
+  # without blocking deployment — deploy.yml is a separate workflow).
+  push:
     branches: [main]
 
 permissions:
