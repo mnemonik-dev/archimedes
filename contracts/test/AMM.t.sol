@@ -277,6 +277,41 @@ contract AMMTest is Test {
         vm.stopPrank();
     }
 
+    // ─── Direct pool swap (AUDIT B9 — minAmountOut guard) ───────────
+
+    /// @notice Direct pool.swap with minAmountOut=0 succeeds (backward-compatible).
+    function test_pool_swap_direct_zero_min() public {
+        address pool = router.createPool(address(tokenA), address(tokenB));
+        _seedLiquidity(alice, address(tokenA), address(tokenB), 10_000e18, 20_000e18);
+
+        uint256 swapAmount = 100e18;
+
+        vm.startPrank(bob);
+        tokenA.approve(pool, swapAmount);
+        uint256 amountOut = AMMPool(pool).swap(address(tokenA), swapAmount, bob, 0);
+        vm.stopPrank();
+
+        assertGt(amountOut, 0);
+    }
+
+    /// @notice Direct pool.swap reverts with SlippageProtection when minAmountOut
+    ///         exceeds the computed output (AUDIT B9).
+    function test_revert_pool_swap_slippage_protection() public {
+        address pool = router.createPool(address(tokenA), address(tokenB));
+        _seedLiquidity(alice, address(tokenA), address(tokenB), 10_000e18, 20_000e18);
+
+        uint256 swapAmount = 100e18;
+        // Preview what we'd get, then require one more wei than that.
+        uint256 preview = AMMPool(pool).getAmountOut(address(tokenA), swapAmount);
+        assertGt(preview, 0);
+
+        vm.startPrank(bob);
+        tokenA.approve(pool, swapAmount);
+        vm.expectRevert(AMMPool.SlippageProtection.selector);
+        AMMPool(pool).swap(address(tokenA), swapAmount, bob, preview + 1);
+        vm.stopPrank();
+    }
+
     // ─── Remove Liquidity ────────────────────────────────────────────
 
     function test_removeLiquidity_basic() public {
