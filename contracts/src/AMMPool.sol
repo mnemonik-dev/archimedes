@@ -70,7 +70,14 @@ contract AMMPool is IAMMPool, ERC20, Ownable, ReentrancyGuard {
     // ─── Swap ────────────────────────────────────────────────────────
 
     /// @notice Swap one token for another. Caller must have approved this contract.
-    function swap(address tokenIn, uint256 amountIn, address to)
+    /// @param tokenIn      Token being sold.
+    /// @param amountIn     Exact amount of tokenIn to sell.
+    /// @param to           Recipient of the output tokens.
+    /// @param minAmountOut Minimum acceptable output; reverts with SlippageProtection
+    ///                     if the computed amountOut is below this threshold.
+    ///                     Pass 0 to skip the check (e.g. when the caller already
+    ///                     enforces slippage at a higher layer, as AMMRouter does).
+    function swap(address tokenIn, uint256 amountIn, address to, uint256 minAmountOut)
         external
         nonReentrant
         returns (uint256 amountOut)
@@ -90,6 +97,7 @@ contract AMMPool is IAMMPool, ERC20, Ownable, ReentrancyGuard {
 
         if (amountOut == 0) revert InsufficientOutput();
         if (amountOut >= rOut) revert InsufficientLiquidity();
+        if (amountOut < minAmountOut) revert SlippageProtection();
 
         uint256 kBefore = rIn * rOut;
 
