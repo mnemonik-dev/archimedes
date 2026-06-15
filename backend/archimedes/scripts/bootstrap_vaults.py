@@ -30,6 +30,7 @@ load_dotenv(".env", override=False)
 from archimedes.chain.circle_signer import circle_signer
 from archimedes.chain.client import chain_client
 from archimedes.chain.contracts import get_contract_loader
+from archimedes.chain.executor import VaultCreationRevertedError
 
 # ─── Configuration ──────────────────────────────────────────────
 
@@ -248,6 +249,9 @@ async def create_vaults(minted: dict[str, float]) -> list[dict]:
                 chain_client.w3.to_bytes(hexstr=tx_hash.removeprefix("0x"))
             )
 
+            if receipt.get("status") == 0:
+                raise VaultCreationRevertedError(f"createVault tx reverted on-chain: {tx_hash}")
+
             vault_address = None
             factory = loader.vault_factory
             for log in receipt.logs:
@@ -259,7 +263,13 @@ async def create_vaults(minted: dict[str, float]) -> list[dict]:
                     continue
 
             if not vault_address:
-                # Fallback: get last vault from factory
+                # Tx succeeded but no VaultCreated event was found — fall back
+                # to the most recently created vault, but flag it: this masks
+                # an event-decoding/indexing issue, not a revert (handled above).
+                print(
+                    f"  ⚠️  {profile['name']}: createVault tx succeeded but no VaultCreated "
+                    f"event found; falling back to most recent vault from getVaults()"
+                )
                 all_vaults = await factory.functions.getVaults().call()
                 vault_address = all_vaults[-1]
 
