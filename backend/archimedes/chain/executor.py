@@ -42,6 +42,15 @@ class TradeRevertedError(RuntimeError):
     """
 
 
+class VaultCreationRevertedError(RuntimeError):
+    """Raised when a submitted createVault transaction reverts on-chain (status 0).
+
+    Without this, a reverted createVault is logged as "sent" and the Circle
+    path falls through to all_vaults[-1] — returning a pre-existing vault's
+    address as the result of a creation call that never happened.
+    """
+
+
 class ChainExecutor:
     """Executes on-chain vault operations: read portfolio, rebalance, create vault."""
 
@@ -300,9 +309,19 @@ class ChainExecutor:
             receipt = await chain_client.w3.eth.wait_for_transaction_receipt(
                 chain_client.w3.to_bytes(hexstr=tx_hash.removeprefix("0x")) if isinstance(tx_hash, str) else tx_hash
             )
+            if receipt.get("status") == 0:
+                raise VaultCreationRevertedError(f"createVault tx reverted on-chain: {tx_hash}")
             vault_address = self._parse_vault_created(factory, receipt)
             if not vault_address:
-                # Fallback: get last vault from factory
+                # Tx succeeded but no VaultCreated event was found — fall back
+                # to the most recently created vault, but flag it: this masks
+                # an event-decoding/indexing issue, not a revert (that's
+                # already handled above).
+                logger.warning(
+                    "createVault tx %s succeeded but no VaultCreated event found; "
+                    "falling back to most recent vault from getVaults()",
+                    tx_hash,
+                )
                 all_vaults = await factory.functions.getVaults().call()
                 vault_address = all_vaults[-1]
             logger.info(f"Vault created at {vault_address}")
