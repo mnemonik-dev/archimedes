@@ -21,10 +21,10 @@ dependencies:
       - sqlalchemy>=2.0
       - psycopg2-binary>=2.9.12       # PostgreSQL driver (binary wheel; no system pq needed). Floor aligned with backend/requirements.txt via dependabot PR #247.
       - redis>=8.0.0                  # Redis client for live regime/state cache (aligned with backend/requirements.txt)
-      - pydantic>=2.9
+      - pydantic>=2.13.4
       - pydantic-settings>=2.14.1     # Floor aligned with backend/requirements.txt via dependabot PR #248.
-      - python-dotenv>=1.0
-      - "slowapi>=0.1.9"              # FastAPI rate-limiter — required by api/limiter.py + user_routes.py. CI installs from backend/requirements.txt; this keeps local dev parity.
+      - python-dotenv>=1.2.2
+      - "slowapi>=0.1.10"             # FastAPI rate-limiter — required by api/limiter.py + user_routes.py. CI installs from backend/requirements.txt; this keeps local dev parity.
 
       # --- Data + numerics ---
       - numpy>=2.4.6,<3.0             # numpy 2 verified against backtrader 1.9.78.123 on 2026-06-12: full analytics-engine suite (170 tests) + backend backtrader tests + e2e Faber SMA200 run all green. Aligned with backend/requirements.txt (dependabot #489).
@@ -36,7 +36,7 @@ dependencies:
       # --- Market data ---
       - yfinance>=1.4.1              # Historical + live equity/ETF/crypto data; for backtesting
       - requests>=2.32
-      - aiohttp>=3.14.0                # Bumped from 3.13.5 to close CVE-2026-34993 / CVE-2026-47265 (HTTP parser DoS/smuggling). Floor aligned with backend/requirements.txt.
+      - aiohttp>=3.14.1                # Bumped from 3.13.5 to close CVE-2026-34993 / CVE-2026-47265 (HTTP parser DoS/smuggling). Floor aligned with backend/requirements.txt.
       - httpx>=0.27                   # Directly imported by services/corpus_service.py (arXiv intake) and services/llm_backend.py (OpenAI-compatible + Ollama). Pinned so we don't rely on transitive resolution.
 
       # --- Backtesting (per backtrader-vs-vectorbt decision memo) ---
@@ -60,7 +60,7 @@ dependencies:
 
       # --- Paper ingestion (Q-fin corpus) ---
       - arxiv>=2.1                    # arxiv API client
-      - pypdf>=6.13.0                 # PDF text extraction
+      - pypdf>=6.13.2                 # PDF text extraction
 
       # --- Quality + tests ---
       - ruff>=0.6                     # Linter + formatter; configured at line length 120
