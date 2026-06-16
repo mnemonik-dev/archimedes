@@ -1,0 +1,91 @@
+# Archimedes — production Docker Compose for the virality-ready backend tier (issue #155)
+#
+# OPTIONAL / virality-prep. This is the stack baked into the backend AMI and
+# run by each auto-scaling-group instance (infra/asg.tf). It is INTENTIONALLY
+# minimal: backend API + nginx ONLY. Postgres and Redis are NOT here — they
+# live in managed Aurora + ElastiCache (infra/aurora.tf, infra/elasticache.tf)
+# and are reached over the network via DATABASE_URL / REDIS_URL.
+#
+# Why a separate file (and why docker-compose.yml is untouched):
+#   - docker-compose.yml remains the single-box / local-dev stack that bundles
+#     postgres + redis + nginx + backend + oracle + agent + kb-runner.
+#   - docker-compose.production.yml is the stateless API replica unit. Putting
+#     postgres on each replica would defeat auto-scaling (each new instance
+#     would have an empty DB), so the DB/cache are externalized.
+#   - oracle_runner and agent_runner are NOT here: they are single canonical
+#     instances (their loops are the source of truth for vault/regime state)
+#     and must not be duplicated across ASG replicas.
+#
+# Usage on an ASG instance (cloud-init / operator):
+#   docker compose -f docker-compose.production.yml up --build -d
+#
+# Required env (from .env, sourced from SSM at boot — NEVER baked into the AMI):
+#   DATABASE_URL=postgresql://archimedes:<pw>@<aurora-endpoint>:5432/archimedes
+#   REDIS_URL=rediss://<elasticache-endpoint>:6379/0
+
+services:
+  # ---------- Reverse proxy + Frontend ----------
+  # nginx listens on 8080 inside the container (non-root image); the ALB
+  # terminates TLS and forwards plain HTTP to the instance on port 80 → 8080.
+  # nginx does NOT terminate TLS in this tier (the ALB does).
+  nginx:
+    build:
+      context: .
+      dockerfile: nginx/Dockerfile
+      args:
+        # VITE_* vars embed into the JS bundle at build time. VITE_API_BASE is
+        # empty so the SPA calls same-origin (CloudFront → ALB → nginx → backend).
+        VITE_CIRCLE_CLIENT_KEY: ${VITE_CIRCLE_CLIENT_KEY:-}
+        VITE_CIRCLE_CLIENT_URL: ${VITE_CIRCLE_CLIENT_URL:-https://modular-sdk.circle.com/v1/rpc/w3s/buidl}
+        VITE_API_BASE: ${VITE_API_BASE:-}
+    restart: unless-stopped
+    # Only port 80 → 8080. The ALB handles 443/TLS; no cert volume mounts here.
+    ports:
+      - "80:8080"
+    depends_on:
+      backend:
+        condition: service_started
+
+  # ---------- Backend API ----------
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    # NO host port binding — backend is only reachable via nginx reverse proxy.
+    expose:
+      - "8000" # visible to nginx on the compose network, NOT to the host
+    environment:
+      # DB + cache are external (Aurora + ElastiCache). No in-stack postgres/redis.
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env (Aurora endpoint)}
+      REDIS_URL: ${REDIS_URL:?Set REDIS_URL in .env (ElastiCache endpoint)}
+      # Deployed Arc testnet contracts (override via .env if needed)
+      ARC_AMM_ROUTER_ADDRESS: ${ARC_AMM_ROUTER_ADDRESS:-0xd5b829f9d364a8bbe1caf6c8b19cb05371b178f4}
+      ARC_VAULT_FACTORY_ADDRESS: ${ARC_VAULT_FACTORY_ADDRESS:-0xca873414070844aeb98b0bf1051f81969c79cc32}
+      ARC_REASONING_TRACE_REGISTRY_ADDRESS: ${ARC_REASONING_TRACE_REGISTRY_ADDRESS:-0x42d8a23edb897cbee203e9fa197eb05ab5106ca6}
+      ARC_ASSET_REGISTRY_ADDRESS: ${ARC_ASSET_REGISTRY_ADDRESS:-0x2d44550711137916df6175587d17886281a0fbc7}
+      ARCHIMEDES_STRATEGIES_DIR: /app/analytics-engine/strategies
+      ARCHIMEDES_CORPUS_MANIFEST: /app/data/corpus/manifest.jsonl
+      ARCHIMEDES_FUSION_ENABLED: ${ARCHIMEDES_FUSION_ENABLED:-true}
+      KB_ARTIFACT_DIR: /app/data/corpus-artifact
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:-archimedes-arc.app}
+      EMAIL_ENCRYPTION_KEY: ${EMAIL_ENCRYPTION_KEY:-}
+    env_file:
+      - .env
+    volumes:
+      - ./analytics-engine/strategies:/app/analytics-engine/strategies:ro
+      - ./analytics-engine/artifacts:/app/analytics-engine/artifacts:ro
+      - ./contracts/abis:/contracts/abis:ro
+      - ./data/corpus:/app/data/corpus:ro
+      - archimedes-corpus-artifact:/app/data/corpus-artifact
+    # Health gate so nginx (and the ALB behind it) only routes to a ready
+    # backend. Mirrors the ALB health check path GET /health.
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  archimedes-corpus-artifact:

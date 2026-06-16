@@ -33,3 +33,16 @@ variable "repo_url" {
   type        = string
   default     = "https://github.com/a-apin/archimedes-arcadia.git"
 }
+
+# AMI for the backend auto-scaling group (issue #155, OPTIONAL virality tier).
+# Bake via infra/scripts/bake-backend-ami.sh, then set this to the resulting
+# AMI id (or pass TF_VAR_backend_ami_id). Empty default keeps the var present
+# without forcing a value when the ASG is not being applied. The launch
+# template / ASG in asg.tf only become real on `terraform apply` — a plan with
+# an empty value will simply error on the launch template until an AMI is set,
+# which is the intended "supply the AMI to enable the tier" gate.
+variable "backend_ami_id" {
+  description = "Custom backend AMI id for the auto-scaling group launch template (issue #155). Set after baking via infra/scripts/bake-backend-ami.sh."
+  type        = string
+  default     = ""
+}
