@@ -94,3 +94,20 @@ output "waf_web_acl_arn" {
   description = "WAF Web ACL ARN"
   value       = aws_wafv2_web_acl.main.arn
 }
+
+# ── CloudFront + ASG (virality tier, issue #155) ──────────────
+
+output "cloudfront_domain_name" {
+  description = "CloudFront distribution domain (the *.cloudfront.net name behind archimedes-arc.app)"
+  value       = aws_cloudfront_distribution.main.domain_name
+}
+
+output "cloudfront_distribution_id" {
+  description = "CloudFront distribution id (for cache invalidations)"
+  value       = aws_cloudfront_distribution.main.id
+}
+
+output "backend_asg_name" {
+  description = "Backend auto-scaling group name"
+  value       = aws_autoscaling_group.backend.name
+}
