@@ -12,7 +12,9 @@ from fastapi import APIRouter, Request, Response
 from archimedes.api.limiter import limiter
 from archimedes.services.rigor_evaluator import (
     compute_average_pairwise_correlation,
+    compute_library_pbo,
     compute_pbo,
+    load_daily_returns_store,
     run_rigor_gate,
 )
 from archimedes.services.strategy_provider import default_provider
@@ -37,8 +39,33 @@ class RigorGateDetail(BaseModel):
     look_ahead: str = "MISSING"
 
 
+class LibraryPbo(BaseModel):
+    """Library-level CSCV PBO (Bailey et al. 2014) over the whole selection set.
+
+    Display-only (#546, option 2): this is a *selection-set property*, identical
+    across every strategy, surfaced ALONGSIDE the per-strategy cohort
+    ``pbo_score`` — it is strictly additive and does NOT feed any gate verdict.
+    The same value is attached to ``RigorGateResponse`` and to every
+    ``StrategyRigorResult`` (the passport endpoint renders from the per-strategy
+    result, so the field must be present there too even though it is library-wide,
+    not strategy-specific). ``value is None`` is the fail-closed / store-absent
+    signal, in which case ``source == "unavailable"``.
+    """
+
+    value: float | None = None  # the single library CSCV PBO, or None (fail-closed / store absent)
+    data_vintage: str | None = None  # store vintage, e.g. "2026-06-11"
+    selection_set_size: int = 0  # number of strategies in the selection set
+    source: str = "library_cscv"  # provenance label; "unavailable" when value is None
+
+
 class StrategyRigorResult(BaseModel):
-    """Rigor gate result for a single strategy."""
+    """Rigor gate result for a single strategy.
+
+    ``library_pbo`` is a *selection-set property* (identical across strategies),
+    not a per-strategy metric; it is included here only so the passport endpoint
+    (which renders from this per-strategy result) can surface it. It is
+    display-only and never affects ``passes_all`` or ``pbo_score`` (#546).
+    """
 
     strategy_id: str
     strategy_name: str
@@ -49,6 +76,7 @@ class StrategyRigorResult(BaseModel):
     pbo_score: float | None = None
     oos_sharpe: float | None = None
     in_sample_sharpe: float | None = None
+    library_pbo: LibraryPbo = LibraryPbo()
 
 
 class RigorGateResponse(BaseModel):
@@ -58,6 +86,7 @@ class RigorGateResponse(BaseModel):
     total: int
     passing: int
     failing: int
+    library_pbo: LibraryPbo = LibraryPbo()
 
 
 class PBORequest(BaseModel):
@@ -94,8 +123,14 @@ async def evaluate_rigor_gate():
     """
     strategies = _provider.list_strategies()
 
+    # Library-level CSCV PBO (#546, option 2): a display-only selection-set
+    # property attached to the response and to each per-strategy result. It is
+    # strictly additive — it never feeds run_rigor_gate or any gate verdict.
+    # Computed once (cached on the store file signature) and reused everywhere.
+    library_pbo = _library_pbo_payload()
+
     if not strategies:
-        return RigorGateResponse(strategies=[], total=0, passing=0, failing=0)
+        return RigorGateResponse(strategies=[], total=0, passing=0, failing=0, library_pbo=library_pbo)
 
     # ── Collect real daily returns from persisted backtest results ──
     from archimedes.db import get_session, init_db
@@ -152,6 +187,7 @@ async def evaluate_rigor_gate():
                         oos_sharpe="MISSING (no backtest data)",
                         look_ahead="MISSING (no code)",
                     ),
+                    library_pbo=library_pbo,
                 )
             )
             continue
@@ -211,6 +247,7 @@ async def evaluate_rigor_gate():
                 pbo_score=gate_result.pbo_score,
                 oos_sharpe=gate_result.oos_sharpe,
                 in_sample_sharpe=gate_result.in_sample_sharpe,
+                library_pbo=library_pbo,
             )
         )
 
@@ -220,6 +257,7 @@ async def evaluate_rigor_gate():
         total=len(results),
         passing=passing,
         failing=len(results) - passing,
+        library_pbo=library_pbo,
     )
 
 
@@ -265,6 +303,84 @@ async def compute_pbo_endpoint(req: PBORequest, request: Request, response: Resp
 
 
 # ── Helpers ──────────────────────────────────────────────────
+
+
+# Cache the (expensive) library CSCV PBO keyed on the store's file signature so
+# the C(16, 8) = 12,870-combination CSCV runs only when the daily-returns store
+# actually changes — matching compute_library_pbo's documented "recompute on
+# store growth" refresh cadence. The store is add-only + idempotent, so a change
+# in the (filename, st_mtime_ns) signature is the "selection set changed" signal.
+_LIBRARY_PBO_CACHE: dict[tuple[tuple[str, int], ...], tuple[float | None, str | None, int]] = {}
+
+
+def _store_signature(store_dir) -> tuple[tuple[str, int], ...] | None:
+    """Sorted ``(filename, st_mtime_ns)`` over the store's ``*.json`` files.
+
+    Returns ``None`` when the directory is absent (degrades gracefully). Used as
+    the cache key: a new/changed/removed file flips the signature and forces a
+    recompute; an unchanged store reuses the cached value.
+    """
+    from pathlib import Path
+
+    if store_dir is None or not Path(store_dir).is_dir():
+        return None
+    try:
+        return tuple(sorted((p.name, p.stat().st_mtime_ns) for p in Path(store_dir).glob("*.json")))
+    except OSError:
+        return None
+
+
+def _cached_library_pbo() -> tuple[float | None, str | None, int]:
+    """Load the daily-returns store and compute the single library CSCV PBO.
+
+    Returns ``(value, data_vintage, selection_set_size)`` where ``value`` is the
+    library PBO (``None`` fail-closed / store absent), ``data_vintage`` is the
+    store's max vintage, and ``selection_set_size`` is the number of aligned
+    series actually used by the CSCV. Cached on the store file signature so the
+    expensive CSCV does not re-run on every request.
+
+    Never raises: an absent/empty/malformed store yields ``(None, None, 0)``.
+    """
+    from archimedes.services.rigor_evaluator import (
+        _resolve_daily_returns_store_dir,
+        align_returns_store,
+    )
+
+    store_dir = _resolve_daily_returns_store_dir()
+    signature = _store_signature(store_dir)
+    if signature is None:
+        return None, None, 0
+    if signature in _LIBRARY_PBO_CACHE:
+        return _LIBRARY_PBO_CACHE[signature]
+
+    store, data_vintage = load_daily_returns_store(store_dir)
+    # selection_set_size = number of series that actually survive date-alignment
+    # (the count CSCV runs over), not the raw file count.
+    selection_set_size = len(align_returns_store(store))
+    value = compute_library_pbo(store)
+    result = (value, data_vintage, selection_set_size)
+    _LIBRARY_PBO_CACHE[signature] = result
+    return result
+
+
+def _library_pbo_payload() -> LibraryPbo:
+    """Build the display-only ``LibraryPbo`` for attachment to gate responses.
+
+    Display-only (#546): never feeds the gate verdict. When the store is
+    unavailable or the PBO fails closed, returns ``LibraryPbo(value=None,
+    source="unavailable")`` and never crashes.
+    """
+    value, data_vintage, selection_set_size = _cached_library_pbo()
+    if value is None:
+        return LibraryPbo(
+            value=None, data_vintage=data_vintage, selection_set_size=selection_set_size, source="unavailable"
+        )
+    return LibraryPbo(
+        value=value,
+        data_vintage=data_vintage,
+        selection_set_size=selection_set_size,
+        source="library_cscv",
+    )
 
 
 def _load_strategy_code(code_path: str) -> str | None:

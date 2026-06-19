@@ -20,6 +20,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 from archimedes.api.selection_bias_routes import (
+    LibraryPbo,
     PBORequest,
     PBOResponse,
     RigorGateDetail,
@@ -516,3 +517,241 @@ class TestOosCliffDenominator:
         )
         # Same series, only the denominator differs → the bug let it pass.
         assert "PASS" in gate.gate_details["oos_sharpe"]
+
+
+# ── Library PBO: schema + cached helper (#546, display-only) ────────────
+
+
+class TestLibraryPboSchema:
+    def test_defaults_are_unavailable_shape(self):
+        lp = LibraryPbo()
+        assert lp.value is None
+        assert lp.data_vintage is None
+        assert lp.selection_set_size == 0
+        assert lp.source == "library_cscv"
+
+    def test_custom_values_stored(self):
+        lp = LibraryPbo(value=0.31, data_vintage="2026-06-11", selection_set_size=22, source="library_cscv")
+        assert lp.value == pytest.approx(0.31)
+        assert lp.data_vintage == "2026-06-11"
+        assert lp.selection_set_size == 22
+
+    def test_present_on_response_models_by_default(self):
+        resp = RigorGateResponse(strategies=[], total=0, passing=0, failing=0)
+        assert isinstance(resp.library_pbo, LibraryPbo)
+        result = StrategyRigorResult(
+            strategy_id="x",
+            strategy_name="X",
+            passes_all=False,
+            gate_details=RigorGateDetail(),
+        )
+        assert isinstance(result.library_pbo, LibraryPbo)
+
+
+class TestCachedLibraryPbo:
+    """The module-level cached helper computes a value for a valid tmp store and
+    fails closed gracefully for an absent one — without re-running CSCV per call."""
+
+    def _write_store(self, directory, n_series: int = 4, n_obs: int = 256, vintage: str = "2026-06-11"):
+        import json
+
+        import numpy as np
+
+        rng = np.random.default_rng(7)
+        dates = [f"2020-{1 + i // 28:02d}-{1 + i % 28:02d}" for i in range(n_obs)]
+        for k in range(n_series):
+            rec = {
+                "stem": f"strat_{k}",
+                "data_vintage": vintage,
+                "n_obs": n_obs,
+                "dates": dates,
+                "daily_returns": rng.normal(0.0005, 0.01, n_obs).tolist(),
+            }
+            (directory / f"strat_{k}.json").write_text(json.dumps(rec), encoding="utf-8")
+
+    def test_returns_value_for_valid_store(self, tmp_path, monkeypatch):
+        from archimedes.api import selection_bias_routes as routes
+
+        self._write_store(tmp_path)
+        # Point the resolver at the tmp store and clear any cached value.
+        monkeypatch.setattr(routes, "_LIBRARY_PBO_CACHE", {})
+        monkeypatch.setattr(
+            "archimedes.services.rigor_evaluator._resolve_daily_returns_store_dir",
+            lambda: tmp_path,
+        )
+        value, vintage, size = routes._cached_library_pbo()
+        assert value is not None
+        assert 0.0 <= value <= 1.0
+        assert vintage == "2026-06-11"
+        assert size == 4
+
+    def test_absent_store_fails_closed(self, monkeypatch):
+        from archimedes.api import selection_bias_routes as routes
+
+        monkeypatch.setattr(routes, "_LIBRARY_PBO_CACHE", {})
+        monkeypatch.setattr(
+            "archimedes.services.rigor_evaluator._resolve_daily_returns_store_dir",
+            lambda: None,
+        )
+        value, vintage, size = routes._cached_library_pbo()
+        assert value is None
+        assert vintage is None
+        assert size == 0
+
+    def test_payload_unavailable_when_value_none(self, monkeypatch):
+        from archimedes.api import selection_bias_routes as routes
+
+        monkeypatch.setattr(routes, "_cached_library_pbo", lambda: (None, None, 0))
+        payload = routes._library_pbo_payload()
+        assert payload.value is None
+        assert payload.source == "unavailable"
+
+    def test_cache_avoids_recompute_on_unchanged_store(self, tmp_path, monkeypatch):
+        """Second call with an unchanged store does NOT re-run compute_library_pbo."""
+        from archimedes.api import selection_bias_routes as routes
+
+        self._write_store(tmp_path)
+        monkeypatch.setattr(routes, "_LIBRARY_PBO_CACHE", {})
+        monkeypatch.setattr(
+            "archimedes.services.rigor_evaluator._resolve_daily_returns_store_dir",
+            lambda: tmp_path,
+        )
+
+        calls = {"n": 0}
+        real = routes.compute_library_pbo
+
+        def _counting(*a, **k):
+            calls["n"] += 1
+            return real(*a, **k)
+
+        monkeypatch.setattr(routes, "compute_library_pbo", _counting)
+
+        routes._cached_library_pbo()
+        routes._cached_library_pbo()
+        assert calls["n"] == 1  # cached on the unchanged file signature
+
+
+# ── Library PBO: endpoint wiring + additivity guarantee (#546) ──────────
+
+
+@pytest.mark.asyncio
+async def test_gate_response_includes_library_pbo_object():
+    """GET /api/selection-bias/gate carries a library_pbo object on the response
+    AND on every per-strategy result (selection-set property)."""
+    from archimedes.main import app
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get("/api/selection-bias/gate")
+    data = resp.json()
+    assert "library_pbo" in data
+    lp = data["library_pbo"]
+    for key in ("value", "data_vintage", "selection_set_size", "source"):
+        assert key in lp, f"missing '{key}' in library_pbo: {list(lp.keys())}"
+    for strat in data["strategies"]:
+        assert "library_pbo" in strat
+
+
+@pytest.mark.asyncio
+async def test_single_strategy_result_includes_library_pbo():
+    """GET /gate/{id} renders the selection-set library_pbo on the passport result."""
+    from archimedes.api import selection_bias_routes
+    from archimedes.main import app
+
+    # Pick a real strategy id from the provider so the route resolves it.
+    strategies = selection_bias_routes._provider.list_strategies()
+    if not strategies:
+        pytest.skip("no strategies in provider")
+    sid = strategies[0].id
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/selection-bias/gate/{sid}")
+    assert resp.status_code == 200
+    assert "library_pbo" in resp.json()
+
+
+@pytest.mark.asyncio
+async def test_library_pbo_does_not_change_verdict_or_pbo_score(monkeypatch):
+    """ADDITIVITY GUARANTEE: injecting vs removing the library PBO must NOT change
+    any strategy's passes_all or pbo_score. We run the gate twice — once with the
+    library PBO forced to a concrete value, once forced unavailable — and assert
+    the per-strategy verdict + cohort pbo_score are byte-for-byte identical."""
+    from archimedes.api import selection_bias_routes as routes
+    from archimedes.main import app
+
+    async def _run_once():
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            return (await client.get("/api/selection-bias/gate")).json()
+
+    # Run A: library PBO present with a concrete value.
+    monkeypatch.setattr(
+        routes,
+        "_library_pbo_payload",
+        lambda: routes.LibraryPbo(value=0.42, data_vintage="2026-06-11", selection_set_size=22),
+    )
+    data_with = await _run_once()
+
+    # Run B: library PBO unavailable (None).
+    monkeypatch.setattr(
+        routes,
+        "_library_pbo_payload",
+        lambda: routes.LibraryPbo(value=None, source="unavailable"),
+    )
+    data_without = await _run_once()
+
+    by_id_with = {s["strategy_id"]: s for s in data_with["strategies"]}
+    by_id_without = {s["strategy_id"]: s for s in data_without["strategies"]}
+    assert by_id_with.keys() == by_id_without.keys()
+    for sid, a in by_id_with.items():
+        b = by_id_without[sid]
+        assert a["passes_all"] == b["passes_all"], f"passes_all changed for {sid}"
+        assert a["pbo_score"] == b["pbo_score"], f"pbo_score changed for {sid}"
+    # Sanity: the only thing that differs is the additive library_pbo field.
+    assert data_with["passing"] == data_without["passing"]
+    assert data_with["library_pbo"]["value"] == pytest.approx(0.42)
+    assert data_without["library_pbo"]["value"] is None
+
+
+@pytest.mark.asyncio
+async def test_run_rigor_gate_called_without_library_pbo_kwarg(monkeypatch):
+    """The gate verdict path must be provably unchanged: run_rigor_gate is called
+    WITHOUT a library_pbo= argument (passing it would alter criterion 4 = option 3,
+    which is out of scope). Patch run_rigor_gate, force the DB to yield a usable
+    return series so the full branch executes, and assert library_pbo is absent
+    from every call's kwargs."""
+    from archimedes.api import selection_bias_routes as routes
+    from archimedes.main import app
+    from archimedes.services.rigor_evaluator import run_rigor_gate as real_run_rigor_gate
+
+    strategies = routes._provider.list_strategies()
+    if not strategies:
+        pytest.skip("no strategies in provider")
+
+    # Force the DB read to return a usable series for at least one strategy so the
+    # full (non-MISSING) branch — the one that calls run_rigor_gate — executes.
+    import numpy as np
+
+    rng = np.random.default_rng(3)
+    series = rng.normal(0.001, 0.01, 400).tolist()
+    target_id = strategies[0].id
+    # The route imports get_all_daily_returns inside the function body
+    # (`from archimedes.services.backtest_repository import get_all_daily_returns`),
+    # so the effective patch point is the definition module, not the route module.
+    monkeypatch.setattr(
+        "archimedes.services.backtest_repository.get_all_daily_returns",
+        lambda session, ids: {target_id: series},
+    )
+
+    captured_kwargs = []
+
+    def _spy(*args, **kwargs):
+        captured_kwargs.append(kwargs)
+        return real_run_rigor_gate(*args, **kwargs)
+
+    monkeypatch.setattr(routes, "run_rigor_gate", _spy)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get("/api/selection-bias/gate")
+    assert resp.status_code == 200
+    assert captured_kwargs, "run_rigor_gate was never called — the full branch did not execute"
+    for kwargs in captured_kwargs:
+        assert "library_pbo" not in kwargs, "run_rigor_gate must NOT receive library_pbo (option-3 guard)"
