@@ -44,9 +44,14 @@ from archimedes.services.gmm_regime_detector import (
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("fit_gmm_regime")
 
-# ~2 years of trading days clears the ≥504-row bar with margin for the
-# _FEATURE_WINDOW warm-up that the rolling features consume.
-_LOOKBACK_PERIOD = "3y"
+# 10 years of daily bars. A shorter window (empirically 3y and 5y) contains no
+# sustained VIX>35 stretch, so no GMM component's mean VIX clears the crisis
+# threshold and the model becomes CRISIS-blind — it would label a real crash as
+# RISK_OFF and the dual-signal sizer (#662) would under-de-risk (0.4x vs 0.1x).
+# 10y spans the 2020 COVID spike (VIX 82.7) and the 2022 drawdown, which lets a
+# genuine crisis component form (mean VIX ~39) and yields a clean 1:1
+# component→regime mapping across all four regimes. Comfortably clears ≥504 rows.
+_LOOKBACK_PERIOD = "10y"
 _MIN_FIT_ROWS = 504
 
 
