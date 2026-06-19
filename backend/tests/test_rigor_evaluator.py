@@ -21,6 +21,7 @@ No network, no database, no on-chain dependencies.
 from __future__ import annotations
 
 import ast
+import json
 import math
 
 import numpy as np
@@ -41,6 +42,7 @@ from archimedes.services.rigor_evaluator import (
     _get_func_name,
     align_returns_store,
     compute_library_pbo,
+    load_daily_returns_store,
     look_ahead_audit,
     run_rigor_gate,
 )
@@ -1418,3 +1420,83 @@ class TestRigorGateLibraryPbo:
         )
         assert not result.passes_all
         assert result.gate_details["pbo"] == "MISSING (source=cohort)"
+
+
+# ─── Daily-returns store loader (#546) ───────────────────────────────
+
+
+class TestLoadDailyReturnsStore:
+    """load_daily_returns_store: read the store into compute_library_pbo's shape,
+    surface the max data_vintage, and degrade gracefully (never raise)."""
+
+    @staticmethod
+    def _write_record(directory, name: str, *, vintage: str, n: int = 4) -> None:
+        dates = [f"2020-01-{1 + i:02d}" for i in range(n)]
+        rec = {
+            "stem": name,
+            "data_vintage": vintage,
+            "n_obs": n,
+            "dates": dates,
+            "daily_returns": [0.001 * (i + 1) for i in range(n)],
+        }
+        (directory / f"{name}.json").write_text(json.dumps(rec), encoding="utf-8")
+
+    def test_loads_shape_and_max_vintage(self, tmp_path) -> None:
+        self._write_record(tmp_path, "alpha", vintage="2026-06-10")
+        self._write_record(tmp_path, "beta", vintage="2026-06-11")
+        self._write_record(tmp_path, "gamma", vintage="2026-06-09")
+
+        store, vintage = load_daily_returns_store(tmp_path)
+
+        assert set(store.keys()) == {"alpha", "beta", "gamma"}
+        # Each entry projected onto exactly {dates, daily_returns}.
+        for rec in store.values():
+            assert set(rec.keys()) == {"dates", "daily_returns"}
+            assert len(rec["dates"]) == len(rec["daily_returns"]) == 4
+        # Max ISO vintage across files.
+        assert vintage == "2026-06-11"
+
+    def test_missing_directory_returns_empty_no_raise(self, tmp_path) -> None:
+        absent = tmp_path / "does-not-exist"
+        store, vintage = load_daily_returns_store(absent)
+        assert store == {}
+        assert vintage is None
+
+    def test_empty_directory_returns_empty(self, tmp_path) -> None:
+        store, vintage = load_daily_returns_store(tmp_path)
+        assert store == {}
+        assert vintage is None
+
+    def test_malformed_file_is_skipped(self, tmp_path) -> None:
+        self._write_record(tmp_path, "good", vintage="2026-06-11")
+        (tmp_path / "broken.json").write_text("{ this is not json", encoding="utf-8")
+
+        store, vintage = load_daily_returns_store(tmp_path)
+
+        # The bad file is skipped; the good one survives.
+        assert set(store.keys()) == {"good"}
+        assert vintage == "2026-06-11"
+
+    def test_record_without_vintage_yields_none_vintage(self, tmp_path) -> None:
+        rec = {"stem": "novintage", "dates": ["2020-01-01", "2020-01-02"], "daily_returns": [0.01, 0.02]}
+        (tmp_path / "novintage.json").write_text(json.dumps(rec), encoding="utf-8")
+
+        store, vintage = load_daily_returns_store(tmp_path)
+        assert set(store.keys()) == {"novintage"}
+        assert vintage is None
+
+    def test_record_missing_returns_field_is_skipped(self, tmp_path) -> None:
+        # dates present but daily_returns absent → not loadable, skip.
+        bad = {"stem": "halfrec", "dates": ["2020-01-01"]}
+        (tmp_path / "halfrec.json").write_text(json.dumps(bad), encoding="utf-8")
+        self._write_record(tmp_path, "good", vintage="2026-06-11")
+
+        store, _ = load_daily_returns_store(tmp_path)
+        assert set(store.keys()) == {"good"}
+
+    def test_default_store_dir_loads_repo_store(self) -> None:
+        # No explicit dir → resolve the repo's analytics-engine store. The repo
+        # ships 22 records, so the live store loads non-empty with a vintage.
+        store, vintage = load_daily_returns_store()
+        assert len(store) >= 2
+        assert isinstance(vintage, str) and vintage

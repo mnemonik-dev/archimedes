@@ -20,8 +20,10 @@ Spec:  docs/specs/selection-bias-corrections-spec.md
 from __future__ import annotations
 
 import ast
+import json
 import logging
 import math
+from pathlib import Path
 
 import numpy as np
 
@@ -248,6 +250,86 @@ def compute_library_pbo(
     if pbo is None or not math.isfinite(pbo):
         return None
     return float(pbo)
+
+
+def _resolve_daily_returns_store_dir() -> Path | None:
+    """Locate ``analytics-engine/strategies/daily_returns/`` from the repo root.
+
+    Walks up from this module's location (``backend/archimedes/services/``)
+    looking for the first ancestor that contains the store directory. Avoids a
+    hardcoded absolute path and avoids depending on ``os.getcwd()`` (which is
+    not the repo root under the test harness). Returns ``None`` when no ancestor
+    carries the tree — a backend deployed without the analytics-engine present
+    degrades gracefully rather than raising.
+    """
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        candidate = parent / "analytics-engine" / "strategies" / "daily_returns"
+        if candidate.is_dir():
+            return candidate
+    return None
+
+
+def load_daily_returns_store(
+    store_dir: Path | None = None,
+) -> tuple[dict[str, dict[str, list]], str | None]:
+    """Load the daily-returns store into the shape ``compute_library_pbo`` wants.
+
+    Reads every ``*.json`` record under ``store_dir`` (default: the repo's
+    ``analytics-engine/strategies/daily_returns/``, resolved by walking up from
+    ``__file__``) and projects each onto the minimal
+    ``{stem: {"dates": [...], "daily_returns": [...]}}`` shape that
+    ``align_returns_store`` / ``compute_library_pbo`` consume.
+
+    Also returns the data vintage: the MAX ``data_vintage`` string seen across
+    the loaded records, so the caller can surface "as of <vintage>" provenance.
+
+    **Never raises.** A missing/absent directory, an empty directory, or a
+    malformed/unreadable file all degrade gracefully: a malformed file is
+    skipped, and an absent or empty store returns ``({}, None)``. This mirrors
+    the fail-closed contract of ``compute_library_pbo`` — a backend without the
+    analytics-engine tree present must still serve.
+
+    Args:
+        store_dir: Directory of ``<stem>.json`` records. When ``None``, resolved
+            to the repo's ``analytics-engine/strategies/daily_returns/``.
+
+    Returns:
+        ``(store, data_vintage)`` where ``store`` is
+        ``{stem: {"dates": [...], "daily_returns": [...]}}`` (empty when the dir
+        is absent/empty or every file was malformed) and ``data_vintage`` is the
+        max ISO vintage string across records (``None`` when no usable record
+        carried one).
+    """
+    if store_dir is None:
+        store_dir = _resolve_daily_returns_store_dir()
+    if store_dir is None or not Path(store_dir).is_dir():
+        return {}, None
+
+    store: dict[str, dict[str, list]] = {}
+    vintages: list[str] = []
+    for path in sorted(Path(store_dir).glob("*.json")):
+        try:
+            rec = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            # Malformed / unreadable file — skip it; never let one bad file
+            # take down the whole load.
+            logger.warning("load_daily_returns_store: skipping unreadable store file %s", path.name)
+            continue
+        if not isinstance(rec, dict):
+            continue
+        dates = rec.get("dates")
+        daily_returns = rec.get("daily_returns")
+        if not isinstance(dates, list) or not isinstance(daily_returns, list):
+            continue
+        stem = rec.get("stem") or path.stem
+        store[stem] = {"dates": dates, "daily_returns": daily_returns}
+        vintage = rec.get("data_vintage")
+        if isinstance(vintage, str) and vintage:
+            vintages.append(vintage)
+
+    data_vintage = max(vintages) if vintages else None
+    return store, data_vintage
 
 
 # ─── 6. Rigor Gate — composite check ─────────────────────────────────
