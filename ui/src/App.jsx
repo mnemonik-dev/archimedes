@@ -4,7 +4,6 @@ import Layout from './components/Layout'
 import Landing from './components/Landing'
 import Explore from './components/Explore'
 import Generate from './components/Generate'
-import ModelCostPanel from './components/ModelCostPanel'
 import Portfolio from './components/Portfolio'
 import Learnings from './components/Learnings'
 import Strategies from './components/Strategies'   // serves /library route ("Example Library")
@@ -206,20 +205,14 @@ export default function App() {
       case 'landing':     return <Landing onNavigate={navigateToPage} />
       case 'explore':      return <Explore />
       case 'generate':     return (
-        <>
-          {/* Model & cost transparency — above the wallet gate so a prospective
-              user sees which LLM is running + the cost landscape before
-              connecting. Collapsed by default (a thin bar). */}
-          <ModelCostPanel />
-          <WalletGate
-            walletAddr={walletAddr}
-            pageName="Generate"
-            description="Generate uses an LLM-powered multi-agent pipeline against a 1,014-paper q-fin corpus. Connect a wallet — sign in with a passkey, no extension needed — to run the agent and persist your generated strategies in your library."
-            onConnect={openConnectModal}
-          >
-            <Generate onNavigate={navigateToPage} />
-          </WalletGate>
-        </>
+        <WalletGate
+          walletAddr={walletAddr}
+          pageName="Generate"
+          description="Generate uses an LLM-powered multi-agent pipeline against a 1,014-paper q-fin corpus. Connect a wallet — sign in with a passkey, no extension needed — to run the agent and persist your generated strategies in your library."
+          onConnect={openConnectModal}
+        >
+          <Generate onNavigate={navigateToPage} />
+        </WalletGate>
       )
       case 'architecture': return <Architecture onNavigate={navigateToPage} />
       case 'library':      return (
