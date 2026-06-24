@@ -16,7 +16,10 @@ fast with a clear pointer at this file.
 from __future__ import annotations
 
 import re
+import sys
+import types
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 _BACKEND_DIR = Path(__file__).resolve().parents[2] / "archimedes" / "services"
 _AGENTS_DIR = Path(__file__).resolve().parents[2] / "archimedes" / "agents"
@@ -159,6 +162,7 @@ def test_make_llm_backend_returns_a_canonical_subclass():
     from archimedes.services.llm_backend import (
         AnthropicBackend,
         AnthropicCompatibleBackend,
+        BedrockBackend,
         CannedBackend,
         OllamaBackend,
         OpenAIBackend,
@@ -176,6 +180,7 @@ def test_make_llm_backend_returns_a_canonical_subclass():
             (
                 AnthropicBackend,
                 AnthropicCompatibleBackend,
+                BedrockBackend,
                 OpenAIBackend,
                 OllamaBackend,
                 CannedBackend,
@@ -188,3 +193,80 @@ def test_make_llm_backend_returns_a_canonical_subclass():
             os.environ["ANTHROPIC_API_KEY"] = original_key
         if original_auth is not None:
             os.environ["ANTHROPIC_AUTH_TOKEN"] = original_auth
+
+
+# ── Bedrock backend (AWS Bedrock LLM provider) ──────────────────────────────
+#
+# BedrockBackend uses anthropic.AnthropicBedrock with IAM auth (no API key),
+# resolving AWS credentials via boto3. These tests are fully hermetic: they
+# inject fake ``boto3`` / ``anthropic`` modules so no real SDK, AWS credentials,
+# or network is required — the import boundary inside ``__init__``
+# (``import boto3`` / ``from anthropic import AnthropicBedrock``) is what we mock.
+
+
+def _fake_boto3(creds):
+    mod = types.ModuleType("boto3")
+    session = MagicMock()
+    session.get_credentials.return_value = creds
+    mod.Session = MagicMock(return_value=session)
+    return mod
+
+
+def _fake_anthropic(client):
+    mod = types.ModuleType("anthropic")
+    mod.AnthropicBedrock = MagicMock(return_value=client)
+    return mod
+
+
+def test_bedrock_backend_canned_when_no_credentials():
+    """No resolvable AWS credentials → not available (caller falls back to canned)."""
+    with patch.dict(sys.modules, {"boto3": _fake_boto3(None), "anthropic": _fake_anthropic(MagicMock())}):
+        from archimedes.services.llm_backend import BedrockBackend
+
+        backend = BedrockBackend()
+        assert backend.available is False
+
+
+def test_bedrock_backend_default_model_is_haiku(monkeypatch):
+    """The default Bedrock model is Haiku (cheapest tier) when LLM_BEDROCK_MODEL is unset."""
+    monkeypatch.delenv("LLM_BEDROCK_MODEL", raising=False)
+    with patch.dict(sys.modules, {"boto3": _fake_boto3(None), "anthropic": _fake_anthropic(MagicMock())}):
+        from archimedes.services.llm_backend import DEFAULT_BEDROCK_MODEL, BedrockBackend
+
+        backend = BedrockBackend()
+        assert backend.model_id == DEFAULT_BEDROCK_MODEL
+        assert "haiku" in backend.model_id.lower()
+
+
+def test_bedrock_backend_available_and_completes_with_mocked_client(monkeypatch):
+    """With creds + a mocked AnthropicBedrock client, the backend is available and
+    ``complete`` returns the (stripped) model text and tracks the served model.
+    """
+    monkeypatch.setenv("LLM_BEDROCK_MODEL", "us.anthropic.claude-haiku-4-5-20251001-v1:0")
+    response = MagicMock()
+    response.content = [MagicMock(text="  HELLO  ")]
+    response.model = "claude-haiku-4-5-20251001"
+    client = MagicMock()
+    client.messages.create.return_value = response
+
+    with patch.dict(sys.modules, {"boto3": _fake_boto3(object()), "anthropic": _fake_anthropic(client)}):
+        from archimedes.services.llm_backend import BedrockBackend
+
+        backend = BedrockBackend()
+        assert backend.available is True
+        assert backend.model_id == "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+        assert backend.complete("sys", "user") == "HELLO"
+        assert backend.served_model == "claude-haiku-4-5-20251001"
+        # The model id handed to the SDK is the Bedrock inference-profile id.
+        assert client.messages.create.call_args.kwargs["model"] == "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+
+
+def test_make_llm_backend_selects_bedrock(monkeypatch):
+    """LLM_PROVIDER=bedrock routes the factory to BedrockBackend (creds present)."""
+    monkeypatch.setenv("LLM_PROVIDER", "bedrock")
+    with patch.dict(sys.modules, {"boto3": _fake_boto3(object()), "anthropic": _fake_anthropic(MagicMock())}):
+        from archimedes.services.llm_backend import BedrockBackend, make_llm_backend
+
+        backend = make_llm_backend()
+        assert isinstance(backend, BedrockBackend)
+        assert backend.available is True
