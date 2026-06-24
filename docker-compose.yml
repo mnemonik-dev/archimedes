@@ -44,11 +44,11 @@ services:
         VITE_API_BASE: ${VITE_API_BASE:-}
     restart: unless-stopped
     ports:
+      # TLS terminates upstream at CloudFront + the ALB; nginx serves plain
+      # HTTP on :8080. No :443/8443 mapping and no cert mounts — the
+      # in-container self-signed-cert stopgap is retired (the ALB→nginx hop is
+      # plain HTTP, so large responses no longer 502 through that TLS layer).
       - "80:8080"
-      - "443:8443"
-    volumes:
-      - /etc/letsencrypt/live/archimedes-arc.app/fullchain.pem:/etc/nginx/certs/fullchain.pem:ro
-      - /etc/letsencrypt/live/archimedes-arc.app/privkey.pem:/etc/nginx/certs/privkey.pem:ro
     depends_on:
       backend:
         condition: service_started

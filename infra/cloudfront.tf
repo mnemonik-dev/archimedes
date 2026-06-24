@@ -26,7 +26,7 @@ provider "aws" {
 # eu-west-2). CloudFront can only attach a us-east-1 cert.
 resource "aws_acm_certificate" "cloudfront" {
   provider                  = aws.us_east_1
-  domain_name               = "${var.domain_name}"
+  domain_name               = var.domain_name
   subject_alternative_names = ["www.${var.domain_name}"]
   validation_method         = "DNS"
 
@@ -283,6 +283,7 @@ resource "aws_cloudfront_distribution" "main" {
     allowed_methods            = ["GET", "HEAD", "OPTIONS"]
     cached_methods             = ["GET", "HEAD"]
     cache_policy_id            = aws_cloudfront_cache_policy.static_assets.id
+    origin_request_policy_id   = aws_cloudfront_origin_request_policy.all_viewer.id
     response_headers_policy_id = aws_cloudfront_response_headers_policy.security.id
     compress                   = true
   }
@@ -295,6 +296,7 @@ resource "aws_cloudfront_distribution" "main" {
     allowed_methods            = ["GET", "HEAD", "OPTIONS"]
     cached_methods             = ["GET", "HEAD"]
     cache_policy_id            = aws_cloudfront_cache_policy.static_assets.id
+    origin_request_policy_id   = aws_cloudfront_origin_request_policy.all_viewer.id
     response_headers_policy_id = aws_cloudfront_response_headers_policy.security.id
     compress                   = true
   }
@@ -307,6 +309,7 @@ resource "aws_cloudfront_distribution" "main" {
     allowed_methods            = ["GET", "HEAD", "OPTIONS"]
     cached_methods             = ["GET", "HEAD"]
     cache_policy_id            = aws_cloudfront_cache_policy.static_assets.id
+    origin_request_policy_id   = aws_cloudfront_origin_request_policy.all_viewer.id
     response_headers_policy_id = aws_cloudfront_response_headers_policy.security.id
     compress                   = true
   }
@@ -319,6 +322,7 @@ resource "aws_cloudfront_distribution" "main" {
     allowed_methods            = ["GET", "HEAD", "OPTIONS"]
     cached_methods             = ["GET", "HEAD"]
     cache_policy_id            = aws_cloudfront_cache_policy.static_assets.id
+    origin_request_policy_id   = aws_cloudfront_origin_request_policy.all_viewer.id
     response_headers_policy_id = aws_cloudfront_response_headers_policy.security.id
     compress                   = true
   }
@@ -352,7 +356,7 @@ data "aws_cloudfront_cache_policy" "caching_disabled" {
 # source (data.aws_route53_zone.main, defined in alb.tf).
 resource "aws_route53_record" "apex_cloudfront" {
   zone_id = data.aws_route53_zone.main.zone_id
-  name    = "${var.domain_name}"
+  name    = var.domain_name
   type    = "A"
 
   alias {
@@ -364,7 +368,7 @@ resource "aws_route53_record" "apex_cloudfront" {
 
 resource "aws_route53_record" "apex_cloudfront_ipv6" {
   zone_id = data.aws_route53_zone.main.zone_id
-  name    = "${var.domain_name}"
+  name    = var.domain_name
   type    = "AAAA"
 
   alias {
