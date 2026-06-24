@@ -8,6 +8,7 @@ import {
   getWalletClient,
   CIRCLE_PROVIDER_ID,
 } from '../config'
+import { sanitizeWalletName } from '../circle-wallet'
 
 export default function WalletConnect({ address, displayName, onConnect, onDisconnect, onEditProfile }) {
   const [showModal, setShowModal] = useState(false)
@@ -17,6 +18,7 @@ export default function WalletConnect({ address, displayName, onConnect, onDisco
   const [discoveryTick, setDiscoveryTick] = useState(0)
   const [copied, setCopied] = useState(false)
   const [balance, setBalance] = useState(null)
+  const [walletName, setWalletName] = useState('')
   const menuRef = useRef(null)
   const providerId = getConnectedProvider()
   const isPasskey = providerId === CIRCLE_PROVIDER_ID
@@ -383,6 +385,27 @@ export default function WalletConnect({ address, displayName, onConnect, onDisco
                               </span>
                             </span>
                           </div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                            <input
+                              type="text"
+                              value={walletName}
+                              onChange={(e) => setWalletName(e.target.value)}
+                              placeholder="Name a new wallet (optional) — e.g. Trading"
+                              maxLength={50}
+                              disabled={busy}
+                              aria-label="New wallet name (optional)"
+                              style={{
+                                width: '100%', padding: '8px 10px', borderRadius: 8,
+                                background: 'var(--surface-1)', border: '1px solid var(--glass-border)',
+                                color: 'var(--text-1)', fontSize: '0.85rem',
+                              }}
+                            />
+                            {walletName.trim().length > 0 && sanitizeWalletName(walletName) === null && (
+                              <span style={{ fontSize: '0.7rem', color: 'var(--danger, #f87171)' }}>
+                                At least 5 characters — letters, numbers, or _ @ . : + -
+                              </span>
+                            )}
+                          </div>
                           <div style={{ display: 'flex', gap: 8 }}>
                             <button
                               className="btn btn-primary"
@@ -395,15 +418,15 @@ export default function WalletConnect({ address, displayName, onConnect, onDisco
                             <button
                               className="btn btn-outline"
                               style={{ flex: 1 }}
-                              onClick={() => handleConnect(p.id, { mode: 'register' })}
-                              disabled={busy}
+                              onClick={() => handleConnect(p.id, { mode: 'register', walletName })}
+                              disabled={busy || (walletName.trim().length > 0 && sanitizeWalletName(walletName) === null)}
                             >
                               Create new wallet
                             </button>
                           </div>
                           <span style={{ fontSize: '0.72rem', color: 'var(--text-4)', lineHeight: 1.4 }}>
                             <strong style={{ color: 'var(--text-3)' }}>Sign in to existing</strong> opens your passkey
-                            picker — choose the wallet you want. <strong style={{ color: 'var(--text-3)' }}>Create new</strong> mints a fresh wallet.
+                            picker — choose the wallet you want. <strong style={{ color: 'var(--text-3)' }}>Create new</strong> mints a fresh wallet under the name above (or an auto-generated one).
                           </span>
                         </div>
                       ) : (
