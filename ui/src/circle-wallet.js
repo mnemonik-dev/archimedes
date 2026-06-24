@@ -85,6 +85,22 @@ function newUniqueUsername() {
   return `archimedes-${hex}`
 }
 
+// Turn a user-typed wallet name into a Circle-valid username (5-50 chars from
+// [a-zA-Z0-9_@.:+-]): trim, collapse disallowed runs (incl. spaces) to a single
+// hyphen, strip edge hyphens, cap at 50. Returns null when the input is empty or
+// sanitizes to fewer than Circle's 5-char floor, so the caller falls back to an
+// auto-generated unique name. Circle enforces username uniqueness, so the name
+// doubles as the human-readable label shown in the passkey picker at login.
+export function sanitizeWalletName(name) {
+  if (!name) return null
+  const cleaned = String(name)
+    .trim()
+    .replace(/[^a-zA-Z0-9_@.:+-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 50)
+  return cleaned.length >= 5 ? cleaned : null
+}
+
 export function clearCircleSession() {
   try {
     localStorage.removeItem(CREDENTIAL_STORAGE_KEY)
@@ -131,14 +147,15 @@ function friendlyPasskeyError(err) {
 //     deterministically derives that wallet's MSCA address. This is how a user
 //     signs back into a SPECIFIC existing wallet (and recovers it on a fresh
 //     browser / device).
-//   - mode 'register' → CREATE a new wallet: register a fresh passkey under a
-//     unique username (Circle rejects duplicate usernames). New credential →
-//     new MSCA address.
+//   - mode 'register' → CREATE a new wallet: register a fresh passkey under the
+//     user-chosen `walletName` (sanitized to Circle's username rules), or an
+//     auto-generated unique name if none is given. Circle rejects duplicate
+//     usernames. New credential → new MSCA address.
 //
 // Returns the smart account + address + credential (persisted to localStorage
 // for silent next-session rehydrate — see rehydrateSmartAccount). Throws a
-// friendly message on WebAuthn cancellation / domain mismatch.
-export async function connectCirclePasskey({ mode = 'login' } = {}) {
+// friendly message on WebAuthn cancellation / domain mismatch / name collision.
+export async function connectCirclePasskey({ mode = 'login', walletName } = {}) {
   if (!circlePasskeyEnabled()) {
     throw new Error('Circle passkey wallet is not configured (missing VITE_CIRCLE_CLIENT_KEY).')
   }
@@ -146,17 +163,27 @@ export async function connectCirclePasskey({ mode = 'login' } = {}) {
   // Passkey transport handles WebAuthn challenge issuance + verification.
   const passkeyTransport = toPasskeyTransport(CLIENT_URL, CLIENT_KEY)
 
+  // Register uses the user-chosen name (sanitized) so the wallet is recognizable
+  // in the passkey picker at login; falls back to an auto-generated unique name.
+  const registerUsername = sanitizeWalletName(walletName) ?? newUniqueUsername()
+
   // Browser prompts the user for biometrics here. Register issues a new P256
-  // credential under a unique username; Login is discoverable (no username, no
+  // credential under that username; Login is discoverable (no username, no
   // credentialId) so the browser surfaces all passkeys for this origin to pick.
   let credential
   try {
     credential = await toWebAuthnCredential(
       mode === 'register'
-        ? { transport: passkeyTransport, mode: WebAuthnMode.Register, username: newUniqueUsername() }
+        ? { transport: passkeyTransport, mode: WebAuthnMode.Register, username: registerUsername }
         : { transport: passkeyTransport, mode: WebAuthnMode.Login },
     )
   } catch (err) {
+    // A custom name that collides with an existing wallet's name gets a clear,
+    // actionable message instead of the generic duplicate-credential copy.
+    const raw = String(err?.message ?? err ?? '')
+    if (mode === 'register' && sanitizeWalletName(walletName) && /username is duplicated/i.test(raw)) {
+      throw new Error('That wallet name is already taken — choose a different one.', { cause: err })
+    }
     throw new Error(friendlyPasskeyError(err), { cause: err })
   }
 
