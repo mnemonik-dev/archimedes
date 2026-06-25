@@ -109,7 +109,6 @@ async def telemetry_middleware(request: Request, call_next):
     never break the request it is measuring.
     """
     is_agent = False
-    agent_type = "human"
     try:
         is_agent, agent_type = classify_request(request)
         request.state.is_agent = is_agent
