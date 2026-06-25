@@ -384,3 +384,89 @@ class TestLoadGmmModel:
         with wrong.open("wb") as fh:
             pickle.dump({"not": "a FittedGmm"}, fh)
         assert load_gmm_model(wrong) is None
+
+
+class TestNaNFeatureGuard:
+    """A non-finite feature vector must degrade to the fallback, not be argmax'd.
+
+    np.argmax over a NaN/inf array silently returns index 0 → a silent
+    misclassification presented as a confident GMM call. The guard intercepts a
+    non-finite feature vector BEFORE scaler/predict and delegates loudly to the
+    rule-based fallback instead.
+    """
+
+    def _eligible_det(self, fallback: _SentinelFallback) -> GmmRegimeDetector:
+        """A detector on the GMM path: fitted model + sufficient calm history."""
+        det = GmmRegimeDetector(
+            model_path=_NONEXISTENT_MODEL,
+            fallback=fallback,
+            seed_history=_gmm_buffer(),
+        )
+        det._model = _fit_synthetic()  # inject in-memory fit (no pickle-on-disk)
+        return det
+
+    def test_nan_features_delegate_to_fallback(self) -> None:
+        sentinel = _sentinel_classification()
+        det = self._eligible_det(_SentinelFallback(sentinel))
+        # Force a NaN feature vector at the boundary the guard checks (mock the
+        # internal builder; the production guard runs on whatever it returns).
+        det._build_features = lambda: np.array([12.0, np.nan, 0.10, 0.05])  # type: ignore[method-assign]
+
+        result = det.classify(_snapshot(vix=12.0, spy_price=5100.0))
+
+        # The sentinel proves we delegated; had the guard been absent, argmax over
+        # the NaN vector would have produced a (wrong) GMM RegimeClassification,
+        # which is NOT the sentinel object.
+        assert result is sentinel
+        assert "nan_features" in det._fallback_warned
+
+    def test_inf_features_delegate_to_fallback(self) -> None:
+        sentinel = _sentinel_classification()
+        det = self._eligible_det(_SentinelFallback(sentinel))
+        det._build_features = lambda: np.array([12.0, np.inf, 0.10, 0.05])  # type: ignore[method-assign]
+
+        result = det.classify(_snapshot(vix=12.0, spy_price=5100.0))
+        assert result is sentinel
+        assert "nan_features" in det._fallback_warned
+
+    def test_does_not_silently_pick_component_zero(self) -> None:
+        # A finite-but-distinct fallback regime makes the "argmax→component 0"
+        # bug observable: if the guard were missing, classify would return a GMM
+        # result whose regime is the component-0 label, not the sentinel's regime.
+        sentinel = _sentinel_classification()  # regime = TRANSITION, vix_level 99.0
+        det = self._eligible_det(_SentinelFallback(sentinel))
+        det._build_features = lambda: np.array([np.nan, np.nan, np.nan, np.nan])  # type: ignore[method-assign]
+
+        result = det.classify(_snapshot(vix=12.0, spy_price=5100.0))
+        assert result is sentinel
+        assert result.signals.vix_level == 99.0  # the fallback's marker, not a GMM signal
+
+
+class TestZeroPriceVolGuard:
+    """A zero in the SPY series must not yield a NaN realized-vol feature.
+
+    ``daily_returns = diff(spy) / spy[:-1]`` divides by 0 on a zero price → inf →
+    np.std propagates NaN. The guard drops the offending steps so realized vol
+    stays finite (and the whole feature vector stays finite → GMM path eligible).
+    """
+
+    def test_zero_price_yields_finite_realized_vol(self) -> None:
+        det = GmmRegimeDetector(model_path=_NONEXISTENT_MODEL)
+        # A calm history with ONE zero SPY price injected mid-window.
+        history = _gmm_buffer()
+        history[5] = (history[5][0], 0.0)  # zero out a single SPY close
+        det._buffer.extend(history)
+
+        features = det._build_features()
+        realized_vol_21d = features[2]  # index 2 = realized_vol_21d
+        assert np.isfinite(realized_vol_21d)
+        assert np.all(np.isfinite(features))  # whole vector stays finite
+
+    def test_all_zero_prices_yield_zero_vol(self) -> None:
+        det = GmmRegimeDetector(model_path=_NONEXISTENT_MODEL)
+        # Degenerate window: every SPY price is zero → no usable return step.
+        det._buffer.extend([(12.0, 0.0) for _ in range(_MIN_HISTORY + 2)])
+
+        features = det._build_features()
+        assert features[2] == 0.0  # realized vol falls back to 0.0, not NaN
+        assert np.all(np.isfinite(features))

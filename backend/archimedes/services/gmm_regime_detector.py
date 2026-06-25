@@ -408,6 +408,19 @@ class GmmRegimeDetector:
 
         # ── GMM path ─────────────────────────────────────────────────
         features = self._build_features()
+        # NaN/inf guard: a non-finite feature vector (e.g. a zero/None price that
+        # slipped a denominator, or an inf that propagated) would make np.argmax
+        # silently return component 0 → a silent misclassification presented as a
+        # confident GMM call. Degrade loudly to the rule-based fallback instead.
+        if not np.all(np.isfinite(features)):
+            self._warn_fallback(
+                "nan_features",
+                f"classify() delegated to rule-based VixRegimeDetector (non-finite feature vector {features.tolist()})",
+            )
+            result = self._fallback.classify(snapshot)
+            self._last = result
+            return result
+
         scaled = self._model.scaler.transform(features.reshape(1, -1))
         proba = self._model.gmm.predict_proba(scaled)[0]
         component = int(np.argmax(proba))
@@ -472,9 +485,18 @@ class GmmRegimeDetector:
         vix_21d_chg = (vix_now - vix_then) / vix_then if vix_then else 0.0
         return_21d = (spy_now - spy_then) / spy_then if spy_then else 0.0
 
-        # Daily SPY returns across the window → annualized realized vol.
-        daily_returns = np.diff(spy_series) / spy_series[:-1]
-        realized_vol_21d = float(np.std(daily_returns) * np.sqrt(_TRADING_DAYS_PER_YEAR))
+        # Daily SPY returns across the window → annualized realized vol. Guard the
+        # denominator against any zero price (a bad/missing tick): dividing by 0
+        # yields inf → NaN, which np.std then propagates into a NaN feature. Mirror
+        # the `if … else 0.0` guards on the change calculations above by dropping
+        # the offending steps (and treating an all-zero window as zero vol).
+        prev_prices = spy_series[:-1]
+        nonzero = prev_prices != 0.0
+        if np.any(nonzero):
+            daily_returns = np.diff(spy_series)[nonzero] / prev_prices[nonzero]
+            realized_vol_21d = float(np.std(daily_returns) * np.sqrt(_TRADING_DAYS_PER_YEAR))
+        else:
+            realized_vol_21d = 0.0
 
         return np.array([vix_now, vix_21d_chg, realized_vol_21d, return_21d], dtype=float)
 
