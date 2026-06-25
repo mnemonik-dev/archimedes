@@ -92,8 +92,12 @@ class TestGmmUnfitTelemetry:
         assert reasons.count("no_fitted_model") <= 1
 
     def test_module_health_probe_reports_degraded_when_unfit(self) -> None:
-        # Construct an unfit detector → it registers itself as the live instance.
-        GmmRegimeDetector(model_path=_ABSENT_MODEL)
+        # Hold the detector ref so the health probe inspects THIS unfit instance.
+        # A dropped ref GCs the weakref, and the probe then falls back to the
+        # on-disk DEFAULT_GMM_MODEL_PATH check — non-hermetic when a real
+        # gmm_model.pkl exists in the dev tree (CI-green / local-red).
+        det = GmmRegimeDetector(model_path=_ABSENT_MODEL)
+        assert det.is_degraded is True
         diag = gmm_regime_health()
         assert diag.status == "degraded"
 
@@ -172,8 +176,13 @@ async def test_health_surfaces_regime_and_risk_flags() -> None:
 
     # Force both subsystems into their degraded states at the boundary.
     degraded_risk = risk_routes.RiskDataHealth(status="mock", reason="test mock")
+    # Pin the GMM probe to "unfit" hermetically: no live detector instance AND a
+    # guaranteed-absent default artifact path. (Patching load_gmm_model alone is
+    # insufficient — the probe's cold path checks DEFAULT_GMM_MODEL_PATH on disk,
+    # so a real gmm_model.pkl in the dev tree reports "live": CI-green/local-red.)
     with (
-        patch.object(gmm_mod, "load_gmm_model", return_value=None),
+        patch.object(gmm_mod, "_LAST_DETECTOR", None),
+        patch.object(gmm_mod, "DEFAULT_GMM_MODEL_PATH", _ABSENT_MODEL),
         patch.object(risk_routes, "risk_data_health", return_value=degraded_risk),
     ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
