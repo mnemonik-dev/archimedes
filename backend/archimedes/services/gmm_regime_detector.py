@@ -85,10 +85,17 @@ _CONFIRMATIONS_REQUIRED = 2
 _CONF_MIN = 0.5
 _CONF_MAX = 0.95
 
-# Component-labelling thresholds (in ORIGINAL feature space). A component whose
-# mean VIX exceeds this is full-crisis rather than merely defensive — the GFC
-# 2008 and COVID 2020 peaks both blew through 35.
+# Component-labelling thresholds (in ORIGINAL feature space). The CRISIS test is
+# applied to the top-VIX component's upper TAIL, not its mean: a genuine crisis
+# cluster (the GFC 2008 / COVID 2020 tail) has its mean pulled below the ~35
+# crash level by the surrounding elevated-but-not-crash days — empirically the
+# component capturing those crashes had mean VIX 34.9, missing a `mean > 35` test
+# by 0.1. So a component is CRISIS when its VIX `mean + 1σ` blows through this
+# crash level (and its mean is at least clearly defensive, _CRISIS_MEAN_FLOOR).
 _CRISIS_VIX_THRESHOLD = 35.0
+# A crisis component must also be unambiguously elevated on average, so a calm
+# component with a fat tail can't trip the tail test.
+_CRISIS_MEAN_FLOOR = 25.0
 
 # Rolling buffer of recent (vix, spy_price) observations. 64 > _MIN_HISTORY so a
 # few short ticks at startup still warm up toward the GMM-eligible threshold.
@@ -179,7 +186,8 @@ def _label_components(scaler: StandardScaler, gmm: GaussianMixture) -> dict[int,
     each component's mean in the ORIGINAL feature space (via
     ``scaler.inverse_transform``). The rule (deterministic; covers all four):
 
-      1. Highest VIX-mean component → CRISIS if that VIX-mean > 35, else RISK_OFF.
+      1. Highest VIX-mean component → CRISIS if its VIX upper tail (mean + 1σ)
+         clears the crash level AND its mean is clearly elevated, else RISK_OFF.
       2. Among the remaining components, the lowest VIX-mean one is the calm
          regime: RISK_ON if its 21-day-return mean is positive, else TRANSITION.
       3. Any still-unassigned components are labelled by DESCENDING VIX-mean,
@@ -193,9 +201,14 @@ def _label_components(scaler: StandardScaler, gmm: GaussianMixture) -> dict[int,
     order_by_vix_desc = list(np.argsort(vix_means)[::-1])  # highest VIX first
     mapping: dict[int, Regime] = {}
 
-    # 1. Highest-VIX component → CRISIS (if extreme) else RISK_OFF.
+    # 1. Highest-VIX component → CRISIS when its VIX upper tail reaches crash
+    #    territory (robust to a crisis cluster's mean sitting below its peaks),
+    #    gated on a clearly-elevated mean; else RISK_OFF.
     crisis_idx = order_by_vix_desc[0]
-    mapping[crisis_idx] = Regime.CRISIS if vix_means[crisis_idx] > _CRISIS_VIX_THRESHOLD else Regime.RISK_OFF
+    crisis_vix_std = float(np.sqrt(gmm.covariances_[crisis_idx][_IDX_VIX, _IDX_VIX]) * scaler.scale_[_IDX_VIX])
+    crisis_tail = vix_means[crisis_idx] + crisis_vix_std
+    is_crisis = vix_means[crisis_idx] >= _CRISIS_MEAN_FLOOR and crisis_tail > _CRISIS_VIX_THRESHOLD
+    mapping[crisis_idx] = Regime.CRISIS if is_crisis else Regime.RISK_OFF
 
     # 2. Lowest-VIX remaining component → calm regime (RISK_ON / TRANSITION by
     #    the sign of its mean 21-day return).
