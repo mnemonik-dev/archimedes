@@ -6,7 +6,11 @@
 > retired; GLM intelligence live; product spine locked in `docs/user-stories.md`;
 > agentic-issue pipeline codified), and 2026-05-27 (post-hackathon lessons:
 > merge-commit-only enforced; testing conventions; secrets-in-git guidance expanded;
-> AWS account access protocol; agent-as-proxy authorization; verify-your-own-audits).
+> AWS account access protocol; agent-as-proxy authorization; verify-your-own-audits),
+> and 2026-06-24 (team/ownership change: Chuan stepping back, Dan takes smart-contract
+> + on-chain-integration + infra ownership, Bogdan joins as on-chain reviewer; prod
+> migrated to Dan's own AWS account behind `archimedes-arc.com`; Bedrock/Nova Micro is
+> the live LLM; GitHub Actions auto-deploy on; Lepton Sprint framing).
 > Intent: drop at the root of the `archimedes` repo and read at the start of every
 > Claude Code session.
 >
@@ -47,10 +51,48 @@ May 11–25, 2026.
   `main` triggers a CI build + deploy to the live EC2 stack. No `develop`/integration
   branch (retired 2026-05-18, unused). Short-lived per-owner branches
   (`dbrowneup/<name>`, `marten`, …) → PR → merge to `main`; `main` moves continuously
-  (Chuan's agentic system lands + self-iterates on it), so rebase late and merge fast
-- Live testnet deploy: [`https://archimedes-arc.com/`](https://archimedes-arc.com/) (EC2 `13.40.112.220`,
-  Chain ID `5042002` / `0x4cef52`, Arc testnet)
+  (the agentic system `t2o2` lands + self-iterates on it; Dan + Claude Code now drive the
+  core build), so rebase late and merge fast
+- Live testnet deploy: [`https://archimedes-arc.com/`](https://archimedes-arc.com/) (CloudFront → EC2,
+  Chain ID `5042002` / `0x4cef52`, Arc testnet). **Prod migrated 2026-06-24 to Dan's own AWS
+  account (`037613907429` / `us-east-1`)** — see "Project / Status" below. The old `archimedes-arc.app`
+  is being decommissioned (the `.app`/`.com` split caused the Circle passkey rpId bug, now fixed)
 - License: [Unlicense](https://unlicense.org) — full public-domain dedication
+
+### Project / Status (refreshed 2026-06-24 — Lepton Sprint)
+
+Post-Agora, the team is in the **Lepton Sprint** (→ Jun 29 + a post-event funding/grant/
+acquisition track). The current build sequence, full tier breakdown, and Lepton scoring map
+live in **`ARCHIMEDES-ROADMAP-v3.md`** (a team artifact pending consolidation into `docs/`
+under roadmap T3.3 — not yet committed at a fixed in-repo path; ask Dan if you can't find
+it). The headlines a fresh session needs:
+
+- **Live + infra.** App is live at [`https://archimedes-arc.com`](https://archimedes-arc.com)
+  (CloudFront → nginx → EC2). The prod stack was **rebuilt on Dan's own AWS account
+  (`037613907429` / `us-east-1`)**, decoupled from the prior shared account. **GitHub Actions
+  auto-deploy is re-pointed and ON** — every merge to `main` rebuilds + redeploys.
+- **LLM.** **AWS Bedrock is the live LLM** — **Amazon Nova Micro** default via a multi-provider
+  **Converse** backend, with a model cost-picker on the Generate page. (GLM is removed from prod;
+  BYOK and a local-Ollama single-user path are preserved.) `response.model` is the
+  provenance of record across the GLM→Bedrock migration.
+- **Current focus = claim integrity, then the core vertical.** **Tier 0 — Claim Integrity**
+  makes every UI/pitch claim true on the live path (unify the rigor gate; owner ≠ agent
+  non-custodial vaults; real commit-reveal + IPFS provenance; runtime backtest in the request
+  path; loud fallback telemetry) — *building flashy work on a fake-strict rigor badge is
+  building on sand.* Then **Tier 1 — the core Lepton vertical**: multi-agent (TradingAgents-style)
+  engine with N>1 diverse candidates, an optional-publish nanopayment marketplace (x402/Gateway,
+  sub-cent USDC), a Chainlink-first oracle, IPFS provenance, and on-chain↔backtest universe parity + 5–10×.
+- **Lepton scoring map.** Tier 0 + the multi-agent engine → Agentic Sophistication (30%);
+  nanopayments → Circle tools (20%) + Traction (30%); provenance + Chainlink + Xia rigor →
+  Innovation (20%). Only post-May-25 work + new traction count (the Agora-delta rule).
+- **Hard constraint above all.** *Claims must be true.* Every guarantee the UI/pitch/grant
+  makes (rigor, non-custodial, on-chain provenance) must be backed by the live path, not a
+  fixture or a cached boolean — this is the #1 rule, and the thing Bogdan's audit (PR #710)
+  showed we were violating.
+
+Status drafts (Circle grant, Lepton submission) live alongside the roadmap as team
+artifacts; treat them as drafts (a few still carry the stale `.app` URL pending Dan's
+edit) — the roadmap is the authoritative status.
 
 ## North Star
 
@@ -77,7 +119,10 @@ at sub-second finality on Arc with USDC. The mathematician's name is fitting: he
 original empiricist working from first principles. We work from peer-reviewed first
 principles.
 
-## Team (5 members; ~20-year age span; coverage on every load-bearing skill)
+## Team (~20-year age span; coverage on every load-bearing skill)
+
+> Roster note (2026-06-24): the team grew through the Lepton community and Chuan is
+> stepping back; the table below lists the core contributors as of this revision.
 
 Roughly balanced bios. Ages are author estimates pending team confirmation. Discord handles
 in parentheses; the human handles are what shows up in the channel.
@@ -93,15 +138,23 @@ in parentheses; the human handles are what shows up in the channel.
 
 | Name                       | Age (est.) | Discord            | Location  | TZ (May)| Role                                                                                                                |
 | -------------------------- | ---------- | ------------------ | --------- | --------| ------------------------------------------------------------------------------------------------------------------- |
-| **Dan Browne**             | 37         | dbrowneup          | Chicago   | UTC-5   | Strategy engine (Q-fin paper corpus, strategy library curation), pitch architecture. Senior Scientist @ LanzaTech, PhD biochemistry. Day job — evenings/weekends. |
-| **Marten Windler**         | ~31        | Marten             | Bremen    | UTC+2   | Off-chain → on-chain integration via Arc CLI; pairs with Chuan. Systems Engineering @ U. Bremen, ML-uncertainty B.Sc. thesis. ROS + Python/C++/Rust. Coordinator lean. |
+| **Dan Browne**             | 37         | dbrowneup          | Chicago   | UTC-5   | **Owner of smart contracts + on-chain integration + infra (incl. AWS account `037613907429` and contract deploys), full-stack control.** Strategy engine (Q-fin paper corpus, strategy library curation), pitch architecture. Senior Scientist @ LanzaTech, PhD biochemistry. Day job — evenings/weekends. |
+| **Marten Windler**         | ~31        | Marten             | Bremen    | UTC+2   | Off-chain → on-chain integration via Arc CLI. Systems Engineering @ U. Bremen, ML-uncertainty B.Sc. thesis. ROS + Python/C++/Rust. Coordinator lean. |
 | **Daniel Reis dos Santos** | early 20s  | The go guy / Daniel [vibe] | Brazil    | UTC-3   | Frontend ownership (Next.js + TailwindCSS). Backend engineer day-side. Go / Java / TypeScript, distributed systems, AWS, Terraform. Healthcare-ERP day role.  |
-| **Chuan Bai**              | ~early 40s | moonshot           | London    | UTC+1   | Architecture + on-chain (smart contracts on Arc, Circle SDK integration). CTO @ [Gyld Finance](https://www.gyld.fi/); built CoinShares' next-gen trading platform; RWA tokenization expertise. PhD HPC. |
+| **Bogdan Sivochkin**       | —          | (GitHub `mnemonik-dev`) | —    | —       | **New member** (joined for Lepton). Blockchain & cryptography architect; 15+ yrs distributed systems; Solidity, Rust, ZK, account abstraction, secure smart-contract engineering (founder, Mnemonic protocol). Ran the recent full-tree technical audit ([PR #710](https://github.com/a-apin/archimedes/pull/710)); working on on-chain provenance / commit-reveal + IPFS ([issue #714](https://github.com/a-apin/archimedes/issues/714)). **Can help with contracts — preferred two-eyes reviewer on contract changes.** |
 | **Önder Akkaya**           | ~21        | Önder              | Ankara    | UTC+3   | Portfolio math (Kelly Criterion / +EV, backtest evaluation, risk pricing). Statistics @ Hacettepe; [ASA Statistical Insight World Champion](https://www.linkedin.com/in/onder-akkaya/); President of [TİD-Genç](https://www.tid.org.tr/); trainee actuary. |
 
+> **Ownership change (2026-06-24): Chuan Bai is stepping back** — much less involved, not
+> gone entirely. **Dan has taken on smart-contract + on-chain-integration + infra ownership**
+> (he owns the new AWS account and deploys the contracts himself). Where this doc previously
+> routed contract / infra review + approval to Chuan, **it now routes to Dan (the human
+> owner)**, with **Bogdan (`mnemonik-dev`) as the preferred contract reviewer** and other
+> teammates who know the contract stack able to step in. The funds-safety care is unchanged:
+> contracts are still high-stakes; two-eyes review is still wise.
+
 Two team members (Dan, Daniel R) have demanding day roles and commit evenings/weekends.
-Chuan runs a real startup but treats the hackathon as serious focus. Marten and Önder are
-students with flexible time.
+Marten and Önder are students with flexible time. (Chuan ran a real startup and treated the
+hackathon as serious focus; he is now stepping back — see the ownership note above.)
 
 **Daily sync window:** 13:00 UTC = 8am Chicago / 10am São Paulo / 14:00 London / 15:00
 Bremen / 16:00 Ankara. Works across the whole team without anyone in unsocial hours.
@@ -130,21 +183,24 @@ cross-lane review need in the PR description so the right teammate sees it.
 | Strategy engine + Q-fin paper corpus curation       | Dan              | Önder                 |
 | Backtesting / strategy-passport math + risk pricing | Önder            | Dan                   |
 | Backend Python layer (FastAPI, API, services, models) | Daniel R.      | Marten                |
-| On-chain integration layer (`backend/archimedes/chain/`, oracle runner) | Chuan | Marten          |
+| On-chain integration layer (`backend/archimedes/chain/`, oracle runner) | Dan | Bogdan / Marten |
 | Frontend (React + Vite + viem, wallet UX, trade tab) | Marten (current) / Daniel R. | Dan       |
-| Smart contracts (Arc, Foundry, 10 deployed)         | Chuan            | Marten                |
-| Infra / EC2 / CI/CD / docker-compose                | Chuan            | Daniel R.             |
-| Architecture + design decisions                     | Chuan (lead)     | full team             |
+| Smart contracts (Arc, Foundry, 11 deployed)         | Dan              | Bogdan (`mnemonik-dev`) / Marten |
+| Infra / EC2 / CI/CD / docker-compose / AWS account  | Dan              | Daniel R.             |
+| Architecture + design decisions                     | Dan (lead)       | full team             |
 | Pitch deck + demo script + Claude Design + judging  | Dan              | Marten                |
 
-The post-Shimon backend slot resolved as a Daniel R. (Python backend) + Chuan (on-chain
-integration) split — the `chain/` subdirectory under `backend/archimedes/` is led by
-Chuan, and `api/` + `services/` + `models/` + `interfaces/` are led by Daniel R. Both
-layers share the `backend/archimedes/` Python package and the FastAPI app boots them
-together via `main.py`. Marten currently has the most recent commits on the React UI as
-he comes up to speed on what the team has built. Cross-lane contributions are the norm,
-not the exception — the leads listed above are reviewers and memory-carriers, not
-gatekeepers.
+**Ownership transition (2026-06-24):** Chuan formerly led on-chain integration, smart
+contracts, infra, and architecture; with Chuan stepping back, **Dan now owns all four** —
+he holds the new AWS account and deploys the contracts himself. **Bogdan (`mnemonik-dev`)
+is the preferred contract reviewer** (he ran the PR #710 audit and is on the provenance /
+commit-reveal + IPFS work, issue #714); Marten remains a backup on the on-chain layer.
+`api/` + `services/` + `models/` + `interfaces/` under `backend/archimedes/` remain led by
+Daniel R.; the `chain/` subdirectory is now Dan's lead. Both layers share the
+`backend/archimedes/` Python package and the FastAPI app boots them together via `main.py`.
+Marten currently has the most recent commits on the React UI as he comes up to speed on what
+the team has built. Cross-lane contributions are the norm, not the exception — the leads
+listed above are reviewers and memory-carriers, not gatekeepers.
 
 ## Setup
 
@@ -173,9 +229,11 @@ README § "Running the test suite" for the honest coverage picture and the
 build-on-deploy integration-test caveat. See also "Testing conventions" in
 Engineering conventions for the hermetic-test standard.
 
-**AWS account access (added 2026-05-27):** Team members who need to verify AWS
+**AWS account access (added 2026-05-27; updated 2026-06-24 — new account/region):**
+Prod now lives on **Dan's own AWS account (`037613907429`) in `us-east-1`** (migrated
+2026-06-24 off the prior shared account). Team members who need to verify AWS
 infrastructure (security review, dashboard checks, SSM access to the live EC2,
-Aurora port-forwarding) should ask Chuan (the AWS account owner) for an IAM
+Aurora port-forwarding) should ask **Dan** (the AWS account owner) for an IAM
 user with the AWS managed policies `SecurityAudit` + `ViewOnlyAccess`, MFA
 required on first login, and the access key + secret delivered via a secure
 channel (1Password / Bitwarden / Signal — never Discord, never email).
@@ -185,17 +243,17 @@ Local setup:
 brew install awscli
 mkdir -p ~/.aws && chmod 700 ~/.aws
 aws configure --profile archimedes
-# region: eu-west-2 ; output: json
+# region: us-east-1 ; output: json
 chmod 600 ~/.aws/credentials
 export AWS_PROFILE=archimedes
-aws sts get-caller-identity   # smoke-test
+aws sts get-caller-identity   # smoke-test (account 037613907429)
 ```
 
 For SSM admin access to the live EC2 (replaces SSH, no port 22 needed):
 ```bash
-aws ssm start-session --target i-<instance-id> --region eu-west-2
-# Aurora port forward (after VPC migration):
-aws ssm start-session --target i-<instance-id> --region eu-west-2 \
+aws ssm start-session --target i-<instance-id> --region us-east-1
+# Aurora port forward (after Aurora/ElastiCache cutover — T3.5):
+aws ssm start-session --target i-<instance-id> --region us-east-1 \
   --document-name AWS-StartPortForwardingSessionToRemoteHost \
   --parameters host=<aurora-endpoint>,portNumber=5432,localPortNumber=5432
 ```
@@ -215,7 +273,7 @@ The repo carries three git submodules at [`submodules/`](submodules/):
   [`submodules/context-arc/AGENTS.md`](submodules/context-arc/AGENTS.md) for the
   task-indexed entry-point table. Highest-leverage files for our build:
     - `circlefin-skills/use-arc.md` — Arc chain config, USDC-as-gas, Foundry deploy (canonical Arc reference)
-    - `circlefin-skills/use-smart-contract-platform.md` — contract deploy + monitor (Chuan's lane)
+    - `circlefin-skills/use-smart-contract-platform.md` — contract deploy + monitor (Dan's lane; Bogdan reviews)
     - `circlefin-skills/bridge-stablecoin.md` — CCTP + Gateway for RWA bridging (Marten's lane)
     - `circlefin-skills/use-gateway.md` — unified balance + nanopayments
     - `samples/arc-escrow/` — closest existing pattern to our vault contract
@@ -299,8 +357,15 @@ they actually shipped (Day 4):
   [`analytics-engine/strategies/`](analytics-engine/strategies/)
 - **DB:** PostgreSQL + Redis (Postgres for strategies + backtests; Redis for live regime
   state)
-- **LLM:** Claude API for strategy extraction, reasoning trace generation, user-facing
-  explanations
+- **LLM:** **AWS Bedrock (live in prod since 2026-06-24)** for strategy extraction,
+  reasoning trace generation, and user-facing explanations — **Amazon Nova Micro** is the
+  default via a multi-provider **Converse** backend, with a model cost-picker on the
+  Generate page; the two Anthropic-on-Bedrock models (Haiku 4.5 / Sonnet 4.6) are pending
+  AWS use-case activation (roadmap T3.8) before the paid tier (T1.8) has real models behind
+  it. GLM is removed from prod; **BYOK and a local-Ollama single-user path are preserved.**
+  `response.model` is the provenance of record across the GLM→Bedrock migration.
+  (`.env.example` still defaults `LLM_PROVIDER=anthropic_compatible` — that's stale vs the
+  live `bedrock_converse`/Nova default and is tracked as roadmap T3.10.)
 - **Backtesting:** [backtrader](https://github.com/mementum/backtrader) for v1 per
   [`docs/adr/backtrader-vs-vectorbt-decision-memo.md`](docs/adr/backtrader-vs-vectorbt-decision-memo.md).
   Supersedes `docs/design.md` § 6 ("vectorbt / custom numpy engine") on this one
@@ -317,10 +382,13 @@ they actually shipped (Day 4):
   is intentional and the registries serve different lookups.)
 - **On-chain integration:** Circle SDK — Wallets (Circle-managed wallet for the oracle
   signer), USYC, Gateway, CCTP, Paymaster; viem on the UI side
-- **Deployment:** Docker compose stack (5 services: postgres / redis / nginx / oracle /
-  backend) running on an EC2 instance behind nginx. CI/CD wired via GitHub Actions per
-  [`docs/infra-setup.md`](docs/infra-setup.md). Live at
-  [`https://archimedes-arc.com/`](https://archimedes-arc.com/) (EC2 `13.40.112.220`)
+- **Deployment:** Docker compose stack (postgres / redis / nginx / oracle / backend) on an
+  EC2 instance behind nginx, fronted by CloudFront. **Runs on Dan's own AWS account
+  (`037613907429` / `us-east-1`) as of 2026-06-24.** CI/CD via GitHub Actions per
+  [`docs/infra-setup.md`](docs/infra-setup.md) — **auto-deploy is re-pointed and ON**, so every
+  merge to `main` rebuilds + redeploys. Live at
+  [`https://archimedes-arc.com/`](https://archimedes-arc.com/). (Aurora + ElastiCache TF is
+  provisioned but the cutover off in-stack Postgres/Redis is still pending — roadmap T3.5.)
 
 ## Scope — the headline commitments
 
@@ -356,10 +424,11 @@ Codified 2026-05-18 to match how the team actually works (see
 - **`main` is the only long-lived branch, and it is the deploy branch.** Every merge
   to `main` triggers a CI build + deploy to the live EC2 stack. There is no
   `develop`/integration branch — it drifted unused and was retired.
-- **`main` moves continuously.** Chuan's agentic system merges work and iterates on
-  its own CI failures directly on `main`. Treat `main` as fast-moving: branch from it
-  late, rebase onto it right before merging, and merge in a tight window before it
-  drifts again. Don't wait for it to "settle" — it won't.
+- **`main` moves continuously.** The agentic system (`t2o2`) merges work and iterates on
+  its own CI failures directly on `main`, and Dan + Claude Code drive the core build in
+  parallel sessions. Treat `main` as fast-moving: branch from it late, rebase onto it right
+  before merging, and merge in a tight window before it drifts again. Don't wait for it to
+  "settle" — it won't.
 - Short-lived per-owner branches `<discord-handle>/<short-name>` → PR → merge to
   `main`. Delete the branch after merge.
 - **Merge commits only (codified 2026-05-27).** Squash-merge and rebase-merge are
@@ -372,7 +441,8 @@ Codified 2026-05-18 to match how the team actually works (see
 - **The few hard rules — universal, and they do not impede speed:** never force-push
   `main`; never commit secrets or `.env`; one logical change per PR. Force-pushing
   your *own* unmerged feature branch is fine and expected (rebase-before-merge).
-- On-chain / smart-contract changes still warrant Chuan's eyes given live-funds risk.
+- On-chain / smart-contract changes still warrant **Dan's eyes (the contract/infra owner),
+  with Bogdan as the preferred second reviewer**, given live-funds risk.
 
 ### PR reviews
 
@@ -414,7 +484,7 @@ implications:
 
 1. **Prefer PRs over direct push** for any change that warrants a version tag (i.e.
    anything except trivial doc fixes you'd be comfortable losing in `git log`).
-   This includes work done by Chuan's agentic system (`t2o2`): if a change is
+   This includes work done by the agentic system (`t2o2`): if a change is
    meaningful enough to read later, it's meaningful enough to PR.
 2. **Choose the right marker for the PR title.** Most changes are patches and
    need no marker. But:
@@ -576,8 +646,8 @@ rules:
   architecture call.
 - **Spec drift is real.** If implementation diverges from the spec, update the spec or
   revert the code. Specs are living docs.
-- **Multiple team members are using Claude.** Chuan (20× Max), Dan (5× Max), and others
-  are running concurrent Claude sessions. **Source-of-truth artifacts in `docs/` are how
+- **Multiple team members are using Claude.** Dan and others run concurrent Claude
+  sessions (Dan now drives the core build with Claude Code). **Source-of-truth artifacts in `docs/` are how
   we keep parallel sessions aligned** — every session reads from the same docs.
 
 ## When to ask before acting (Claude Code session in this repo)
@@ -585,7 +655,8 @@ rules:
 - Pushing to shared infrastructure
 - Adding new top-level dependencies (state which package, why, and the license)
 - Touching `docker-compose*.yml`, deployment configs, or CI/CD wiring without team alignment
-- Any smart contract change (needs Chuan's review)
+- Any smart contract change (needs **Dan's review as contract owner; Bogdan is the
+  preferred second reviewer**) — contracts hold live funds and Dan deploys them himself
 - Editing `.env.example` (signals an env contract change for everyone)
 - Editing [`environment.yml`](environment.yml) (every team member rebuilds their env on a change)
 - Anything that touches the strategy-passport / reasoning-trace data flow (the
@@ -767,18 +838,20 @@ window (>24h) and work in their lane is blocked, their agent **is authorized
 to act as proxy for backend code reviews and merges in that lane**, with two
 exceptions:
 
-- **Solidity contract changes still require the human's explicit consent.**
-  Contracts hold live funds; the human's contract-specific judgment is
-  load-bearing. Pi can review and recommend, but the human (Chuan) must
-  approve the merge.
+- **Solidity contract changes still require the human owner's explicit consent.**
+  Contracts hold live funds; the owner's contract-specific judgment is
+  load-bearing. An agent can review and recommend, but **Dan (the contract owner,
+  who deploys them himself) must approve the merge** — and where possible **Bogdan
+  (`mnemonik-dev`) provides the two-eyes contract review**. (Updated 2026-06-24:
+  contract approval routes to Dan, not Chuan, after the ownership change.)
 - **Architecture decisions and infrastructure cost commitments** (new AWS
-  services, recurring spend, multi-day migrations) still warrant the human's
-  ack. Operational fixes within an already-approved architecture are fine to
-  proxy.
+  services, recurring spend, multi-day migrations) still warrant **Dan's** ack
+  (he owns the AWS account). Operational fixes within an already-approved
+  architecture are fine to proxy.
 
 This unblocks work without compromising the high-stakes review surfaces.
 Document each proxy-merge action in the PR description with a one-line note
-("Reviewed by Pi on Chuan's behalf — Chuan offline since 2026-05-26 20:00 UTC")
+("Reviewed by <agent> on Dan's behalf — Dan offline since <timestamp>")
 so the human can audit on return. If the human disagrees on return, revert and
 re-review — the proxy is a stop-gap, not a delegation.
 
@@ -929,12 +1002,17 @@ Refer to [`docs/design.md` § 10](docs/design.md) for the technical risk matrix 
 [`docs/judging-rubric-assessment.md`](docs/judging-rubric-assessment.md) for the running
 rubric score. Adding team / coordination risks:
 
-- **Chuan as smart-contract + on-chain-integration bus factor 1.** Day-4 reality: Chuan
-  owns the contracts AND the `backend/archimedes/chain/` layer AND infra. Mitigated by
-  Marten as documented backup and by keeping contracts small with cached ABIs. See
+- **Smart-contract + on-chain-integration + infra ownership concentrated in one human
+  (updated 2026-06-24).** Chuan formerly owned the contracts, the `backend/archimedes/chain/`
+  layer, and infra; with Chuan stepping back, **Dan has taken on all three** (he holds the
+  AWS account and deploys the contracts himself). This concentrates the bus factor on Dan,
+  who is also evenings/weekends-only — a real constraint. Mitigated by **Bogdan
+  (`mnemonik-dev`) as the on-chain/contract reviewer** (he ran the PR #710 audit and owns
+  the provenance/IPFS work), Marten as on-chain backup, keeping contracts small with cached
+  ABIs, and externalizing contract addresses out of `client.py` (roadmap T2.3). See
   [`docs/architectural-principles.md`](docs/architectural-principles.md) for the general
   pattern.
-- **5-person team across 5 timezones with 3 day-job constraints.** Mitigated by Marten as
+- **Distributed team across many timezones with day-job constraints.** Mitigated by Marten as
   schedule owner + daily sync + async-first defaults.
 - **Traction = 0 on the rubric scoreboard until arc-canteen telemetry starts flowing.**
   Per [`docs/judging-rubric-assessment.md`](docs/judging-rubric-assessment.md), this is
@@ -953,10 +1031,13 @@ rubric score. Adding team / coordination risks:
 
 ## What this file deliberately does not cover
 
-- The full architecture — see [`docs/design.md`](docs/design.md) (Chuan)
+- The full architecture — see [`docs/design.md`](docs/design.md) (note: §5.2/§5.3 are
+  superseded history per PR #710; architecture decisions now route to Dan)
 - Pitch deck content — see [`docs/demo-script-pitch-deck-outline.md`](docs/demo-script-pitch-deck-outline.md)
 - Competitive landscape — see [`docs/competitor-landscape.md`](docs/competitor-landscape.md)
-- Post-hackathon roadmap — out of scope for now
+- The current build roadmap + tier breakdown — see **`ARCHIMEDES-ROADMAP-v3.md`**
+  (Lepton Sprint; the canonical sequence and Lepton scoring map; a team artifact
+  pending consolidation into `docs/` under roadmap T3.3)
 
 ---
 
