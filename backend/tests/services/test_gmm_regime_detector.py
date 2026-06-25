@@ -25,6 +25,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 from archimedes.models.asset import MarketSnapshot
@@ -32,12 +33,16 @@ from archimedes.models.regime import Regime, RegimeClassification, RegimeSignals
 from archimedes.services.gmm_regime_detector import (
     _CONF_MAX,
     _CONF_MIN,
+    _CRISIS_MEAN_FLOOR,
+    _IDX_VIX,
     _MIN_HISTORY,
     FittedGmm,
     GmmRegimeDetector,
+    _label_components,
     fit_gmm_model,
     load_gmm_model,
 )
+from sklearn.preprocessing import StandardScaler
 
 # A path that never exists → load_gmm_model returns None → detector falls back.
 _NONEXISTENT_MODEL = Path("/nonexistent/archimedes-gmm-test-does-not-exist.pkl")
@@ -248,6 +253,61 @@ class TestFallbackDelegation:
 
         det = GmmRegimeDetector(model_path=_NONEXISTENT_MODEL)
         assert isinstance(det._fallback, VixRegimeDetector)
+
+
+class TestCrisisTailLabelling:
+    """CRISIS keys off the top-VIX component's upper TAIL, not its mean — a crisis
+    cluster whose mean sits just below the crash level still labels CRISIS
+    (regression for the brittle ``mean > 35`` test that left the live 10y model
+    crisis-blind by 0.1 VIX: the COVID/2022 cluster had mean VIX 34.9)."""
+
+    @staticmethod
+    def _scaler(mean: list[float], scale: list[float]) -> StandardScaler:
+        s = StandardScaler()
+        s.mean_ = np.asarray(mean, dtype=float)
+        s.scale_ = np.asarray(scale, dtype=float)
+        s.var_ = s.scale_**2
+        s.n_features_in_ = len(mean)
+        return s
+
+    @staticmethod
+    def _gmm(vix_means: list[float], vix_stds: list[float], scaler: StandardScaler) -> SimpleNamespace:
+        # Only the VIX dim varies; other feature dims stay 0 so the calm
+        # component's mean 21d-return is >= 0 → RISK_ON. Full covariances encode
+        # each component's original-space VIX std in the VIX-VIX entry.
+        n = len(vix_means)
+        means = np.zeros((n, 4))
+        covs = np.tile(np.eye(4) * 0.05, (n, 1, 1))
+        for i, (vm, vs) in enumerate(zip(vix_means, vix_stds, strict=True)):
+            means[i, _IDX_VIX] = (vm - scaler.mean_[_IDX_VIX]) / scaler.scale_[_IDX_VIX]
+            covs[i, _IDX_VIX, _IDX_VIX] = (vs / scaler.scale_[_IDX_VIX]) ** 2
+        return SimpleNamespace(means_=means, covariances_=covs)
+
+    _SCALER_ARGS = {"mean": [18.0, 0.0, 0.18, 0.0], "scale": [8.0, 0.3, 0.1, 0.05]}
+
+    def test_subthreshold_mean_with_crash_tail_is_crisis(self) -> None:
+        scaler = self._scaler(**self._SCALER_ARGS)
+        # Top component: mean VIX 34.9 (< 35) but a wide tail (std 12 → mean+1σ ≈ 47).
+        gmm = self._gmm([34.9, 28.0, 22.0, 14.0], [12.0, 3.0, 2.0, 2.0], scaler)
+        mapping = _label_components(scaler, gmm)
+        assert Regime.CRISIS in mapping.values()
+        assert mapping[0] is Regime.CRISIS  # index 0 is the highest-VIX component
+
+    def test_low_mean_thin_tail_is_not_crisis(self) -> None:
+        scaler = self._scaler(**self._SCALER_ARGS)
+        # Elevated but its tail never reaches the crash level → RISK_OFF, no CRISIS.
+        gmm = self._gmm([30.0, 22.0, 16.0, 12.0], [1.0, 2.0, 2.0, 2.0], scaler)
+        mapping = _label_components(scaler, gmm)
+        assert Regime.CRISIS not in mapping.values()
+        assert mapping[0] is Regime.RISK_OFF
+
+    def test_below_mean_floor_is_not_crisis(self) -> None:
+        scaler = self._scaler(**self._SCALER_ARGS)
+        # A calm-but-fat-tailed top component (mean < floor) can't trip CRISIS.
+        assert _CRISIS_MEAN_FLOOR > 22.0
+        gmm = self._gmm([22.0, 16.0, 13.0, 10.0], [20.0, 2.0, 2.0, 2.0], scaler)
+        mapping = _label_components(scaler, gmm)
+        assert Regime.CRISIS not in mapping.values()
 
 
 class TestGetCurrentRegime:
