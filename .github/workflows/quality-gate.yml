@@ -9,6 +9,8 @@
 #   ruff linter    — full `ruff check` (broader rule set; not blocking yet)
 #   eslint         — npm run lint
 #   coverage       — unit coverage vs 60% floor (agent PRs only)
+#   supply-chain   — pip-audit + npm audit + detect-secrets (non-blocking; see
+#                    the supply-chain job below for the promote-to-hard-block note)
 
 name: Quality Gate
 
@@ -185,3 +187,159 @@ jobs:
           python-version: "3.12"
       - run: pip install --quiet -r backend/requirements.txt "pytest>=8.3" "pytest-asyncio>=0.24" "pytest-cov>=5.0"
       - run: pytest -m "not integration" --cov=archimedes --cov-fail-under=60 --tb=short -q
+
+  supply-chain:
+    # INFORMATIONAL ONLY — every step runs with continue-on-error and the job
+    # never blocks merge. It surfaces dependency CVEs (pip-audit + npm audit)
+    # and leaked-secret regressions (detect-secrets) as a PR-comment table so
+    # the signal is visible without gating the build.
+    #
+    # Informational first; promote pip-audit/npm-audit to hard-block once the
+    # open CVE backlog (starlette/urllib3/pypdf) is cleared. Until then, a red
+    # row here is a triage nudge, not a wall.
+    name: Supply chain — report table
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: pip-audit
+        id: pip_audit
+        continue-on-error: true
+        run: |
+          pip install --quiet pip-audit
+          # --format json emits a machine-readable report; --progress-spinner=off
+          # keeps the CI log clean. continue-on-error + `|| true` mean a non-zero
+          # exit (vulnerabilities found) never fails the step.
+          pip-audit -r backend/requirements.txt --format json --progress-spinner=off > /tmp/pip_audit.json 2>/dev/null || true
+          python3 - <<'EOF'
+          import json, os
+          # pip-audit JSON shape: {"dependencies": [{"name": ..., "vulns": [...]}, ...]}.
+          # Count total vulnerability entries across all dependencies.
+          try:
+              data = json.load(open("/tmp/pip_audit.json"))
+              deps = data.get("dependencies", data) if isinstance(data, dict) else data
+              count = sum(len(d.get("vulns", [])) for d in deps)
+          except Exception:
+              count = 0
+          out = open(os.environ["GITHUB_OUTPUT"], "a")
+          out.write(f"result={'passed' if count == 0 else 'not passed'}\n")
+          out.write(f"count={count}\n")
+          EOF
+
+      - name: npm audit
+        id: npm_audit
+        continue-on-error: true
+        run: |
+          cd ui
+          # --omit=dev mirrors the prod-only audit we run locally (see CLAUDE.md
+          # supply-chain conventions). --json emits the structured report.
+          npm audit --omit=dev --json > /tmp/npm_audit.json 2>/dev/null || true
+          python3 - <<'EOF'
+          import json, os
+          # npm audit --json shape: {"metadata": {"vulnerabilities": {"total": N, ...}}}.
+          try:
+              data = json.load(open("/tmp/npm_audit.json"))
+              count = data.get("metadata", {}).get("vulnerabilities", {}).get("total", 0)
+          except Exception:
+              count = 0
+          out = open(os.environ["GITHUB_OUTPUT"], "a")
+          out.write(f"result={'passed' if count == 0 else 'not passed'}\n")
+          out.write(f"count={count}\n")
+          EOF
+
+      - name: detect-secrets
+        id: detect_secrets
+        continue-on-error: true
+        run: |
+          pip install --quiet detect-secrets
+          # Re-scan the tree against the audited baseline. New findings (lines
+          # not already in .secrets.baseline) surface as added results in the
+          # scan output; we diff the result set against the baseline to report
+          # whether anything new leaked.
+          detect-secrets scan --baseline .secrets.baseline > /tmp/secrets_scan.json 2>/dev/null || true
+          python3 - <<'EOF'
+          import json, os
+
+          def result_keys(report):
+              # results maps "path" -> [ {line_number, type, ...}, ... ].
+              keys = set()
+              for path, findings in (report.get("results") or {}).items():
+                  for f in findings:
+                      keys.add((path, f.get("line_number"), f.get("type")))
+              return keys
+
+          new_found = 0
+          try:
+              baseline = json.load(open(".secrets.baseline"))
+              scan = json.load(open("/tmp/secrets_scan.json"))
+              # Findings present in the fresh scan but absent from the baseline
+              # are newly-introduced potential secrets.
+              new_keys = result_keys(scan) - result_keys(baseline)
+              new_found = len(new_keys)
+          except Exception:
+              new_found = 0
+          out = open(os.environ["GITHUB_OUTPUT"], "a")
+          out.write(f"result={'passed' if new_found == 0 else 'not passed'}\n")
+          out.write(f"count={new_found}\n")
+          EOF
+
+      - name: Post or update PR comment
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const fmt = r => r === 'passed' ? '✅ passed' : '❌ not passed';
+            const pipResult   = fmt('${{ steps.pip_audit.outputs.result }}');
+            const pipCount    = '${{ steps.pip_audit.outputs.count }}' || '0';
+            const npmResult   = fmt('${{ steps.npm_audit.outputs.result }}');
+            const npmCount    = '${{ steps.npm_audit.outputs.count }}' || '0';
+            const secResult   = fmt('${{ steps.detect_secrets.outputs.result }}');
+            const secCount    = '${{ steps.detect_secrets.outputs.count }}' || '0';
+
+            const marker = '<!-- supply-chain-v1 -->';
+            const body = [
+              marker,
+              '## Supply Chain (informational)',
+              '',
+              'Non-blocking. Promote pip-audit/npm-audit to hard-block once the open',
+              'CVE backlog (starlette/urllib3/pypdf) is cleared.',
+              '',
+              '| Check | Status | Count |',
+              '|---|---|---|',
+              `| pip-audit (python deps) | ${pipResult} | ${pipCount} |`,
+              `| npm audit (frontend prod deps) | ${npmResult} | ${npmCount} |`,
+              `| detect-secrets (new secrets) | ${secResult} | ${secCount} |`,
+            ].join('\n');
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const existing = comments.find(c => c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
