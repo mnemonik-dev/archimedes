@@ -28,6 +28,7 @@ from datetime import UTC, datetime
 from archimedes.chain.client import chain_client
 from archimedes.chain.executor import InsufficientLiquidityError, chain_executor
 from archimedes.chain.oracle_updater import OracleUpdater
+from archimedes.chain.provenance_publisher import pin_public_provenance
 from archimedes.chain.trace_publisher import trace_publisher
 from archimedes.chain.v_check import VCheck
 from archimedes.interfaces.math import IRegimeDetector
@@ -675,18 +676,21 @@ class StrategyRunner:
 
         commit_tx = None
         commit_block = None
+        commit_trace_id: int | None = None
 
-        if not DRY_RUN:
-            commit_tx, commit_block = await self._commit_trace(
-                vault_address,
-                trades,
-                all_signals,
-                market_regime,
-                consensus,
-                tick_id,
-                reasoning,
-                portfolio,
-            )
+        # Build + commit the canonical trace ONCE. The same trace object is revealed
+        # after settlement so the on-chain keccak256 binding holds. In dry-run we still
+        # build it (no on-chain commit) so the reveal/persist path has a trace to use.
+        committed_trace, commit_trace_id, commit_tx, commit_block = await self._commit_trace(
+            vault_address,
+            trades,
+            all_signals,
+            market_regime,
+            consensus,
+            tick_id,
+            reasoning,
+            portfolio,
+        )
 
         # Phase 2: TRADE — execute the rebalance
         if DRY_RUN:
@@ -759,18 +763,11 @@ class StrategyRunner:
                 )
                 return
 
-        # Phase 3: REVEAL — publish full trace with all data AFTER trade settles
+        # Phase 3: REVEAL — pin public provenance + reveal the SAME committed trace
         await self._reveal_trace(
-            vault_address,
-            DecisionType.REBALANCE,
-            "strategy_signal_drift",
-            portfolio,
-            trades,
-            all_signals,
-            market_regime,
-            consensus,
+            committed_trace,
+            commit_trace_id,
             tick_id,
-            reasoning,
             tx_hashes,
             commit_tx=commit_tx,
             commit_block=commit_block,
@@ -845,6 +842,12 @@ class StrategyRunner:
 
     # ─── Commit-Reveal Trace ────────────────────────────────────
 
+    # How far in the future the committed execution is claimed to land. The
+    # contract requires claimedExecutionTime > commit-block timestamp, so the
+    # reveal can only succeed once this lead window has elapsed — proving the
+    # trade landed strictly after the commit (causal ordering).
+    _COMMIT_EXECUTION_LEAD_S = 60
+
     async def _commit_trace(
         self,
         vault_address: str,
@@ -855,23 +858,29 @@ class StrategyRunner:
         tick_id: str,
         reasoning: str,
         portfolio: Portfolio,
-    ) -> tuple[str | None, int | None]:
-        """Commit phase: publish trace hash on-chain BEFORE the trade executes.
+    ) -> tuple[ReasoningTrace, int | None, str | None, int | None]:
+        """Commit phase: anchor the trace hash on-chain BEFORE the trade executes.
 
-        Returns (commit_tx_hash, commit_block_number) or (None, None) on failure.
+        Builds the canonical trace ONCE and commits its keccak256 via the registry's
+        real ``commit()`` (with claimedExecutionTime) so the same bytes can be revealed
+        after settlement and the on-chain hash binding holds. Falls back to the v1
+        ``publishTrace`` anchor when the deployed registry is pre-v1.5 (#588 redeploy).
+
+        Returns (trace, on_chain_trace_id, commit_tx_hash, commit_block_number).
+        The trace is always returned so reveal() can submit the identical content;
+        trace_id is None when commit-reveal is unavailable (publishTrace fallback).
         """
         trace = ReasoningTrace(
             id=str(uuid.uuid4()),
             vault_address=vault_address,
             decision_type=DecisionType.REBALANCE,
-            trigger="commit_phase",
+            trigger="strategy_signal_drift",
             timestamp=datetime.now(UTC),
             market_context={
                 "regime": market_regime,
                 "ensemble_consensus": consensus.label.value,
                 "ensemble_flat_pct": round(consensus.flat_pct, 4),
                 "strategy_count": len(all_signals),
-                "phase": "commit",
             },
             portfolio_before={
                 "vault": vault_address[:10],
@@ -880,12 +889,9 @@ class StrategyRunner:
                     h.symbol: {"weight": f"{h.weight:.1%}", "value_usdc": h.value_usdc} for h in portfolio.holdings
                 },
             },
-            reasoning=f"[COMMIT] {reasoning}",
+            reasoning=reasoning,
             confidence=_compute_confidence(all_signals),
-            trades_executed=[
-                {"symbol": t.symbol, "direction": t.direction.value, "amount": t.amount, "phase": "intended"}
-                for t in trades
-            ],
+            trades_executed=[{"symbol": t.symbol, "direction": t.direction.value, "amount": t.amount} for t in trades],
             strategies_referenced=[ss.strategy_id for ss in all_signals],
             consulted_paper_hashes=_paper_hashes_from_signals(all_signals),
         )
@@ -893,115 +899,122 @@ class StrategyRunner:
         trace.compute_hash()
         logger.info("[tick %s] COMMIT hash: %s", tick_id, trace.trace_hash[:16])
 
+        if DRY_RUN:
+            logger.info("[tick %s] DRY RUN — skipping on-chain commit", tick_id)
+            return trace, None, None, None
+
+        claimed_execution_time = int(datetime.now(UTC).timestamp()) + self._COMMIT_EXECUTION_LEAD_S
+        intent_summary = f"{trace.decision_type.value}:{len(trades)}".encode()
+
         try:
+            if trace_publisher.supports_commit_reveal():
+                trace_id, commit_tx, commit_block = await trace_publisher.commit(
+                    trace, claimed_execution_time, intent_summary
+                )
+                if commit_tx:
+                    logger.info(
+                        "[tick %s] COMMIT anchored (commit-reveal): id=%s tx=%s block=%s",
+                        tick_id,
+                        trace_id,
+                        commit_tx[:16],
+                        commit_block,
+                    )
+                return trace, trace_id, commit_tx, commit_block
+
+            # Fallback: v1 publishTrace anchor (no temporal binding).
             arc_tx = await trace_publisher.publish(trace)
+            commit_block = None
             if arc_tx:
-                # Get block number from commit tx
                 try:
                     receipt = await chain_client.w3.eth.get_transaction_receipt(
                         chain_client.w3.to_bytes(hexstr=arc_tx.removeprefix("0x"))
                     )
-                    block_num = receipt.blockNumber
-                    logger.info(
-                        "[tick %s] COMMIT anchored: tx=%s block=%d",
-                        tick_id,
-                        arc_tx[:16],
-                        block_num,
-                    )
-                    return arc_tx, block_num
+                    commit_block = receipt.blockNumber
                 except Exception as e:
                     logger.warning("[tick %s] Cannot get commit block: %s", tick_id, e)
-                    return arc_tx, None
-            return None, None
+                logger.info(
+                    "[tick %s] COMMIT anchored (publishTrace fallback): tx=%s block=%s",
+                    tick_id,
+                    arc_tx[:16],
+                    commit_block,
+                )
+            return trace, None, arc_tx, commit_block
         except Exception as e:
-            logger.error("[tick %s] COMMIT publish FAILED: %s", tick_id, e)
-            return None, None
+            logger.error("[tick %s] COMMIT FAILED: %s", tick_id, e)
+            return trace, None, None, None
 
     async def _reveal_trace(
         self,
-        vault_address: str,
-        decision_type: DecisionType,
-        trigger: str,
-        portfolio: Portfolio,
-        trades: list[TradeOrder],
-        all_signals: list[StrategySignals],
-        market_regime: str,
-        consensus: EnsembleConsensus,
+        trace: ReasoningTrace,
+        trace_id: int | None,
         tick_id: str,
-        reasoning: str,
         tx_hashes: list[str] | None = None,
         commit_tx: str | None = None,
         commit_block: int | None = None,
         trade_block: int | None = None,
     ) -> None:
-        """Reveal phase: publish full trace AFTER the trade settles.
+        """Reveal phase: pin public provenance to IPFS, then reveal the SAME trace.
 
-        Records commit/reveal/trade block numbers for temporal binding verification.
+        ``trace`` is the exact object committed in the commit phase — we do NOT rebuild
+        it, so the canonical bytes revealed on-chain match the committed hash. Steps:
+          1. Pin the PUBLIC provenance layer (papers/methodology/rigor — not executable
+             params) to IPFS → CID. Degrades loudly to hash-only if PINATA_JWT is unset.
+          2. reveal(trace_id, cid, canonicalBytes) — contract recomputes keccak256 and
+             enforces commit block < execution < reveal block.
+          3. Fall back to publishTrace if the deployed registry is pre-v1.5 (#588).
         """
-        trace = ReasoningTrace(
-            id=str(uuid.uuid4()),
-            vault_address=vault_address,
-            decision_type=decision_type,
-            trigger=trigger,
-            timestamp=datetime.now(UTC),
-            market_context={
-                "regime": market_regime,
-                "ensemble_consensus": consensus.label.value,
-                "ensemble_flat_pct": round(consensus.flat_pct, 4),
-                "strategy_count": len(all_signals),
-                "signal_summary": {
-                    ss.paper_title[:30]: {s.asset: f"{s.signal.value}({s.weight:.0%})" for s in ss.signals[:5]}
-                    for ss in all_signals
-                },
-                "phase": "reveal",
-            },
-            portfolio_before={
-                "vault": vault_address[:10],
-                "aum_usdc": portfolio.total_value_usdc,
-                "holdings": {
-                    h.symbol: {"weight": f"{h.weight:.1%}", "value_usdc": h.value_usdc} for h in portfolio.holdings
-                },
-            },
-            portfolio_after={"tx_hashes": tx_hashes or []},
-            reasoning=f"[REVEAL] {reasoning}",
-            confidence=_compute_confidence(all_signals),
-            trades_executed=[{"symbol": t.symbol, "direction": t.direction.value, "amount": t.amount} for t in trades],
-            strategies_referenced=[ss.strategy_id for ss in all_signals],
-            consulted_paper_hashes=_paper_hashes_from_signals(all_signals),
-            # Commit-reveal temporal binding
-            commit_tx_hash=commit_tx,
-            commit_block_number=commit_block,
-            trade_tx_hash=tx_hashes[0] if tx_hashes else None,
-            trade_block_number=trade_block,
-        )
+        # Annotate the (already-committed) trace with trade settlement data. These
+        # fields are NOT in the hashed canonical set (_HASH_FIELDS), so adding them
+        # does not change trace_hash — the commit binding stays intact.
+        trace.portfolio_after = {"tx_hashes": tx_hashes or []}
+        trace.commit_tx_hash = commit_tx
+        trace.commit_block_number = commit_block
+        trace.trade_tx_hash = tx_hashes[0] if tx_hashes else None
+        trace.trade_block_number = trade_block
 
-        trace.compute_hash()
-        logger.info("[tick %s] REVEAL hash: %s", tick_id, trace.trace_hash[:16])
+        logger.info("[tick %s] REVEAL hash: %s", tick_id, (trace.trace_hash or trace.compute_hash())[:16])
 
-        # Publish reveal trace on-chain
         reveal_tx = None
         reveal_block = None
+        ipfs_cid = None
         if not DRY_RUN:
+            # ── 1. Pin public provenance to IPFS (loud-degrade if unconfigured) ──
             try:
-                reveal_tx = await trace_publisher.publish(trace)
+                ipfs_cid, _payload = await pin_public_provenance(trace)
+                if ipfs_cid:
+                    logger.info("[tick %s] Public provenance pinned: cid=%s", tick_id, ipfs_cid)
+            except Exception as e:
+                logger.error("[tick %s] IPFS pin FAILED (continuing hash-only): %s", tick_id, e)
+
+            # ── 2. Reveal on-chain, anchoring the CID as the storage pointer ──
+            try:
+                if trace_id is not None and trace_publisher.supports_commit_reveal():
+                    reveal_tx, reveal_block = await trace_publisher.reveal(
+                        trace_id, trace, storage_pointer=ipfs_cid or ""
+                    )
+                else:
+                    # Pre-v1.5 registry: anchor the canonical content via publishTrace.
+                    reveal_tx = await trace_publisher.publish(trace)
+                    if reveal_tx:
+                        try:
+                            receipt = await chain_client.w3.eth.get_transaction_receipt(
+                                chain_client.w3.to_bytes(hexstr=reveal_tx.removeprefix("0x"))
+                            )
+                            reveal_block = receipt.blockNumber
+                        except Exception:
+                            logger.debug("reveal receipt block lookup failed", exc_info=True)
                 if reveal_tx:
-                    try:
-                        receipt = await chain_client.w3.eth.get_transaction_receipt(
-                            chain_client.w3.to_bytes(hexstr=reveal_tx.removeprefix("0x"))
-                        )
-                        reveal_block = receipt.blockNumber
-                    except Exception:
-                        logger.debug("reveal receipt block lookup failed", exc_info=True)
                     logger.info(
-                        "[tick %s] REVEAL anchored: tx=%s block=%s",
+                        "[tick %s] REVEAL anchored: tx=%s block=%s cid=%s",
                         tick_id,
                         reveal_tx[:16],
                         reveal_block,
+                        ipfs_cid,
                     )
             except Exception as e:
                 logger.error("[tick %s] REVEAL publish FAILED: %s", tick_id, e)
 
-        # Persist off-chain with full temporal binding data
+        # Persist off-chain with full temporal binding + IPFS pointer
         try:
             off_chain_data = {
                 "id": trace.id,
@@ -1019,6 +1032,8 @@ class StrategyRunner:
                 "trace_hash": trace.trace_hash,
                 "arc_tx_hash": reveal_tx,
                 "is_verified": reveal_tx is not None,
+                # IPFS provenance pointer (T1.4)
+                "ipfs_cid": ipfs_cid,
                 # Temporal binding fields
                 "commit_tx_hash": commit_tx,
                 "commit_block_number": commit_block,

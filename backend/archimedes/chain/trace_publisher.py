@@ -17,10 +17,35 @@ logger = logging.getLogger(__name__)
 
 
 class TracePublisher:
-    """Publishes reasoning trace hashes to on-chain ReasoningTraceRegistry."""
+    """Publishes reasoning trace hashes to on-chain ReasoningTraceRegistry.
+
+    Two anchoring paths:
+      - ``publish`` → ``publishTrace`` (v1 anchor-after-the-fact; kept for the
+        legacy SKIP/error path and existing callers).
+      - ``commit`` + ``reveal`` (v1.5 temporal binding): the agent commits the
+        trace hash BEFORE the trade and reveals the canonical content AFTER it
+        settles. The contract recomputes keccak256 on reveal and enforces
+        commit block < execution < reveal block — proving "trace existed before
+        the trade". commit/reveal require the v1.5 registry; ``supports_commit_reveal``
+        detects whether the deployed ABI exposes them (redeploy gated on #588).
+    """
 
     def __init__(self, loader: ContractLoader | None = None):
         self.loader = loader or get_contract_loader()
+
+    def supports_commit_reveal(self) -> bool:
+        """True iff the deployed registry ABI exposes commit() + reveal().
+
+        The v1.5 commit-reveal pair lives in the Solidity source but the deployed
+        ABI may still be v1 (publishTrace only) until the registry is redeployed
+        (#588). Callers use this to fall back to publishTrace gracefully instead
+        of throwing an AttributeError mid-tick.
+        """
+        try:
+            fns = self.loader.trace_registry.functions
+            return hasattr(fns, "commit") and hasattr(fns, "reveal")
+        except Exception:
+            return False
 
     async def publish(self, trace: ReasoningTrace) -> str | None:
         """Publish a reasoning trace hash on-chain.
@@ -97,6 +122,204 @@ class TracePublisher:
         except Exception as e:
             logger.error(f"Failed to publish trace on-chain: {e}")
             return None
+
+    # ── Commit-Reveal (v1.5 temporal binding) ─────────────────────────
+
+    async def commit(
+        self,
+        trace: ReasoningTrace,
+        claimed_execution_time: int,
+        trade_intent_summary: bytes = b"",
+    ) -> tuple[int | None, str | None, int | None]:
+        """Commit the trace hash on-chain BEFORE the covered trade executes.
+
+        Calls ``ReasoningTraceRegistry.commit(vault, contentHash, claimedExecutionTime,
+        tradeIntentSummary)``. The committed ``contentHash`` is keccak256 of the trace's
+        canonical JSON — the SAME bytes ``reveal`` will later submit, so the on-chain
+        hash binding holds.
+
+        Args:
+            trace: the trace being committed (its hash is computed here if absent).
+            claimed_execution_time: unix time the trade is claimed to land at; must be
+                strictly after the commit block's timestamp (the contract enforces this).
+            trade_intent_summary: ABI/opaque bytes summarizing intended trades (metadata).
+
+        Returns:
+            (trace_id, tx_hash, commit_block) — trace_id is the on-chain id needed to
+            reveal; any field is None on failure. Falls back to None if the deployed
+            registry has no commit() (pre-#588 redeploy).
+        """
+        if not self.supports_commit_reveal():
+            logger.warning(
+                "Registry ABI has no commit() — deployed contract is pre-v1.5 "
+                "(redeploy gated on #588). Falling back to publishTrace anchor."
+            )
+            return None, None, None
+
+        content_hash = trace.trace_hash or trace.compute_hash()
+        content_hash_bytes = bytes.fromhex(content_hash.removeprefix("0x"))  # 32 bytes
+        vault_addr = chain_client.to_checksum(trace.vault_address)
+        registry_addr = chain_client.to_checksum(chain_client.settings.reasoning_trace_registry_address)
+
+        # ── Path 1: Circle wallet ──
+        if circle_signer.is_configured:
+            try:
+                content_hash_hex = "0x" + content_hash.removeprefix("0x")
+                intent_hex = "0x" + trade_intent_summary.hex() if trade_intent_summary else "0x"
+                tx_hash = await circle_signer.execute_contract(
+                    contract_address=registry_addr,
+                    abi_function="commit(address,bytes32,uint64,bytes)",
+                    abi_params=[vault_addr, content_hash_hex, str(claimed_execution_time), intent_hex],
+                )
+                logger.info(f"Trace committed via Circle: {tx_hash[:16]}...")
+                return await self._finalize_commit(trace, tx_hash, vault_addr)
+            except Exception as e:
+                logger.error(f"Circle commit failed, falling back: {e}")
+
+        # ── Path 2: Raw private key ──
+        account = chain_client.settings.agent_account
+        if not account:
+            logger.warning("No agent account configured — skipping trace commit")
+            return None, None, None
+
+        registry = self.loader.trace_registry
+        try:
+            nonce = await chain_client.w3.eth.get_transaction_count(account.address)
+            tx = await registry.functions.commit(
+                vault_addr, content_hash_bytes, claimed_execution_time, trade_intent_summary
+            ).build_transaction(
+                {
+                    "from": account.address,
+                    "nonce": nonce,
+                    "chainId": chain_client.settings.chain_id,
+                    "gas": 300_000,
+                    "gasPrice": await chain_client.w3.eth.gas_price,
+                }
+            )
+            signed = account.sign_transaction(tx)
+            tx_hash_bytes = await chain_client.w3.eth.send_raw_transaction(signed.raw_transaction)
+            tx_hash = tx_hash_bytes.hex()
+            logger.info(f"Trace committed on-chain: {tx_hash[:16]}...")
+            return await self._finalize_commit(trace, tx_hash, vault_addr)
+        except Exception as e:
+            logger.error(f"Failed to commit trace on-chain: {e}")
+            return None, None, None
+
+    async def _finalize_commit(
+        self, trace: ReasoningTrace, tx_hash: str, vault_addr: str
+    ) -> tuple[int | None, str | None, int | None]:
+        """Resolve the on-chain trace_id + block from a commit tx receipt.
+
+        Decodes the TraceCommitted event to read the auto-incremented trace_id; falls
+        back to getTracesByVault()[-1] if the event can't be decoded.
+        """
+        trace.commit_tx_hash = tx_hash
+        registry = self.loader.trace_registry
+        block_num = None
+        trace_id = None
+        try:
+            receipt = await chain_client.w3.eth.get_transaction_receipt(tx_hash)
+            block_num = receipt.blockNumber
+            for log in receipt.logs:
+                try:
+                    decoded = registry.events.TraceCommitted().process_log(log)
+                    trace_id = int(decoded["args"]["traceId"])
+                    break
+                except Exception:
+                    continue
+        except Exception as e:
+            logger.warning(f"Cannot read commit receipt: {e}")
+
+        if trace_id is None:
+            # Fallback: newest trace id for the vault.
+            try:
+                ids = await registry.functions.getTracesByVault(vault_addr).call()
+                trace_id = int(ids[-1]) if ids else None
+            except Exception:
+                trace_id = None
+
+        trace.commit_block_number = block_num
+        return trace_id, tx_hash, block_num
+
+    async def reveal(
+        self,
+        trace_id: int,
+        trace: ReasoningTrace,
+        storage_pointer: str = "",
+    ) -> tuple[str | None, int | None]:
+        """Reveal the full canonical trace content AFTER the trade settles.
+
+        Calls ``ReasoningTraceRegistry.reveal(traceId, storagePointer, fullTraceContent)``.
+        ``fullTraceContent`` MUST be the exact canonical bytes whose keccak256 equals the
+        committed hash; we derive them from ``trace.canonical_json()`` (the same source the
+        commit hash was computed from). ``storage_pointer`` is the IPFS CID (or any URL) so
+        verifiers can fetch the off-chain public provenance.
+
+        Returns (reveal_tx_hash, reveal_block) — None on failure or pre-v1.5 registry.
+        """
+        if not self.supports_commit_reveal():
+            logger.warning("Registry ABI has no reveal() — skipping reveal (redeploy gated on #588).")
+            return None, None
+        if trace_id is None:
+            logger.warning("No trace_id to reveal (commit likely failed) — skipping reveal")
+            return None, None
+
+        full_content = trace.canonical_json().encode("utf-8")
+        registry_addr = chain_client.to_checksum(chain_client.settings.reasoning_trace_registry_address)
+
+        # ── Path 1: Circle wallet ──
+        if circle_signer.is_configured:
+            try:
+                content_hex = "0x" + full_content.hex()
+                tx_hash = await circle_signer.execute_contract(
+                    contract_address=registry_addr,
+                    abi_function="reveal(uint256,string,bytes)",
+                    abi_params=[str(trace_id), storage_pointer, content_hex],
+                )
+                logger.info(f"Trace revealed via Circle: {tx_hash[:16]}...")
+                return await self._finalize_reveal(trace, tx_hash)
+            except Exception as e:
+                logger.error(f"Circle reveal failed, falling back: {e}")
+
+        # ── Path 2: Raw private key ──
+        account = chain_client.settings.agent_account
+        if not account:
+            logger.warning("No agent account configured — skipping trace reveal")
+            return None, None
+
+        registry = self.loader.trace_registry
+        try:
+            nonce = await chain_client.w3.eth.get_transaction_count(account.address)
+            tx = await registry.functions.reveal(trace_id, storage_pointer, full_content).build_transaction(
+                {
+                    "from": account.address,
+                    "nonce": nonce,
+                    "chainId": chain_client.settings.chain_id,
+                    "gas": 500_000,
+                    "gasPrice": await chain_client.w3.eth.gas_price,
+                }
+            )
+            signed = account.sign_transaction(tx)
+            tx_hash_bytes = await chain_client.w3.eth.send_raw_transaction(signed.raw_transaction)
+            tx_hash = tx_hash_bytes.hex()
+            logger.info(f"Trace revealed on-chain: {tx_hash[:16]}...")
+            return await self._finalize_reveal(trace, tx_hash)
+        except Exception as e:
+            logger.error(f"Failed to reveal trace on-chain: {e}")
+            return None, None
+
+    async def _finalize_reveal(self, trace: ReasoningTrace, tx_hash: str) -> tuple[str, int | None]:
+        """Record reveal tx + block on the trace and return them."""
+        trace.reveal_tx_hash = tx_hash
+        trace.arc_tx_hash = tx_hash  # reveal is the canonical anchor tx for this trace
+        block_num = None
+        try:
+            receipt = await chain_client.w3.eth.get_transaction_receipt(tx_hash)
+            block_num = receipt.blockNumber
+        except Exception:
+            logger.debug("reveal receipt block lookup failed", exc_info=True)
+        trace.reveal_block_number = block_num
+        return tx_hash, block_num
 
     async def verify(self, trace: ReasoningTrace) -> bool:
         """Verify a trace against its on-chain hash."""
