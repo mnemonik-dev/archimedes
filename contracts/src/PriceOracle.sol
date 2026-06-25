@@ -3,12 +3,52 @@ pragma solidity ^0.8.24;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 
+/// @notice Minimal Chainlink price-feed interface (T1.3 — Chainlink-first read path).
+///         Declared locally rather than pulling in the chainlink/contracts package
+///         so we add no new submodule dependency for one interface. This is the canonical
+///         AggregatorV3Interface signature — Chainlink feeds (and Arc-native /
+///         Chainlink-compatible aggregators) implement it verbatim.
+///         Reference: https://docs.chain.link/data-feeds/api-reference
+interface AggregatorV3Interface {
+    /// @return The number of decimals the feed answer is reported in (USD feeds: 8).
+    function decimals() external view returns (uint8);
+
+    /// @notice Latest completed round of price data.
+    /// @return roundId         The round ID the answer was computed in.
+    /// @return answer          The price (signed; non-negative for a healthy feed).
+    /// @return startedAt       Timestamp the round started.
+    /// @return updatedAt       Timestamp the answer was last updated (staleness key).
+    /// @return answeredInRound The round in which the answer was computed (legacy
+    ///                         carry-over detector; answeredInRound < roundId means
+    ///                         the answer is stale carried from a prior round).
+    function latestRoundData()
+        external
+        view
+        returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound);
+}
+
 /// @title PriceOracle
-/// @notice Admin-updatable price oracle for any asset on Arc testnet.
-///         In production, replace with Chainlink feed. For the hackathon,
-///         the backend agent pushes price updates periodically.
+/// @notice Per-asset price oracle for any asset on Arc testnet. Prefers a Chainlink
+///         `AggregatorV3Interface` feed when one is configured (T1.3); falls back to
+///         the admin-fed value (backend oracle runner pushes via `setPrice`) for
+///         assets that have no native Chainlink feed.
+/// @dev    ⚠️ Funds-adjacent: this price flows straight into Vault / SyntheticVault
+///         collateral math (`getPrice()` → 6-decimal USDC price). Read-path changes
+///         here need a careful contract review (Chuan).
+///
+///         Read-path precedence (see `getPrice()`):
+///           1. Chainlink feed (if `priceFeed != address(0)`), with staleness +
+///              non-negative + round-completeness checks, scaled to 6 decimals.
+///           2. Admin-fed `price` (the existing hackathon path), with its own
+///              staleness check — used when no feed is configured.
+///         The no-arg `getPrice()` signature is preserved so every existing consumer
+///         (Vault, SyntheticVault, SyntheticFactory) and the backend keep working.
 contract PriceOracle is Ownable {
-    /// @notice Asset price in USDC (6 decimals). e.g. $392.60 → 392600000
+    /// @notice Asset price in USDC (6 decimals). e.g. $392.60 → 392600000.
+    ///         This is the *admin-fed* value (the fallback path). When a Chainlink
+    ///         feed is configured, `getPrice()` reads the feed instead and this
+    ///         field is not used for the live read. Kept public + named `price` so
+    ///         the backend's on-chain reference read (`.price()`) keeps working.
     uint256 public price;
 
     /// @notice Human-readable label (e.g. "TSLA", "NVDA", "SPY")
@@ -22,6 +62,17 @@ contract PriceOracle is Ownable {
 
     /// @notice Address allowed to push price updates (e.g. Circle wallet)
     address public updater;
+
+    /// @notice Chainlink (or Chainlink-compatible) price feed for this asset (T1.3).
+    ///         When non-zero, `getPrice()` reads `latestRoundData()` from this feed
+    ///         instead of the admin-fed `price`. Owner-set via `setPriceFeed`; set
+    ///         back to `address(0)` to revert to the admin-fed fallback.
+    AggregatorV3Interface public priceFeed;
+
+    /// @notice Target decimals for the returned price — USDC's 6 decimals, matching
+    ///         the admin-fed `price` convention and every consumer's math. Chainlink
+    ///         USD feeds report 8 decimals, so the feed answer is rescaled to this.
+    uint8 public constant PRICE_DECIMALS = 6;
 
     /// @notice Timestamp of the last *setPrice* update (0 until the first one).
     ///         Distinct from lastUpdated (which the constructor seeds) so the
@@ -74,6 +125,7 @@ contract PriceOracle is Ownable {
     event MaxDeviationBpsChanged(uint256 oldBps, uint256 newBps);
     event UpdaterChanged(address oldUpdater, address newUpdater);
     event UpdateCooldownChanged(uint256 oldCooldown, uint256 newCooldown);
+    event PriceFeedChanged(address oldFeed, address newFeed);
 
     error StalePrice();
     error UnauthorizedUpdater();
@@ -82,6 +134,11 @@ contract PriceOracle is Ownable {
     error InvalidDeviationBound();
     error UpdateRateLimited(uint256 lastUpdated, uint256 cooldown, uint256 nowTs);
     error InvalidCooldown();
+    // ── Chainlink read-path errors (T1.3) ──────────────────────────
+    error NegativePrice(int256 answer); // feed reported answer <= 0
+    error IncompleteRound(); // updatedAt == 0 → round not yet answered
+    error StaleFeedRound(uint80 roundId, uint80 answeredInRound); // carried-over answer
+    error InvalidFeedDecimals(uint8 decimals); // feed decimals would overflow scaling
 
     modifier onlyUpdater() {
         if (msg.sender != owner() && msg.sender != updater) revert UnauthorizedUpdater();
@@ -173,12 +230,94 @@ contract PriceOracle is Ownable {
         emit UpdaterChanged(old, _updater);
     }
 
+    /// @notice Configure (or clear) the Chainlink feed for this asset (T1.3).
+    ///         Owner-only. Pass `address(0)` to disable the feed and fall back to
+    ///         the admin-fed `price`. When a non-zero feed is set, its `decimals()`
+    ///         is validated up front so a feed that would overflow the scaling math
+    ///         (decimals > 36) is rejected at configuration time rather than on read.
+    /// @dev    ⚠️ Funds-adjacent: pointing this at the wrong feed silently reprices
+    ///         every vault that reads this oracle. Verify the feed address +
+    ///         denomination (must be the asset/USD pair) before calling. Does NOT
+    ///         re-validate the feed's *answer* here (a feed can be healthy at config
+    ///         time and stale later) — staleness is enforced on every `getPrice()`.
+    function setPriceFeed(address _feed) external onlyOwner {
+        if (_feed != address(0)) {
+            // Probe decimals() so a non-conforming or overflow-prone feed can't be
+            // wired in. PRICE_DECIMALS (6) + 36 keeps the up-scale (10 ** (6 - d))
+            // and down-scale (10 ** (d - 6)) factors well inside uint256.
+            uint8 feedDecimals = AggregatorV3Interface(_feed).decimals();
+            if (feedDecimals > 36) revert InvalidFeedDecimals(feedDecimals);
+        }
+        address old = address(priceFeed);
+        priceFeed = AggregatorV3Interface(_feed);
+        emit PriceFeedChanged(old, _feed);
+    }
+
+    /// @notice Current asset price in USDC 6-decimal units.
+    ///         Prefers the Chainlink feed when configured (T1.3); otherwise returns
+    ///         the admin-fed `price`. Reverts (never returns a bad price) when the
+    ///         active source is stale or invalid — consumers treat a revert as
+    ///         "do not trade", so a bad feed blocks rather than misprices.
+    /// @dev    Signature unchanged (no-arg) so Vault / SyntheticVault /
+    ///         SyntheticFactory keep compiling and behaving identically.
     function getPrice() external view returns (uint256) {
+        if (address(priceFeed) != address(0)) {
+            return _readChainlink();
+        }
+        // Admin-fed fallback (assets with no native Chainlink feed).
         if (block.timestamp > lastUpdated + MAX_STALENESS) revert StalePrice();
         return price;
     }
 
+    /// @notice True when the *active* price source is fresh (feed if configured,
+    ///         else the admin-fed value). View-safe: never reverts; the Chainlink
+    ///         branch returns false instead of bubbling a revert so callers can
+    ///         probe freshness without a try/catch.
     function isFresh() external view returns (bool) {
+        if (address(priceFeed) != address(0)) {
+            try this.getPrice() returns (uint256) {
+                return true;
+            } catch {
+                return false;
+            }
+        }
         return block.timestamp <= lastUpdated + MAX_STALENESS;
+    }
+
+    /// @notice Read + validate + scale the Chainlink feed answer to 6 decimals.
+    /// @dev    Funds-safety checks, in order — any failure reverts (fail-closed):
+    ///           • answer > 0           — reject zero / negative prices (NegativePrice)
+    ///           • updatedAt != 0       — reject an unanswered/incomplete round
+    ///                                    (IncompleteRound)
+    ///           • answeredInRound >= roundId — reject a carried-over stale answer
+    ///                                    from a prior round (StaleFeedRound)
+    ///           • block.timestamp - updatedAt <= MAX_STALENESS — reject a feed that
+    ///                                    has not updated within the staleness window
+    ///                                    (StalePrice), the same bound the admin path
+    ///                                    uses.
+    ///         Then scale `answer` from the feed's reported decimals to PRICE_DECIMALS
+    ///         (6). USD feeds report 8 decimals → divide by 100; a hypothetical
+    ///         sub-6-decimal feed multiplies up. `decimals()` is bounded at config
+    ///         time (<= 36) so neither scaling factor overflows.
+    function _readChainlink() internal view returns (uint256) {
+        (uint80 roundId, int256 answer,, uint256 updatedAt, uint80 answeredInRound) = priceFeed.latestRoundData();
+
+        if (answer <= 0) revert NegativePrice(answer);
+        if (updatedAt == 0) revert IncompleteRound();
+        if (answeredInRound < roundId) revert StaleFeedRound(roundId, answeredInRound);
+        if (block.timestamp > updatedAt + MAX_STALENESS) revert StalePrice();
+
+        uint256 rawPrice = uint256(answer); // safe: answer > 0 checked above
+        uint8 feedDecimals = priceFeed.decimals();
+
+        if (feedDecimals == PRICE_DECIMALS) {
+            return rawPrice;
+        } else if (feedDecimals > PRICE_DECIMALS) {
+            // e.g. 8-decimal USD feed → /100 to reach 6 decimals.
+            return rawPrice / (10 ** (feedDecimals - PRICE_DECIMALS));
+        } else {
+            // Sub-6-decimal feed (rare) → scale up to 6 decimals.
+            return rawPrice * (10 ** (PRICE_DECIMALS - feedDecimals));
+        }
     }
 }
