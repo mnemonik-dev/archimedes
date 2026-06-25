@@ -188,7 +188,7 @@ def test_position_weight_zero_equity_returns_zero() -> None:
         pass
 
     class _FakeBroker:
-        def getvalue(self, datas=None):  # noqa: ANN001, ANN201
+        def getvalue(self, datas=None):
             return 0.0
 
     class _FakeStrategy:

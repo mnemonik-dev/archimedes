@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
+from typing import ClassVar
 
 import numpy as np
 from archimedes.models.asset import MarketSnapshot
@@ -283,7 +284,7 @@ class TestCrisisTailLabelling:
             covs[i, _IDX_VIX, _IDX_VIX] = (vs / scaler.scale_[_IDX_VIX]) ** 2
         return SimpleNamespace(means_=means, covariances_=covs)
 
-    _SCALER_ARGS = {"mean": [18.0, 0.0, 0.18, 0.0], "scale": [8.0, 0.3, 0.1, 0.05]}
+    _SCALER_ARGS: ClassVar[dict[str, list[float]]] = {"mean": [18.0, 0.0, 0.18, 0.0], "scale": [8.0, 0.3, 0.1, 0.05]}
 
     def test_subthreshold_mean_with_crash_tail_is_crisis(self) -> None:
         scaler = self._scaler(**self._SCALER_ARGS)

@@ -551,7 +551,7 @@ def monte_carlo_portfolio(
     """
     arr = np.asarray(daily_returns, dtype=float)
     T = len(arr)
-    if T < block_size * 2:
+    if block_size * 2 > T:
         raise ValueError(f"Need ≥ {block_size * 2} returns for block bootstrap; got {T}")
 
     rng = np.random.default_rng(seed)
@@ -685,7 +685,7 @@ def sensitivity_sweep(
         )
 
     def _run_one(combo: tuple) -> dict[str, Any]:
-        kw: dict[str, Any] = dict(zip(param_names, combo))
+        kw: dict[str, Any] = dict(zip(param_names, combo, strict=True))
         base = {
             "strategy_id": strategy_id,
             "weights": weights,
@@ -1048,7 +1048,7 @@ def _run_backtest_job(job: dict[str, Any]) -> dict[str, Any]:
         result, _ = backtest_portfolio(**kwargs)
         metrics = {m: float(getattr(result, m, float("nan")) or float("nan")) for m in _JOB_REPORTED_METRICS}
         return {"label": label, "ok": True, "error": None, **metrics}
-    except Exception as exc:  # noqa: BLE001 — non-fatal per-job failure, surfaced in the result
+    except Exception as exc:  # non-fatal per-job failure, surfaced in the result
         logger.debug("run_parallel_backtest job %s failed: %s", label, exc)
         return {
             "label": label,

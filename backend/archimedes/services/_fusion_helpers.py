@@ -337,10 +337,7 @@ def _as_returns_matrix(
     usable (length >= 2) series survive — the caller treats ``None`` as
     "not scoreable".
     """
-    if isinstance(returns_matrix, dict):
-        series = list(returns_matrix.values())
-    else:
-        series = list(returns_matrix)
+    series = list(returns_matrix.values()) if isinstance(returns_matrix, dict) else list(returns_matrix)
 
     arrs = [_np.asarray(s, dtype=float).ravel() for s in series]
     arrs = [a for a in arrs if a.size >= 2]
