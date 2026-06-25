@@ -79,8 +79,17 @@ def build_feature_matrix(vix_closes: np.ndarray, spy_closes: np.ndarray) -> np.n
         return_21d = (spy_now - spy_then) / spy_then if spy_then else 0.0
 
         window = spy_closes[t - _FEATURE_WINDOW : t + 1]
-        daily_returns = np.diff(window) / window[:-1]
-        realized_vol_21d = float(np.std(daily_returns) * np.sqrt(_TRADING_DAYS_PER_YEAR))
+        # Guard the denominator against any zero price (a bad/missing close):
+        # dividing by 0 yields inf → NaN, which np.std propagates into a NaN
+        # feature row that would poison the fit. Drop the offending steps (and
+        # treat an all-zero window as zero vol) — mirrors the change-calc guards.
+        prev_prices = window[:-1]
+        nonzero = prev_prices != 0.0
+        if np.any(nonzero):
+            daily_returns = np.diff(window)[nonzero] / prev_prices[nonzero]
+            realized_vol_21d = float(np.std(daily_returns) * np.sqrt(_TRADING_DAYS_PER_YEAR))
+        else:
+            realized_vol_21d = 0.0
 
         rows.append([float(vix_now), float(vix_21d_chg), realized_vol_21d, float(return_21d)])
 
