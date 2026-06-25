@@ -393,7 +393,7 @@ class CannedBackend:
     def available(self) -> bool:
         return False
 
-    def complete(self, system: str, user: str) -> str:
+    def complete(self, system: str, user: str) -> str:  # noqa: ARG002 — LLM backend interface contract
         return json.dumps(
             {
                 "fallback": True,

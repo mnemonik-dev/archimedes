@@ -187,7 +187,7 @@ def optimize_weights(
     Sigma += np.eye(n) * 1e-8  # numerical regularization
 
     if optimizer == "hrp":
-        raw = _hrp_weights(Sigma, symbols)
+        raw = _hrp_weights(Sigma)
     elif optimizer == "black_litterman":
         raw = _black_litterman_weights(mu, Sigma, n, cap=_CAP_DEFAULT)
     elif optimizer == "robust":
@@ -452,7 +452,7 @@ def _hrp_recurse(cov: np.ndarray, order: list[int]) -> np.ndarray:
     return np.concatenate([w_left, w_right])
 
 
-def _hrp_weights(Sigma: np.ndarray, symbols: list[str]) -> np.ndarray | None:
+def _hrp_weights(Sigma: np.ndarray) -> np.ndarray | None:
     """Hierarchical Risk Parity weights (López de Prado 2016).
 
     Steps:
@@ -820,10 +820,7 @@ def compare_optimizers(
         vol_daily = float(port.std(ddof=1)) if port.shape[0] > 1 else 0.0
         annual_return = mean_daily * _ANNUALIZATION
         annual_vol = vol_daily * math.sqrt(_ANNUALIZATION)
-        if annual_vol > 1e-12:
-            sharpe = (mean_daily - _RF_DAILY) / vol_daily * math.sqrt(_ANNUALIZATION)
-        else:
-            sharpe = 0.0
+        sharpe = (mean_daily - _RF_DAILY) / vol_daily * math.sqrt(_ANNUALIZATION) if annual_vol > 1e-12 else 0.0
 
         # Max drawdown of the cumulative-return path.
         cum = np.cumprod(1.0 + port)

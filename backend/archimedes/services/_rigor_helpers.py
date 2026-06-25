@@ -814,12 +814,9 @@ def regime_robustness_score(
     max_sharpe = float(max(sharpes))
     dispersion = round(max_sharpe - min_sharpe, 6) if len(sharpes) >= 2 else None
 
-    if max_sharpe > 0.0:
-        consistency = min(1.0, max(0.0, min_sharpe / max_sharpe))
-    else:
-        # Non-positive in every regime: there is no regime in which the edge
-        # works, so there is no consistency to credit.
-        consistency = 0.0
+    # Non-positive in every regime → no regime in which the edge works, so there
+    # is no consistency to credit (0.0).
+    consistency = min(1.0, max(0.0, min_sharpe / max_sharpe)) if max_sharpe > 0.0 else 0.0
 
     return {
         "per_regime": per_regime,
@@ -1099,10 +1096,8 @@ def benjamini_hochberg_fdr(
 
     # Largest k where sorted_p[k-1] <= bh_crit[k-1]
     below_threshold = sorted_p <= bh_crit
-    if np.any(below_threshold):
-        k_star = int(np.where(below_threshold)[0][-1])  # 0-based index of last True
-    else:
-        k_star = -1  # nothing rejected
+    # 0-based index of the last True (largest rejected k); -1 if nothing rejected.
+    k_star = int(np.where(below_threshold)[0][-1]) if np.any(below_threshold) else -1
 
     reject_sorted = np.zeros(m, dtype=bool)
     if k_star >= 0:

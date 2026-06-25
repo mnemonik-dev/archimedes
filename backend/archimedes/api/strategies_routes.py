@@ -1563,8 +1563,8 @@ async def _run_fusion_job(job_id: str) -> None:
 @limiter.limit("20/minute")
 async def construct_strategy(
     req: StrategyConstructionRequest,
-    request: Request,
-    response: Response,
+    request: Request,  # noqa: ARG001 — required by the slowapi limiter / FastAPI
+    response: Response,  # noqa: ARG001 — kept for FastAPI handler symmetry
     _wallet: str | None = Depends(gate_generation),
 ):
     """Interactive strategy architect -- the 'design me a portfolio' path."""
