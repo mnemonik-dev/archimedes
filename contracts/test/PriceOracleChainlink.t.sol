@@ -26,16 +26,23 @@ contract MockAggregator is AggregatorV3Interface {
         return _decimals;
     }
 
+    bool internal _shouldRevert;
+
     function latestRoundData()
         external
         view
         override
         returns (uint80, int256, uint256, uint256, uint80)
     {
+        if (_shouldRevert) revert("feed down");
         return (_roundId, _answer, _updatedAt, _updatedAt, _answeredInRound);
     }
 
     // ── Test setters ─────────────────────────────────────────────
+    function setShouldRevert(bool r) external {
+        _shouldRevert = r;
+    }
+
     function setAnswer(int256 a) external {
         _answer = a;
     }
@@ -146,64 +153,70 @@ contract PriceOracleChainlinkTest is Test {
 
     // ─── Staleness rejection (the core T1.3 funds-safety check) ──────
 
-    function test_feed_staleness_rejection() public {
+    function test_feed_stale_beyond_heartbeat_degrades_to_admin() public {
         vm.prank(owner);
         oracle.setPriceFeed(address(feed));
-        // Pin the feed's updatedAt, then warp `now` to one second beyond the
-        // staleness window → getPrice() must revert StalePrice (fail-closed).
         uint256 feedTs = block.timestamp; // 1_000_000 (pinned in setUp)
         feed.setUpdatedAt(feedTs);
-        uint256 maxStaleness = oracle.MAX_STALENESS();
-        vm.warp(feedTs + maxStaleness + 1); // now - updatedAt = MAX_STALENESS + 1
+        // Past the per-feed heartbeat but the admin reference is still fresh: the feed
+        // is ignored and getPrice() DEGRADES to the admin value (not a hard revert).
+        vm.warp(feedTs + oracle.feedStaleness() + 1);
+        assertEq(oracle.getPrice(), oracle.price());
+        assertTrue(oracle.isFresh()); // admin fallback is fresh
+    }
+
+    function test_feed_stale_and_admin_stale_reverts() public {
+        vm.prank(owner);
+        oracle.setPriceFeed(address(feed));
+        uint256 feedTs = block.timestamp;
+        feed.setUpdatedAt(feedTs);
+        // Both the feed (past heartbeat) and the admin (past MAX_STALENESS) are stale →
+        // only now does getPrice() revert.
+        vm.warp(feedTs + oracle.MAX_STALENESS() + 1);
         vm.expectRevert(PriceOracle.StalePrice.selector);
         oracle.getPrice();
-        // isFresh() reports false without bubbling the revert.
         assertFalse(oracle.isFresh());
     }
 
-    function test_feed_fresh_at_exact_staleness_boundary() public {
+    function test_feed_fresh_at_exact_heartbeat_boundary() public {
         vm.prank(owner);
         oracle.setPriceFeed(address(feed));
-        // updatedAt exactly MAX_STALENESS ago is still fresh (strict > check).
+        // updatedAt exactly feedStaleness ago is still fresh (strict > check).
         uint256 ts = block.timestamp;
         feed.setUpdatedAt(ts);
-        vm.warp(ts + oracle.MAX_STALENESS());
+        vm.warp(ts + oracle.feedStaleness());
         assertEq(oracle.getPrice(), EXPECTED_6DEC);
     }
 
-    // ─── Other funds-safety guards ───────────────────────────────────
+    // ─── Other funds-safety guards (now DEGRADE to admin, #724 review) ──
 
-    function test_feed_negative_answer_reverts() public {
+    function test_feed_negative_answer_degrades_to_admin() public {
         vm.prank(owner);
         oracle.setPriceFeed(address(feed));
         feed.setAnswer(-1);
-        vm.expectRevert(abi.encodeWithSelector(PriceOracle.NegativePrice.selector, int256(-1)));
-        oracle.getPrice();
+        // A bad feed answer no longer bricks the read — it degrades to the admin price.
+        assertEq(oracle.getPrice(), oracle.price());
     }
 
-    function test_feed_zero_answer_reverts() public {
+    function test_feed_zero_answer_degrades_to_admin() public {
         vm.prank(owner);
         oracle.setPriceFeed(address(feed));
         feed.setAnswer(0);
-        vm.expectRevert(abi.encodeWithSelector(PriceOracle.NegativePrice.selector, int256(0)));
-        oracle.getPrice();
+        assertEq(oracle.getPrice(), oracle.price());
     }
 
-    function test_feed_incomplete_round_reverts() public {
+    function test_feed_incomplete_round_degrades_to_admin() public {
         vm.prank(owner);
         oracle.setPriceFeed(address(feed));
         feed.setUpdatedAt(0); // round not yet answered
-        vm.expectRevert(PriceOracle.IncompleteRound.selector);
-        oracle.getPrice();
+        assertEq(oracle.getPrice(), oracle.price());
     }
 
-    function test_feed_carried_over_round_reverts() public {
+    function test_feed_carried_over_round_degrades_to_admin() public {
         vm.prank(owner);
         oracle.setPriceFeed(address(feed));
-        // answeredInRound < roundId → answer carried over from a prior round.
-        feed.setRound(5, 4);
-        vm.expectRevert(abi.encodeWithSelector(PriceOracle.StaleFeedRound.selector, uint80(5), uint80(4)));
-        oracle.getPrice();
+        feed.setRound(5, 4); // answeredInRound < roundId → carried-over answer
+        assertEq(oracle.getPrice(), oracle.price());
     }
 
     // ─── setPriceFeed access + validation ────────────────────────────
@@ -234,5 +247,98 @@ contract PriceOracleChainlinkTest is Test {
         vm.prank(owner);
         oracle.setPriceFeed(address(boundFeed));
         assertEq(address(oracle.priceFeed()), address(boundFeed));
+    }
+
+    function test_setPriceFeed_caches_decimals() public {
+        vm.prank(owner);
+        oracle.setPriceFeed(address(feed));
+        assertEq(oracle.feedDecimals(), FEED_DECIMALS);
+        // Cleared back to 0 when the feed is removed.
+        vm.prank(owner);
+        oracle.setPriceFeed(address(0));
+        assertEq(oracle.feedDecimals(), 0);
+    }
+
+    // ─── #724-review hardening: degrade + sanity band + heartbeat ─────
+
+    function test_feed_reverts_degrades_to_admin() public {
+        vm.prank(owner);
+        oracle.setPriceFeed(address(feed));
+        feed.setShouldRevert(true);
+        // A feed whose latestRoundData() reverts (paused / self-destructed) is caught and
+        // degrades to the admin fallback — NOT a hard revert that bricks every consumer.
+        assertEq(oracle.getPrice(), oracle.price());
+        assertTrue(oracle.isFresh());
+    }
+
+    function test_feed_out_of_band_degrades_to_admin() public {
+        vm.prank(owner);
+        oracle.setPriceFeed(address(feed));
+        // Admin reference is $392.60; point the feed at $5000 (a ~12x wrong-denomination-
+        // style error) — well outside the 50% band → getPrice() ignores the feed.
+        feed.setAnswer(500_000_000_000); // $5000 @ 8 dec
+        assertEq(oracle.getPrice(), oracle.price());
+    }
+
+    function test_feed_in_band_uses_feed() public {
+        vm.prank(owner);
+        oracle.setPriceFeed(address(feed));
+        // $450 vs admin $392.60 ≈ +14.6% — inside the 50% band → the live feed wins.
+        feed.setAnswer(45_000_000_000); // $450 @ 8 dec
+        assertEq(oracle.getPrice(), 450_000_000);
+    }
+
+    function test_band_disabled_trusts_feed_out_of_band() public {
+        vm.startPrank(owner);
+        oracle.setMaxFeedDeviationBps(0); // disable the band
+        oracle.setPriceFeed(address(feed));
+        vm.stopPrank();
+        feed.setAnswer(500_000_000_000); // $5000 — would be out of band
+        assertEq(oracle.getPrice(), 5_000_000_000); // band off → feed trusted
+    }
+
+    function test_band_skipped_when_admin_stale_trusts_feed() public {
+        vm.prank(owner);
+        oracle.setPriceFeed(address(feed));
+        // Admin reference goes stale (> MAX_STALENESS) but the feed stays fresh; the band
+        // can't sanity-check against a stale reference, so the in-heartbeat feed is trusted.
+        uint256 ts = block.timestamp;
+        vm.warp(ts + oracle.MAX_STALENESS() + 1);
+        feed.setUpdatedAt(block.timestamp); // feed itself is fresh
+        feed.setAnswer(500_000_000_000); // out-of-band vs the (now stale) admin price
+        assertEq(oracle.getPrice(), 5_000_000_000); // admin stale → band skipped → feed
+    }
+
+    function test_post_scale_zero_degrades_to_admin() public {
+        // An 18-decimal feed reporting 1 wei floors to 0 at 6 decimals → degrade.
+        MockAggregator feed18 = new MockAggregator(18, 1, block.timestamp);
+        vm.prank(owner);
+        oracle.setPriceFeed(address(feed18));
+        assertEq(oracle.getPrice(), oracle.price());
+    }
+
+    function test_setFeedStaleness_bounds_and_access() public {
+        uint256 tooLong = oracle.MAX_STALENESS() + 1; // read view BEFORE arming expectRevert
+        vm.prank(owner);
+        oracle.setFeedStaleness(2 hours);
+        assertEq(oracle.feedStaleness(), 2 hours);
+        vm.prank(owner);
+        vm.expectRevert(PriceOracle.InvalidFeedStaleness.selector);
+        oracle.setFeedStaleness(0);
+        vm.prank(owner);
+        vm.expectRevert(PriceOracle.InvalidFeedStaleness.selector);
+        oracle.setFeedStaleness(tooLong);
+        vm.prank(alice);
+        vm.expectRevert(); // onlyOwner
+        oracle.setFeedStaleness(2 hours);
+    }
+
+    function test_setMaxFeedDeviationBps_and_access() public {
+        vm.prank(owner);
+        oracle.setMaxFeedDeviationBps(2000);
+        assertEq(oracle.maxFeedDeviationBps(), 2000);
+        vm.prank(alice);
+        vm.expectRevert(); // onlyOwner
+        oracle.setMaxFeedDeviationBps(1000);
     }
 }
