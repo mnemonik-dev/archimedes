@@ -23,7 +23,9 @@ fallback** instead:
 2. **Sanity band** (`maxFeedDeviationBps`, default 50%) — reject a feed answer that grossly
    deviates from a *fresh* admin reference (catches mis-pointed / wrong-denomination /
    compromised feeds before they reprice vaults); skipped when the admin ref is stale or the
-   band is set to 0.
+   band is set to 0. The band comparison is computed **overflow-safe and revert-free**: both a
+   malicious huge feed answer *and* a ratcheted-large admin `price` degrade out of band rather
+   than overflow-reverting and bricking the read.
 3. **Per-feed heartbeat** (`feedStaleness`, default 1h) instead of the admin path's 24h
    `MAX_STALENESS` — a *live* feed frozen for hours must read stale on a funds path.
 4. **Post-scale zero-reject**, and `decimals()` **cached at config time** (TOCTOU + gas).

@@ -300,6 +300,18 @@ contract PriceOracleChainlinkTest is Test {
         assertEq(oracle.getPrice(), oracle.price());
     }
 
+    function test_ratcheted_huge_admin_price_band_no_overflow() public {
+        // The OTHER band factor: a ratcheted-large admin `price` must not overflow
+        // `price * maxFeedDeviationBps` and brick getPrice even when the FEED reads clean
+        // (#724 review round-3). Construct an oracle with an absurd admin price, point it at
+        // a valid fresh feed, and confirm the band guard degrades (returns admin) — no revert.
+        PriceOracle huge = new PriceOracle("HUGE", type(uint256).max, owner);
+        vm.prank(owner);
+        huge.setPriceFeed(address(feed)); // valid 8-dec feed, fresh (updatedAt == now)
+        // price * maxFeedDeviationBps would overflow uint256 → band uncomputable → degrade.
+        assertEq(huge.getPrice(), type(uint256).max);
+    }
+
     function test_feed_out_of_band_degrades_to_admin() public {
         vm.prank(owner);
         oracle.setPriceFeed(address(feed));

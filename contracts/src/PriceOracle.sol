@@ -327,15 +327,23 @@ contract PriceOracle is Ownable {
                     return feedPrice;
                 }
                 uint256 diff = feedPrice > price ? feedPrice - price : price - feedPrice;
-                // Overflow-safe band (#724 review): keep the large multiply off the
-                // attacker-controllable `diff` side. `price * maxFeedDeviationBps` is bounded
-                // (admin price × ≤10× bps); `diff` is a subtraction. A malicious huge feedPrice
-                // therefore can't overflow-and-revert here (which would brick getPrice) — it
-                // simply falls out of band and degrades to admin.
-                if (diff <= (price * maxFeedDeviationBps) / BPS_DENOMINATOR) {
+                // Overflow-proof, revert-free sanity band (#724 review round-3). BOTH factors
+                // of the band multiply are unbounded: `diff` can be a malicious huge feedPrice,
+                // and `price` is admin-set + ratchetable upward over time via forceSetPrice. So
+                // (a) the bps multiply sits on `price` (putting it on the `diff` subtraction
+                // would overflow `diff * BPS_DENOMINATOR`), and (b) we GUARD that multiply
+                // explicitly — if even `price * maxFeedDeviationBps` would exceed uint256, the
+                // admin reference is itself absurd, so we DEGRADE (treat the feed as out of
+                // band) rather than overflow-revert and brick getPrice. maxFeedDeviationBps > 0
+                // here (the ==0 disable returned above), so the division guard cannot divide
+                // by zero.
+                if (
+                    price <= type(uint256).max / maxFeedDeviationBps
+                        && diff <= (price * maxFeedDeviationBps) / BPS_DENOMINATOR
+                ) {
                     return feedPrice; // in band → trust the live feed
                 }
-                // out of band → fall through and degrade to the admin price
+                // out of band (or band uncomputable) → fall through and degrade to admin
             }
             // feed unreadable / invalid / out-of-band → degrade to the admin fallback.
             // NOT a hard revert: a bad feed must not brick deposits, withdrawals, NAV,
