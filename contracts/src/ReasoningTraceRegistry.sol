@@ -123,7 +123,16 @@ contract ReasoningTraceRegistry is IReasoningTraceRegistry, Ownable {
         require(tradeId != bytes32(0), "Empty trade id");
         // One outstanding commitment per (vault, trade) at a time — a second commit
         // must not clobber an unexecuted one. (#589)
-        require(_pendingTrade[vault][tradeId] == 0, "Pending commitment exists");
+        uint256 pending = _pendingTrade[vault][tradeId];
+        if (pending != 0) {
+            Commitment storage p = _commitments[pending];
+            if (p.executeBlock != 0 || p.revealBlock != 0) {
+                // Stale pointer (already executed/revealed) — clear so this tradeId can be reused.
+                delete _pendingTrade[vault][tradeId];
+            } else {
+                revert("Pending commitment exists");
+            }
+        }
         // Time-lock: the covered execution must be claimed strictly after this
         // block's timestamp — i.e. it lands at least one block after the commit.
         require(claimedExecutionTime > block.timestamp, "Time-lock: execution must follow commit");
