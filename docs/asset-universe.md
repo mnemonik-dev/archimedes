@@ -44,7 +44,7 @@ All 59 synths below are **on-chain-eligible** (priced on the live path).
 | `sBRENT` | Synthetic Brent | Energy futures | 6 | $66.40 | No | Yes |
 | `sNG` | Synthetic Natural Gas | Energy futures | 6 | $3.10 | No | Yes |
 | `sOIL` | Synthetic OIL | Energy futures | 6 | $62.80 | Yes | Yes |
-| `sEURUSD` | Synthetic EUR/USD | FX | 6 | $1.08 | Yes | Yes |
+| `sEURUSD` | Synthetic EUR/USD | FX | 6 | $1.085 | Yes | Yes |
 | `sGBPUSD` | Synthetic GBP/USD | FX | 6 | $1.27 | Yes | Yes |
 | `sUSDJPY` | Synthetic USD/JPY | FX | 6 | $157.20 | Yes | Yes |
 | `sUSDTRY` | Synthetic USD/TRY | FX | 6 | $39.10 | Yes | Yes |

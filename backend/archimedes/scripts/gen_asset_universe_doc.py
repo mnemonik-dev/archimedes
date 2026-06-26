@@ -73,7 +73,15 @@ _CLASS_LABELS = {
 
 
 def _fmt_price(p: float) -> str:
-    return f"${p:,.2f}"
+    """Render the SSOT price at full precision (up to 6 dp, with thousands separators),
+    trailing zeros trimmed, but never fewer than 2 dp so ordinary dollar prices keep their
+    cents. The doc must reflect the SSOT exactly — e.g. sEURUSD `1.0850` must render as
+    ``$1.085``, not round to ``$1.08`` (#757 review)."""
+    s = f"{p:,.6f}".rstrip("0")
+    int_part, _, frac = s.partition(".")
+    if len(frac) < 2:  # 450.000000 -> $450.00 ; 1.085 -> $1.085 ; 0.000123 -> $0.000123
+        frac = frac.ljust(2, "0")
+    return f"${int_part}.{frac}"
 
 
 def render_doc() -> str:
