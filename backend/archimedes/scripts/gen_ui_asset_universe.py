@@ -124,11 +124,21 @@ def render_js() -> str:
 
 
 def _tickers_in(js: str) -> set[str]:
-    """Extract the ticker set from an assetUniverse.js (every quoted token in an assets array)."""
-    tickers: set[str] = set()
+    """Extract the ticker set from an assetUniverse.js (every quoted token in an assets array).
+
+    Fails loudly if a ticker is duplicated ACROSS groups: a plain set would silently collapse
+    the duplicate, so ``--check``/CI would miss the drift even though the UI renders duplicate
+    chips. Each display symbol must appear in exactly one group (#758 review)."""
+    tickers: list[str] = []
     for block in re.findall(r"assets:\s*\[([^\]]*)\]", js, flags=re.DOTALL):
-        tickers.update(re.findall(r"'([^']+)'", block))
-    return tickers
+        tickers.extend(re.findall(r"'([^']+)'", block))
+    dupes = sorted({t for t in tickers if tickers.count(t) > 1})
+    if dupes:
+        raise SystemExit(
+            f"duplicate ticker(s) across picker groups in assetUniverse.js: {dupes} — "
+            "each display symbol must appear in exactly one group"
+        )
+    return set(tickers)
 
 
 def expected_tickers() -> set[str]:

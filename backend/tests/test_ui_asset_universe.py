@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from archimedes.scripts.gen_ui_asset_universe import _tickers_in, expected_tickers
 from archimedes.services.strategy_signal_evaluator import GLOBAL_ASSETS
 from archimedes.universe import COMPLIANCE_FLAGGED_SINGLE_STOCKS
@@ -38,3 +39,16 @@ def test_picker_has_no_single_name_equities() -> None:
     flagged_display = {GLOBAL_ASSETS[s][1] for s in COMPLIANCE_FLAGGED_SINGLE_STOCKS if s in GLOBAL_ASSETS}
     leaked = got & flagged_display
     assert not leaked, f"single-name equities leaked into the asset picker: {sorted(leaked)}"
+
+
+def test_tickers_in_rejects_cross_group_duplicate() -> None:
+    # A ticker duplicated across two groups must fail loudly — a plain set would collapse it
+    # and let --check/CI miss the drift while the UI renders duplicate chips (#758 review).
+    js = (
+        "export const ASSET_GROUPS = [\n"
+        "  { id: 'a', label: 'A', assets: ['sBTC', 'sETH'] },\n"
+        "  { id: 'b', label: 'B', assets: ['sETH', 'sSPY'] },\n"  # sETH duplicated
+        "]\n"
+    )
+    with pytest.raises(SystemExit, match="duplicate ticker"):
+        _tickers_in(js)
