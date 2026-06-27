@@ -106,6 +106,6 @@ Keep shipping the single admin-set price, just better-hardened.
 - **Make failover a deliberate, logged, reversible operator action.** Clearing a feed is owner-only and evented; re-pointing to the feed when it recovers is one `setPriceFeed` call. Document the runbook so the on-the-spot decision (halt vs. fall back) is a checklist, not an improvisation.
 - **Do not "solve" this by deleting the fallback.** Strict-only trades this risk for a worse one (hard halts + zero long-tail coverage). The fallback stays; we make it as strong and as observable as we can.
 
-## Decision
+## Ratification
 
 **Adopt Chainlink-primary with a thin, bounded, loud admin fallback — the PR #724 architecture.** Status **Proposed**; ratify in the next sync. On approval, #724 merges (Dan approves as contract owner; Bogdan reviews), feeds are configured per-asset where they exist on Arc, and #725 lands the fallback-hardening + failover alerting. Assets with no feed run on the bounded fallback until a feed exists, at which point a single `setPriceFeed` call promotes them — no consumer change, no migration.

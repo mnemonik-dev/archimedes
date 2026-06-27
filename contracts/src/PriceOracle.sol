@@ -34,7 +34,7 @@ interface AggregatorV3Interface {
 ///         assets that have no native Chainlink feed.
 /// @dev    ⚠️ Funds-adjacent: this price flows straight into Vault / SyntheticVault
 ///         collateral math (`getPrice()` → 6-decimal USDC price). Read-path changes
-///         here need a careful contract review (Chuan).
+///         here need careful contract review (Dan owns contracts; Bogdan reviews).
 ///
 ///         Read-path precedence (see `getPrice()`):
 ///           1. Chainlink feed (if `priceFeed != address(0)`): read, validated (round
