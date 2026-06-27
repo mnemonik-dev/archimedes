@@ -166,7 +166,19 @@ def render_doc() -> str:
     return "\n".join(out) + "\n"
 
 
+def _force_utf8_stdio() -> None:
+    """Make the CLI locale-independent: the doc + unified diff contain non-ASCII (✅ · ⊆ ∩ ∅,
+    em-dash), so writing them to stdout/stderr in an ASCII / C-locale shell would raise
+    UnicodeEncodeError. Reconfigure stdio to UTF-8 so the documented command is robust when run
+    exactly as written, in any locale — not reliant on the caller setting PYTHONUTF8 (#757 review)."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8")
+
+
 def main(argv: list[str] | None = None) -> int:
+    _force_utf8_stdio()
     argv = list(sys.argv[1:] if argv is None else argv)
     # Output path is overridable via env so the drift test can exercise the real --check CLI
     # (exit code + diff) against a temp file, without mutating the committed doc.

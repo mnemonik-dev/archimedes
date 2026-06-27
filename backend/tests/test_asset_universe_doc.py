@@ -32,16 +32,13 @@ def _doc_path() -> Path:
 def _clean_env(extra: dict[str, str] | None = None) -> dict[str, str]:
     # Hermetic subprocess env: do NOT inherit the developer's .env (DATABASE_URL etc. that
     # only resolve inside docker compose) — just what the stdlib generator needs to import
-    # archimedes and find the SSOT (CLAUDE.md subprocess-test convention).
-    # Force UTF-8 stdio: the generated doc/diff contains non-ASCII (✅ · ⊆ ∩ ∅ em-dash); a
-    # C-locale CI runner would otherwise give the child ASCII stdio and crash with
-    # UnicodeEncodeError when --check prints the unified diff to stderr (#757 review).
+    # archimedes and find the SSOT (CLAUDE.md subprocess-test convention). Deliberately does
+    # NOT set PYTHONUTF8: the CLI forces UTF-8 stdio itself, and the drift test below proves it
+    # in a hostile C locale (#757 review — the CLI must be robust when run as documented).
     env = {
         "HOME": os.environ.get("HOME", "/tmp"),
         "PATH": os.environ.get("PATH", ""),
         "PYTHONPATH": str(_repo_root() / "backend"),
-        "PYTHONUTF8": "1",
-        "PYTHONIOENCODING": "utf-8",
     }
     if extra:
         env.update(extra)
@@ -55,7 +52,7 @@ def test_asset_universe_doc_is_in_sync() -> None:
     committed = _doc_path().read_text(encoding="utf-8")
     assert committed == render_doc(), (
         "docs/asset-universe.md is stale vs the SSOT — regenerate with "
-        "`PYTHONPATH=backend python -m archimedes.scripts.gen_asset_universe_doc`."
+        "`PYTHONPATH=backend python scripts/gen_asset_universe_doc.py`."
     )
 
 
@@ -113,7 +110,7 @@ def test_check_cli_reports_in_sync_via_subprocess() -> None:
         cwd=str(_repo_root()),
         env=_clean_env(),
         capture_output=True,
-        text=True,
+        encoding="utf-8",  # decode the child's UTF-8 stdio regardless of the parent's locale
     )
     assert proc.returncode == 0, f"--check should pass on the committed doc; stderr=\n{proc.stderr}"
     assert "in sync" in proc.stdout.lower()
@@ -122,16 +119,27 @@ def test_check_cli_reports_in_sync_via_subprocess() -> None:
 def test_check_cli_detects_drift_via_subprocess(tmp_path: Path) -> None:
     # --check must exit 1 AND print a diff when the doc drifts (#757 review). Point the CLI at
     # a tampered TEMP copy via ASSET_UNIVERSE_DOC_PATH so the committed doc is never mutated.
+    # Force a hostile ASCII locale (LC_ALL=C, UTF-8 mode + C-locale coercion OFF) so the diff —
+    # which contains the doc's non-ASCII `✅` — exercises the CLI's OWN UTF-8 stdio reconfigure,
+    # not any env help. Without it this would raise UnicodeEncodeError.
     from archimedes.scripts.gen_asset_universe_doc import render_doc
 
     drifted = tmp_path / "asset-universe.md"
     drifted.write_text(render_doc() + "| sFAKE | Fake | crypto | $1.00 | 6 | true | live ✅ |\n", encoding="utf-8")
+    hostile = {
+        "ASSET_UNIVERSE_DOC_PATH": str(drifted),
+        "LC_ALL": "C",
+        "LANG": "C",
+        "PYTHONUTF8": "0",
+        "PYTHONCOERCECLOCALE": "0",
+    }
     proc = subprocess.run(
         [sys.executable, "scripts/gen_asset_universe_doc.py", "--check"],
         cwd=str(_repo_root()),
-        env=_clean_env({"ASSET_UNIVERSE_DOC_PATH": str(drifted)}),
+        env=_clean_env(hostile),
         capture_output=True,
-        text=True,
+        encoding="utf-8",  # decode the child's UTF-8 stdio regardless of the parent's locale
     )
     assert proc.returncode == 1, "drift must fail --check"
     assert "sFAKE" in proc.stderr, "the drift diff should be printed to stderr"
+    assert "UnicodeEncodeError" not in proc.stderr, "the CLI must force UTF-8 stdio in a C locale"
