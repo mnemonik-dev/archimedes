@@ -47,6 +47,7 @@ class RigorGateDetail(BaseModel):
     cpcv: str = "MISSING"
     dsr_convention: str = "MISSING"
     iid: str = "MISSING"
+    regime_robustness: str = "MISSING"
 
 
 class LibraryPbo(BaseModel):
@@ -254,6 +255,7 @@ async def evaluate_rigor_gate():
                     cpcv=details.get("cpcv", "MISSING"),
                     dsr_convention=details.get("dsr_convention", "MISSING"),
                     iid=details.get("iid", "MISSING"),
+                    regime_robustness=details.get("regime_robustness", "MISSING"),
                 ),
                 deflated_sharpe=gate_result.deflated_sharpe,
                 dsr_p_value=gate_result.dsr_p_value,

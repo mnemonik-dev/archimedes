@@ -842,10 +842,20 @@ class TestGateDetailsBranches:
         """gate_details must contain the four gate keys + DSR convention (#547) + the IID advisory (#621)."""
         r = RigorGateResult("s")
         keys = set(r.gate_details.keys())
-        assert keys == {"dsr", "dsr_convention", "pbo", "oos_sharpe", "look_ahead", "cpcv", "iid"}
+        assert keys == {
+            "dsr",
+            "dsr_convention",
+            "pbo",
+            "oos_sharpe",
+            "look_ahead",
+            "cpcv",
+            "iid",
+            "regime_robustness",
+        }
         assert r.gate_details["dsr_convention"] == "excess"
-        # IID is advisory and unset by default (no return series) -> MISSING.
+        # Advisories are unset by default (no return series) -> MISSING.
         assert r.gate_details["iid"] == "MISSING"
+        assert r.gate_details["regime_robustness"] == "MISSING"
 
 
 # ─── run_rigor_gate — all branches in lines 509-555 ──────────────────
@@ -939,7 +949,22 @@ class TestRunRigorGatePaths:
             "look_ahead",
             "cpcv",
             "iid",
+            "regime_robustness",
         }
+
+    def test_regime_robustness_surfaced_but_advisory(self):
+        """Regime-robustness is computed for a long-enough series, surfaced, and never gates."""
+        # 80 bars >= 63 → regime classification runs and robustness is populated.
+        result = run_rigor_gate("s", _RETURNS_80, num_trials=1, pbo_scores={"s": 0.1}, look_ahead_audit_passed=True)
+        assert result.regime_robustness is not None
+        assert result.gate_details["regime_robustness"].startswith("ADVISORY")
+        # toggling the advisory does not move passes_all
+        before = result.passes_all
+        result.regime_robustness = {"min_regime_sharpe": -9.0, "consistency": 0.0, "robust": False}
+        assert result.passes_all == before
+        # a short series simply reports MISSING (no crash)
+        short = run_rigor_gate("s2", [0.01, -0.01, 0.02, 0.0, 0.01])
+        assert short.gate_details["regime_robustness"] == "MISSING"
 
     def test_iid_diagnostic_surfaced_but_advisory(self):
         """#621: run_rigor_gate computes + surfaces the IID diagnostic, but it never gates pass/fail.
