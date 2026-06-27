@@ -126,12 +126,17 @@ def render_js() -> str:
 def _tickers_in(js: str) -> set[str]:
     """Extract the ticker set from an assetUniverse.js (every quoted token in an assets array).
 
-    Fails loudly if a ticker is duplicated ACROSS groups: a plain set would silently collapse
-    the duplicate, so ``--check``/CI would miss the drift even though the UI renders duplicate
-    chips. Each display symbol must appear in exactly one group (#758 review)."""
+    Quote-style-insensitive: accepts both ``'...'`` and ``"..."`` (and a quoted-or-bare
+    ``assets`` key) so a formatter — prettier / eslint — rewriting the generated file to double
+    quotes can't make ``--check``/CI report FALSE drift (#758 review). Fails loudly if a ticker
+    is duplicated ACROSS groups: a plain set would silently collapse the duplicate, so the drift
+    gate would miss it even though the UI renders duplicate chips. Each display symbol must
+    appear in exactly one group."""
     tickers: list[str] = []
-    for block in re.findall(r"assets:\s*\[([^\]]*)\]", js, flags=re.DOTALL):
-        tickers.extend(re.findall(r"'([^']+)'", block))
+    for block in re.findall(r"['\"]?assets['\"]?\s*:\s*\[([^\]]*)\]", js, flags=re.DOTALL):
+        # (['\"]) captures the opening quote; \1 forces the SAME closing quote, so a mismatched
+        # '..." can't be mis-parsed as one token.
+        tickers.extend(m.group(2) for m in re.finditer(r"(['\"])([^'\"]+)\1", block))
     dupes = sorted({t for t in tickers if tickers.count(t) > 1})
     if dupes:
         raise SystemExit(

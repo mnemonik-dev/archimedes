@@ -52,3 +52,11 @@ def test_tickers_in_rejects_cross_group_duplicate() -> None:
     )
     with pytest.raises(SystemExit, match="duplicate ticker"):
         _tickers_in(js)
+
+
+def test_tickers_in_is_quote_style_insensitive() -> None:
+    # A formatter (prettier/eslint) rewriting the generated file to double quotes must not make
+    # --check report false drift: both quote styles parse to the same ticker set (#758 review).
+    single = "export const ASSET_GROUPS = [\n  { id: 'a', label: 'A', assets: ['sBTC', 'sETH'] },\n]\n"
+    double = 'export const ASSET_GROUPS = [\n  { id: "a", label: "A", "assets": ["sBTC", "sETH"] },\n]\n'
+    assert _tickers_in(single) == _tickers_in(double) == {"sBTC", "sETH"}
