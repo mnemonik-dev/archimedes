@@ -275,7 +275,7 @@ contract PriceOracleChainlinkTest is Test {
         vm.prank(owner);
         oracle.setPriceFeed(address(feed));
         // A feed reporting a timestamp in the FUTURE is malformed round metadata — it must
-        // fail closed (degrade to admin), not be treated as fresh (#724 review).
+        // degrade to admin (fail-soft), not be treated as fresh (#724 review).
         feed.setUpdatedAt(block.timestamp + 1 hours);
         assertEq(oracle.getPrice(), oracle.price());
         assertTrue(oracle.isFresh()); // admin fallback is fresh

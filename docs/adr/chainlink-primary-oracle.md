@@ -13,9 +13,11 @@
 
 The adversarial #724 review found the feed path, as *first* written, **bypassed every
 manipulation guard the admin write-path earned (#587)** and **hard-reverted on a bad feed
-(a DoS, not a failover)**. The merged design folds in four changes — so wherever the rest
-of this ADR says the feed "fails closed / reverts," read **degrades to the bounded admin
-fallback** instead:
+(a DoS, not a failover)**. The merged design folds in four changes, so the implemented feed
+path **degrades to the bounded admin fallback** on any problem (it reverts only when *both*
+sources are unusable — see "Decision" below). Where this ADR discusses a feed outage causing
+a *halt*, that describes the **rejected strict-Chainlink-only alternative**, not the shipped
+design:
 
 1. **Degrade, don't brick.** A feed that reverts, stales, returns a bad answer, or floors
    to zero degrades to the admin `price` (which keeps its own staleness check). `getPrice()`
@@ -76,7 +78,7 @@ The original contract header even said the quiet part out loud: *"In production,
   - it is **staleness-checked** — the same 24h `MAX_STALENESS` reverts a fallback that stops updating;
   - it is **loud** — every fallback write and every feed reconfiguration emits a distinct event for #725's alerting; and
   - it is **used only on feed absence/outage**, never as the default trust source for a feed-backed asset.
-- **A second read path to maintain and reason about.** Two code paths (feed + admin) means more surface, more tests, and a precedence rule reviewers must hold in their heads. PR #724 ships a dedicated `PriceOracleChainlink.t.sol` covering scaling, staleness, precedence, fallback, and every fail-closed guard to keep this honest.
+- **A second read path to maintain and reason about.** Two code paths (feed + admin) means more surface, more tests, and a precedence rule reviewers must hold in their heads. PR #724 ships a dedicated `PriceOracleChainlink.t.sol` covering scaling, staleness, precedence, fallback, and every fail-soft degrade guard to keep this honest.
 - **Operational responsibility shifts but does not vanish.** We trade "keep the pusher live and honest" for "configure the *right* feed (correct asset/USD pair) and watch for feed outage." `setPriceFeed` pointing at the wrong feed silently reprices every vault that reads the oracle — so feed configuration is contract-review-grade work (Dan approves, Bogdan reviews).
 
 ## Alternatives considered
