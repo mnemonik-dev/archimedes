@@ -7,7 +7,7 @@ const AGENTS = [
   {
     name: 'Strategy Generation Agent',
     role: 'What should be done?',
-    desc: 'Retrieves relevant papers from a 1,014-record q-fin metadata corpus, reads current market context, and synthesizes a candidate strategy that passes the rigor gate.',
+    desc: 'Retrieves relevant papers from a 10,000-record q-fin metadata corpus, reads current market context, and synthesizes a candidate strategy that passes the rigor gate.',
     subagents: [
       { name: 'Paper Retrieval', detail: 'Keyword + TF-IDF ranking (SPECTER2 / KG walk: build target)' },
       { name: 'Market Context', detail: 'Regime classifier + on-chain oracle + price history' },
@@ -49,7 +49,7 @@ const MEMORY_LAYERS = [
   {
     tag: 'A.1',
     name: 'Intra-step latent',
-    substrate: 'LLM KV cache (GLM-4.7 via z.ai)',
+    substrate: 'LLM KV cache (Amazon Nova Micro via AWS Bedrock)',
     lifetime: 'Single forward pass',
     why: 'Where one synthesis step does its thinking.',
   },
@@ -84,7 +84,7 @@ const MEMORY_LAYERS = [
   {
     tag: 'E',
     name: 'Semantic knowledge',
-    substrate: 'q-fin corpus (1,014 metadata records; embeddings + clusters + KG pending)',
+    substrate: 'q-fin corpus (10,000 metadata records; embeddings + clusters + KG pending)',
     lifetime: 'Persistent',
     why: 'The substrate the Strategy Generation Agent retrieves from (keyword/TF-IDF today).',
   },
@@ -106,7 +106,7 @@ function PageHeader() {
         paper-anchored, rigor-gated, and auditable end to end.
       </p>
       <p className="body" style={{ color: 'var(--text-3)' }}>
-        Three top-level agents, six memory layers, a 1,014-paper q-fin corpus, and the{' '}
+        Three top-level agents, six memory layers, a 10,000-record q-fin metadata corpus, and the{' '}
         <code>ReasoningTraceRegistry</code> on Arc anchoring every decision.
       </p>
     </div>
@@ -117,7 +117,7 @@ function HeroStrip() {
   const stats = [
     { n: '3', l: 'Top-level agents', s: 'Generation · Construction · Execution' },
     { n: '6', l: 'Memory layers', s: 'KV cache → on-chain ground truth' },
-    { n: '1,014', l: 'q-fin metadata records', s: 'embeddings + clusters + KG: build target' },
+    { n: '10,000', l: 'q-fin metadata records', s: 'embeddings + clusters + KG: build target' },
     { n: '10', l: 'Smart contracts', s: 'Deployed on Arc testnet' },
   ]
   return (
@@ -317,7 +317,7 @@ function CorpusPanel() {
     <div className="card p-5 mb-7">
       <div className="label mb-3">The q-fin corpus — Layer E in detail</div>
       <p className="body mb-4">
-        1,014 paper <strong>metadata records</strong> (arXiv preprints across q-fin, ML, math,
+        10,000 paper <strong>metadata records</strong> (arXiv preprints across q-fin, ML, math,
         and agentic AI) seeded from a JSONL manifest into Postgres. The Strategy Generation Agent's{' '}
         <strong>Paper Retrieval</strong> sub-agent ranks these records by keyword/TF-IDF relevance
         when you submit a brief. The full KB pipeline — PyMuPDF full-text extraction, SPECTER2
@@ -326,10 +326,10 @@ function CorpusPanel() {
       </p>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
-          { n: '120', l: 'Mathematical Finance', s: 'arxiv q-fin.MF' },
-          { n: '119', l: 'Risk Management', s: 'arxiv q-fin.RM' },
-          { n: '107', l: 'Computational Finance', s: 'arxiv q-fin.CP' },
-          { n: '104', l: 'Statistical Finance', s: 'arxiv q-fin.ST' },
+          { n: '1,360', l: 'Statistical Finance', s: 'arxiv q-fin.ST' },
+          { n: '1,292', l: 'Mathematical Finance', s: 'arxiv q-fin.MF' },
+          { n: '1,016', l: 'Computational Finance', s: 'arxiv q-fin.CP' },
+          { n: '950', l: 'Risk Management', s: 'arxiv q-fin.RM' },
         ].map(b => (
           <div key={b.l} className="card-flat p-3">
             <div className="font-bold" style={{ fontSize: '1.1rem' }}>{b.n}</div>
@@ -339,10 +339,10 @@ function CorpusPanel() {
         ))}
       </div>
       <p className="caption mt-3" style={{ color: 'var(--text-3)' }}>
-        1,014 metadata records across 41 categories (top four shown above). Manifest seed
-        target is ~10,000 — the remainder hydrate into Postgres incrementally as we expand
-        the corpus. Counts are metadata only; they do not imply the records have been
-        embedded or graphed.
+        10,000 metadata records across 41 categories (top four shown above), all seeded into
+        Postgres from the JSONL manifest. Metadata only — no full-text ingestion, embeddings,
+        or knowledge graph yet (that pipeline is the build target); no paper PDFs in S3 and no
+        per-paper index in DynamoDB.
       </p>
     </div>
   )
