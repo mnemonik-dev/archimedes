@@ -16,7 +16,7 @@ import hashlib
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Literal
+from typing import Any, Literal
 
 from archimedes.models.paper_ref import PaperRef
 
@@ -120,6 +120,12 @@ class StrategyPassport:
     # ── Backtest engine binding ─────────────────────────────
     strategy_code_path: str | None = None  # Path to the analytics-engine strategy file
     strategy_code_hash: str | None = None  # SHA-256 of the strategy file contents
+    # Raw validated DSL spec JSON (the same dict a fusion proposal emits). When
+    # present and non-empty, the live signal evaluator interprets it directly via
+    # the shared condition tree — the SAME evaluator the backtest uses — instead
+    # of keyword-matching into a hardcoded evaluator (and silently buy-and-holding
+    # when no keyword matches). Live↔backtest signal parity is the whole point.
+    strategy_spec: dict[str, Any] | None = None
 
     # ── On-chain anchor ─────────────────────────────────────
     on_chain_registration_tx: str | None = None  # StrategyRegistry contract tx hash

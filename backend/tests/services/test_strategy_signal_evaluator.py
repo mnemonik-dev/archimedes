@@ -7,6 +7,7 @@ import pandas as pd
 import pytest
 from archimedes.models.paper_ref import PaperRef
 from archimedes.models.strategy import Strategy
+from archimedes.services.strategy_dsl import FABER_2007_SPEC
 from archimedes.services.strategy_signal_evaluator import (
     AssetSignal,
     Signal,
@@ -15,6 +16,7 @@ from archimedes.services.strategy_signal_evaluator import (
     _buy_hold_signal,
     _faber_sma200_signal,
     _get_evaluator,
+    _spec_signal,
     _tsmom_signal,
     _vol_managed_signal,
 )
@@ -270,3 +272,105 @@ class TestStrategySignalsTotalWeight:
             signals=[],
         )
         assert ss.total_weight == 0.0
+
+
+# ─── DSL-spec live evaluator (LEG B — kills silent buy-and-hold) ──
+
+
+class TestSpecSignal:
+    """`_spec_signal` interprets a validated DSL spec via the shared condition tree."""
+
+    def test_uptrend_in_market_long(self):
+        # Faber spec: long when close > sma_200. Rising series → in market.
+        prices = pd.Series(np.linspace(80, 120, 250), name="sSPY")
+        result = _spec_signal("s1", "sSPY", prices, dict(FABER_2007_SPEC))
+        assert result.signal == Signal.LONG
+        assert result.weight > 0
+
+    def test_downtrend_flat_not_buy_hold(self):
+        # Declining series → close < sma_200 → FLAT. Buy-and-hold would be LONG,
+        # so a FLAT here proves the spec drove the signal, not the fallback.
+        prices = pd.Series(np.linspace(120, 80, 250), name="sSPY")
+        result = _spec_signal("s1", "sSPY", prices, dict(FABER_2007_SPEC))
+        assert result.signal == Signal.FLAT
+        assert result.weight == 0.0
+
+    def test_insufficient_data_explicit_flat(self):
+        prices = pd.Series(np.linspace(80, 120, 50), name="sSPY")
+        result = _spec_signal("s1", "sSPY", prices, dict(FABER_2007_SPEC))
+        assert result.signal == Signal.FLAT
+        assert result.weight == 0.0
+        assert "insufficient data" in result.reason
+
+    def test_invalid_spec_loud_flat_never_buy_hold(self):
+        prices = pd.Series(np.linspace(80, 120, 250), name="sSPY")
+        # Missing every required field → DSLError → loud FLAT, NOT silent buy-hold.
+        result = _spec_signal("s1", "sSPY", prices, {"name": "broken"})
+        assert result.signal == Signal.FLAT
+        assert result.weight == 0.0
+        assert result.reason.startswith("spec invalid:")
+
+
+class TestEvaluateStrategiesSpecRouting:
+    """evaluate_strategies routes per-strategy: spec path vs legacy keyword path."""
+
+    def _faber_strategy(self, title: str, spec: dict | None) -> Strategy:
+        return Strategy(
+            id="route-strat-001",
+            papers=[PaperRef(title=title)],
+            asset_universe=["SPY"],
+            strategy_spec=spec,
+        )
+
+    def test_spec_with_unrecognized_title_produces_real_long_not_buy_hold(self):
+        """A populated spec + unrecognized title must take the DSL path.
+
+        On a downtrend the spec yields FLAT; the silent buy-and-hold fallback
+        would yield LONG. FLAT here proves the spec path was used.
+        """
+        evaluator = StrategySignalEvaluator()
+        strat = self._faber_strategy("Completely Unrecognized Alpha Engine ZZZ", dict(FABER_2007_SPEC))
+
+        # Uptrend → real LONG via spec
+        up = {"sSPY": pd.Series(np.linspace(80, 120, 250), name="sSPY")}
+        up_res = evaluator.evaluate_strategies([strat], ["sSPY"], price_histories=up)
+        assert up_res[0].signals[0].signal == Signal.LONG
+        assert up_res[0].signals[0].weight > 0
+
+        # Downtrend → FLAT (NOT silent buy-hold-long)
+        down = {"sSPY": pd.Series(np.linspace(120, 80, 250), name="sSPY")}
+        down_res = evaluator.evaluate_strategies([strat], ["sSPY"], price_histories=down)
+        assert down_res[0].signals[0].signal == Signal.FLAT
+        assert down_res[0].signals[0].weight == 0.0
+
+    def test_specless_unrecognized_title_falls_to_legacy_buy_hold(self):
+        """Spec-less + unrecognized title → legacy path → buy-and-hold (control)."""
+        evaluator = StrategySignalEvaluator()
+        strat = self._faber_strategy("Unrecognized ZZZ", None)
+        down = {"sSPY": pd.Series(np.linspace(120, 80, 250), name="sSPY")}
+        res = evaluator.evaluate_strategies([strat], ["sSPY"], price_histories=down)
+        sig = res[0].signals[0]
+        # Legacy fallback for an unknown title is buy-and-hold: always LONG.
+        assert sig.signal == Signal.LONG
+        assert "Buy-and-hold" in sig.reason
+
+    def test_specless_recognized_title_uses_correct_legacy_evaluator(self):
+        """Spec-less + a recognized title binds the matching hardcoded evaluator."""
+        evaluator = StrategySignalEvaluator()
+        strat = self._faber_strategy("Faber 2007 SMA200 Timing", None)
+        # Downtrend → Faber legacy evaluator → FLAT (distinct from buy-hold LONG).
+        down = {"sSPY": pd.Series(np.linspace(120, 80, 250), name="sSPY")}
+        res = evaluator.evaluate_strategies([strat], ["sSPY"], price_histories=down)
+        sig = res[0].signals[0]
+        assert sig.signal == Signal.FLAT
+        assert "SMA200" in sig.reason
+
+    def test_empty_spec_dict_falls_to_legacy(self):
+        """An empty dict spec is treated as 'no spec' → legacy path."""
+        evaluator = StrategySignalEvaluator()
+        strat = self._faber_strategy("Unrecognized ZZZ", {})
+        down = {"sSPY": pd.Series(np.linspace(120, 80, 250), name="sSPY")}
+        res = evaluator.evaluate_strategies([strat], ["sSPY"], price_histories=down)
+        sig = res[0].signals[0]
+        assert sig.signal == Signal.LONG  # buy-and-hold fallback
+        assert "Buy-and-hold" in sig.reason
