@@ -7,7 +7,7 @@
   "models": [
     { "provider": "Amazon", "name": "Nova Micro", "model_id": "amazon.nova-micro-v1:0", "input": 0.035, "output": 0.14, "works_now": true, "recommended": true },
     { "provider": "OpenAI", "name": "gpt-oss-20b", "model_id": "openai.gpt-oss-20b-1:0", "input": 0.035, "output": 0.15, "works_now": true },
-    { "provider": "Z.AI", "name": "GLM 4.7 Flash", "model_id": "zai.glm-4.7-flash", "input": 0.035, "output": 0.20, "works_now": true, "recommended": true },
+    { "provider": "Z.AI", "name": "GLM 4.7 Flash", "model_id": "zai.glm-4.7-flash", "input": 0.035, "output": 0.20, "works_now": true },
     { "provider": "Amazon", "name": "Nova Lite", "model_id": "amazon.nova-lite-v1:0", "input": 0.06, "output": 0.24, "works_now": true, "recommended": true },
     { "provider": "Qwen", "name": "Qwen3 32B", "model_id": "qwen.qwen3-32b-v1:0", "input": 0.075, "output": 0.30, "works_now": true },
     { "provider": "Meta", "name": "Llama 4 Scout 17B", "model_id": "us.meta.llama4-scout-17b-instruct-v1:0", "input": 0.17, "output": 0.66, "works_now": true },
