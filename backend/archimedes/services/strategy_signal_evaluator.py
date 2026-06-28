@@ -19,9 +19,18 @@ import logging
 import time
 from dataclasses import dataclass
 from enum import Enum
+from typing import Any
 
 import numpy as np
 import pandas as pd
+
+# REUSE the SAME spec validator the rigor gate runs, so an invalid spec fails
+# loudly here exactly as it would at admission time. The condition-tree evaluator
+# (``_eval_condition``) is the SAME one the backtest interpreter uses — imported
+# LAZILY inside _spec_signal so this module does not pull backtrader into the
+# API/runner import chain (the eager import would; _eval_condition itself is pure
+# Python). Live↔backtest signal parity comes from sharing that one function.
+from archimedes.services.strategy_dsl import DSLError, StrategySpec, validate_strategy_spec
 
 logger = logging.getLogger(__name__)
 
@@ -698,6 +707,219 @@ def _buy_hold_signal(
     )
 
 
+# ─── DSL-spec evaluator — interprets a validated fusion spec live ──
+#
+# This is the path that kills the silent buy-and-hold fallback. A
+# fusion-generated strategy carries a validated DSL spec (the same dict the
+# rigor gate / backtest consume). Instead of keyword-matching the paper title
+# into a hardcoded evaluator (and defaulting to always-long buy-and-hold when no
+# keyword matches), we interpret the spec's entry/exit condition tree directly —
+# computing each referenced indicator from the price Series with the SAME numpy/
+# pandas primitives the 5 hardcoded evaluators use, then evaluating the tree with
+# the SAME ``_eval_condition`` the backtest interpreter uses.
+
+# Validated-spec cache: re-validating the DSL on every tick is wasteful. Keyed by
+# id(spec_dict) is unsafe (dicts may be rebuilt), so key by the canonical JSON.
+_SPEC_CACHE: dict[str, StrategySpec] = {}
+
+
+def _validated_spec(spec_dict: dict[str, Any]) -> StrategySpec:
+    """Validate a spec dict, caching the result. Raises DSLError on invalid spec."""
+    import json
+
+    try:
+        key = json.dumps(spec_dict, sort_keys=True, default=str)
+    except (TypeError, ValueError):
+        key = None  # unhashable / non-serializable → skip cache, validate fresh
+
+    if key is not None:
+        cached = _SPEC_CACHE.get(key)
+        if cached is not None:
+            return cached
+
+    spec = validate_strategy_spec(spec_dict)
+
+    if key is not None:
+        _SPEC_CACHE[key] = spec
+    return spec
+
+
+def _indicator_periods(spec: StrategySpec) -> dict[str, tuple[str, int]]:
+    """Map indicator alias (e.g. ``"sma_200"``) → (name, period) for a spec."""
+    out: dict[str, tuple[str, int]] = {}
+    for alias in spec.indicators:
+        parts = alias.rsplit("_", 1)
+        if len(parts) == 2:
+            try:
+                out[alias] = (parts[0], int(parts[1]))
+            except ValueError:
+                continue
+    return out
+
+
+def _compute_indicator_value(name: str, period: int, prices: pd.Series) -> float:
+    """Compute the latest value of one indicator from a price Series.
+
+    Uses the SAME numpy/pandas primitives the 5 hardcoded evaluators use, so the
+    live spec path produces values consistent with both them and the backtrader
+    interpreter's indicators:
+      - sma           → rolling(N).mean().iloc[-1]
+      - ema           → ewm(span=N).mean().iloc[-1]
+      - rsi           → standard Wilder-style RSI over N
+      - momentum      → prices.iloc[-1] / prices.iloc[-N-1] - 1   (matches _tsmom_signal)
+      - realized_vol  → pct_change().tail(N).std() * sqrt(252)    (matches _vol_managed_signal)
+    """
+    if name == "sma":
+        return float(prices.rolling(period).mean().iloc[-1])
+    if name == "ema":
+        return float(prices.ewm(span=period, adjust=False).mean().iloc[-1])
+    if name == "rsi":
+        delta = prices.diff()
+        gain = delta.clip(lower=0.0)
+        loss = -delta.clip(upper=0.0)
+        avg_gain = gain.rolling(period).mean().iloc[-1]
+        avg_loss = loss.rolling(period).mean().iloc[-1]
+        if avg_loss == 0:
+            return 100.0
+        rs = avg_gain / avg_loss
+        return float(100.0 - (100.0 / (1.0 + rs)))
+    if name == "momentum":
+        return float(prices.iloc[-1] / prices.iloc[-period - 1] - 1.0)
+    if name == "realized_vol":
+        return float(prices.pct_change().tail(period).std() * np.sqrt(252))
+    raise DSLError(f"unsupported indicator: {name}")
+
+
+def _spec_signal(
+    strategy_id: str,
+    asset: str,
+    prices: pd.Series,
+    spec_dict: dict[str, Any],
+) -> AssetSignal:
+    """Evaluate a validated DSL spec against live prices → AssetSignal.
+
+    Pure Python — NO backtrader.Strategy / Cerebro / full backtest in the tick
+    path. Validates the spec (cached), guards insufficient data, computes each
+    referenced indicator from the price Series, evaluates the entry/exit
+    condition tree via the shared ``_eval_condition``, and sizes the position by
+    ``position_sizing.type``.
+
+    On a DSLError (invalid spec) it logs loudly and returns a FLAT signal with an
+    explicit reason — it NEVER silently buys-and-holds.
+    """
+    try:
+        spec = _validated_spec(spec_dict)
+    except DSLError as exc:
+        logger.error(
+            "DSL spec INVALID for strategy %s asset %s: %s — returning FLAT (no silent buy-and-hold)",
+            strategy_id,
+            asset,
+            exc,
+        )
+        return AssetSignal(
+            strategy_id=strategy_id,
+            strategy_name="DSL (invalid spec)",
+            asset=asset,
+            signal=Signal.FLAT,
+            weight=0.0,
+            reason=f"spec invalid: {exc}",
+        )
+
+    strategy_name = spec.name or "DSL"
+    periods = _indicator_periods(spec)
+    max_period = max((p for _, p in periods.values()), default=0)
+
+    # Guard insufficient data — need max_period + 1 bars to compute the longest
+    # indicator (e.g. momentum_N reaches back N+1 bars).
+    if len(prices) < max_period + 1 or len(prices) < 2:
+        return AssetSignal(
+            strategy_id=strategy_id,
+            strategy_name=strategy_name,
+            asset=asset,
+            signal=Signal.FLAT,
+            weight=0.0,
+            reason=f"insufficient data ({len(prices)} bars, need {max_period + 1})",
+        )
+
+    # Compute bar_values for the condition tree: raw price operands + each
+    # indicator alias the spec references.
+    bar_values: dict[str, float] = {
+        "close": float(prices.iloc[-1]),
+        "open": float(prices.iloc[-1]),
+        "high": float(prices.iloc[-1]),
+        "low": float(prices.iloc[-1]),
+        "volume": 0.0,
+    }
+    try:
+        for alias, (name, period) in periods.items():
+            bar_values[alias] = _compute_indicator_value(name, period, prices)
+    except DSLError as exc:
+        logger.error(
+            "DSL indicator compute failed for strategy %s asset %s: %s — returning FLAT",
+            strategy_id,
+            asset,
+            exc,
+        )
+        return AssetSignal(
+            strategy_id=strategy_id,
+            strategy_name=strategy_name,
+            asset=asset,
+            signal=Signal.FLAT,
+            weight=0.0,
+            reason=f"spec invalid: {exc}",
+        )
+
+    # Evaluate entry/exit via the SAME condition tree the backtest uses. Lazy
+    # import keeps backtrader out of the module-load import chain (dsl_to_backtrader
+    # imports backtrader at top level; _eval_condition itself is pure Python).
+    from archimedes.services.dsl_to_backtrader import _eval_condition
+
+    # The runner is stateless across ticks here (no position memory), so we treat
+    # "in market" as: entry true AND NOT exit. This is the live snapshot of the
+    # spec's market-membership predicate.
+    in_market = _eval_condition(spec.entry, bar_values) and not _eval_condition(spec.exit, bar_values)
+
+    if not in_market:
+        return AssetSignal(
+            strategy_id=strategy_id,
+            strategy_name=strategy_name,
+            asset=asset,
+            signal=Signal.FLAT,
+            weight=0.0,
+            reason=f"entry/exit conditions → out of market (close={bar_values['close']:.2f})",
+        )
+
+    # Position sizing → weight.
+    ps = spec.position_sizing or {}
+    ps_type = ps.get("type", "full_invested_when_in_market")
+
+    if ps_type == "volatility_target":
+        annual_pct = ps.get("annual_pct")
+        # 22-day realized-vol window matches _vol_managed_signal's vol_window.
+        realized_vol = _compute_indicator_value("realized_vol", 22, prices)
+        weight = 1.0 if not annual_pct or realized_vol <= 0 else min(float(annual_pct) / realized_vol, 1.0)
+        signal_type = Signal.LONG if weight >= 0.95 else Signal.SCALED
+        return AssetSignal(
+            strategy_id=strategy_id,
+            strategy_name=strategy_name,
+            asset=asset,
+            signal=signal_type,
+            weight=round(weight, 4),
+            reason=(f"in market; vol-target {annual_pct} / realized {realized_vol:.1%} → weight {weight:.0%}"),
+        )
+
+    # full_invested_when_in_market / equal_weight / inverse_vol → full exposure
+    # when in market (inverse_vol cross-asset sizing is an aggregation concern).
+    return AssetSignal(
+        strategy_id=strategy_id,
+        strategy_name=strategy_name,
+        asset=asset,
+        signal=Signal.LONG,
+        weight=1.0,
+        reason=f"in market (close={bar_values['close']:.2f}) → long",
+    )
+
+
 # ─── Strategy → evaluator mapping ─────────────────────────────────
 
 # Maps strategy code_hash prefix to its evaluator function.
@@ -816,7 +1038,29 @@ class StrategySignalEvaluator:
                 if not strategy_synths:
                     strategy_synths = list(price_histories.keys())
 
-            evaluator = _get_evaluator(strategy.paper_title, strategy.strategy_code_path)
+            # Per-strategy routing (claim-integrity fix). A fusion-generated
+            # strategy carrying a validated DSL spec drives signals by SPEC
+            # INTERPRETATION (live↔backtest parity via the shared condition tree).
+            # Only strategies WITHOUT a spec fall back to the legacy keyword
+            # evaluator. The path is logged once per strategy at INFO so the
+            # fallback is no longer silent.
+            spec_dict = getattr(strategy, "strategy_spec", None)
+            use_spec = isinstance(spec_dict, dict) and bool(spec_dict)
+
+            if use_spec:
+                logger.info(
+                    "Strategy '%s' → DSL-spec path (interpreting validated spec)",
+                    strategy.paper_title,
+                )
+                evaluator = lambda sid, asset, prices, _spec=spec_dict: _spec_signal(sid, asset, prices, _spec)  # noqa: E731
+            else:
+                evaluator = _get_evaluator(strategy.paper_title, strategy.strategy_code_path)
+                logger.info(
+                    "Strategy '%s' → legacy keyword path (evaluator=%s)",
+                    strategy.paper_title,
+                    getattr(evaluator, "__name__", str(evaluator)),
+                )
+
             signals: list[AssetSignal] = []
 
             for asset in strategy_synths:
