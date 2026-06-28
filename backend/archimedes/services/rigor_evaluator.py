@@ -32,7 +32,7 @@ from archimedes.services._rigor_helpers import (
     _RF_DAILY,
     benjamini_hochberg_fdr,  # noqa: F401 - re-exported for test_rigor_evaluator
     bonferroni_correction,  # noqa: F401 - re-exported for test_rigor_evaluator
-    classify_regimes,  # noqa: F401 - re-exported for test_rigor_regime
+    classify_regimes,  # used by run_rigor_gate (regime-robustness) + re-exported for test_rigor_regime
     compute_average_pairwise_correlation,  # noqa: F401 - re-exported for fusion_evaluator/selection_bias_routes
     compute_cpcv_oos_sharpe,
     compute_dsr,
@@ -43,8 +43,9 @@ from archimedes.services._rigor_helpers import (
     monte_carlo_dsr_pvalue,  # noqa: F401 - re-exported for test_rigor_evaluator
     regime_conditional_dsr,  # noqa: F401 - re-exported for test_rigor_regime
     regime_conditional_sharpe,  # noqa: F401 - re-exported for test_rigor_regime
-    regime_robustness_score,  # noqa: F401 - re-exported for test_rigor_regime
+    regime_robustness_score,  # used by run_rigor_gate (regime-robustness) + re-exported for test_rigor_regime
 )
+from archimedes.services.return_diagnostics import diagnose
 
 logger = logging.getLogger(__name__)
 
@@ -352,6 +353,9 @@ class RigorGateResult:
         cpcv_mean_oos_sharpe: float | None = None,
         cpcv_positive_fraction: float | None = None,
         pbo_source: str = "cohort",
+        iid_assumption_violated: bool | None = None,
+        iid_diagnostics: dict | None = None,
+        regime_robustness: dict | None = None,
     ) -> None:
         self.strategy_id = strategy_id
         self.deflated_sharpe = deflated_sharpe
@@ -372,6 +376,20 @@ class RigorGateResult:
         # strategy's edge holds OOS across a majority of CPCV paths.
         self.cpcv_mean_oos_sharpe = cpcv_mean_oos_sharpe
         self.cpcv_positive_fraction = cpcv_positive_fraction
+        # IID / random-walk return diagnostics (#621). ADVISORY, not a pass/fail
+        # criterion: autocorrelated returns are the *signal* for trend/momentum
+        # strategies (Faber SMA200, TSMOM), so an IID violation must NOT fail the
+        # gate — it would wrongly reject legitimate strategies. We surface it so
+        # the diagnostic is honest (computed AND reported, not computed-and-dropped)
+        # and the passport can flag "interpret the Sharpe SE with caution here".
+        # iid_diagnostics carries the full Ljung-Box / variance-ratio / runs detail.
+        self.iid_assumption_violated = iid_assumption_violated
+        self.iid_diagnostics = iid_diagnostics
+        # Regime-robustness (per-volatility-regime Sharpe consistency). ADVISORY for
+        # the same reason: a single-regime edge can be a legitimate, disclosed strategy.
+        # Carries per_regime / min_regime_sharpe / consistency / robust (see
+        # _rigor_helpers.regime_robustness_score). None when the series is too short.
+        self.regime_robustness = regime_robustness
 
     @property
     def passes_all(self) -> bool:
@@ -406,6 +424,8 @@ class RigorGateResult:
             not math.isfinite(self.cpcv_positive_fraction) or self.cpcv_positive_fraction < 0.5
         ):
             return False
+        # NOTE: the IID (#621) and regime-robustness diagnostics are deliberately NOT
+        # pass/fail criteria. They are surfaced via gate_details as advisories — see __init__.
         return self.look_ahead_passed
 
     @property
@@ -456,6 +476,35 @@ class RigorGateResult:
             details["cpcv"] = "MISSING"
 
         details["look_ahead"] = "PASS" if self.look_ahead_passed else "FAIL"
+
+        # IID / random-walk diagnostic (#621) — ADVISORY, never gates pass/fail.
+        # Surfaced so a reader knows whether the Sharpe SE rests on an IID
+        # assumption that the return series actually violates (common + expected
+        # for trend/momentum strategies, where the autocorrelation IS the edge).
+        if self.iid_assumption_violated is None:
+            details["iid"] = "MISSING"
+        elif self.iid_assumption_violated:
+            details["iid"] = (
+                "ADVISORY: autocorrelation detected (Sharpe SE may understate risk; expected for trend/momentum)"
+            )
+        else:
+            details["iid"] = "ADVISORY: returns consistent with IID / random-walk"
+
+        # Regime-robustness — ADVISORY, never gates pass/fail. Shows whether the edge
+        # survives across volatility regimes or is fragile (earned in only one).
+        rr = self.regime_robustness
+        if not rr or rr.get("min_regime_sharpe") is None:
+            details["regime_robustness"] = "MISSING"
+        elif rr.get("robust"):
+            details["regime_robustness"] = (
+                f"ADVISORY: edge holds across regimes (min regime SR={rr['min_regime_sharpe']:.2f}, "
+                f"consistency={rr.get('consistency', 0.0):.2f})"
+            )
+        else:
+            details["regime_robustness"] = (
+                f"ADVISORY: regime-fragile (min regime SR={rr['min_regime_sharpe']:.2f} ≤ 0 in ≥1 regime, "
+                f"consistency={rr.get('consistency', 0.0):.2f})"
+            )
 
         return details
 
@@ -530,6 +579,27 @@ def run_rigor_gate(
     oos_sharpe = compute_oos_sharpe(daily_returns)
     cpcv = compute_cpcv_oos_sharpe(cv_returns_matrix)
 
+    # IID / random-walk diagnostics (#621) — computed AND surfaced (previously
+    # computed-and-dropped). ADVISORY only: it never gates pass/fail because a
+    # trend/momentum strategy's autocorrelation is its edge, so an IID violation
+    # must not reject it. See RigorGateResult.passes_all / gate_details["iid"].
+    iid = diagnose(daily_returns)
+
+    # Regime-robustness diagnostic — does the edge survive across volatility regimes,
+    # or is it earned only in calm/only-in-one regime (fragile)? Uses vol-based regime
+    # labels derived from the series itself (classify_regimes). ADVISORY like IID — it is
+    # surfaced, never gates pass/fail: a single-regime edge can still be a legitimate,
+    # honestly-disclosed strategy, and promoting this to a hard gate is an admission-policy
+    # call for the rigor lane (Dan/Önder). Computed only when the series is long enough to
+    # label more than one regime; never allowed to break the gate.
+    regime_robustness: dict | None = None
+    if len(daily_returns) >= 63:  # ~3 vol windows (vol_window=21) — enough to label >1 regime
+        try:
+            regime_labels = classify_regimes(daily_returns)
+            regime_robustness = regime_robustness_score(daily_returns, regime_labels)
+        except Exception as exc:  # an advisory diagnostic must never break the gate
+            logger.debug("Regime-robustness diagnostic skipped [%s]: %s", strategy_id, exc)
+
     # 4. Look-ahead audit
     if strategy_code is not None:
         la_passed, la_warnings = look_ahead_audit(strategy_code)
@@ -566,10 +636,13 @@ def run_rigor_gate(
         cpcv_mean_oos_sharpe=cpcv["mean_oos_sharpe"] if cpcv else None,
         cpcv_positive_fraction=cpcv["positive_fraction"] if cpcv else None,
         pbo_source=pbo_source,
+        iid_assumption_violated=iid.get("iid_assumption_violated"),
+        iid_diagnostics=iid,
+        regime_robustness=regime_robustness,
     )
 
     logger.info(
-        "Rigor gate [%s]: %s (DSR p=%s, PBO=%s [%s], OOS=%s, CPCV+=%s, LA=%s)",
+        "Rigor gate [%s]: %s (DSR p=%s, PBO=%s [%s], OOS=%s, CPCV+=%s, LA=%s, IID_violated=%s, regime_robust=%s [advisories])",
         strategy_id,
         "PASS" if result.passes_all else "FAIL",
         dsr_p_value,
@@ -578,6 +651,8 @@ def run_rigor_gate(
         oos_sharpe,
         cpcv["positive_fraction"] if cpcv else None,
         la_passed,
+        iid.get("iid_assumption_violated"),
+        regime_robustness.get("robust") if regime_robustness else None,
     )
 
     return result

@@ -839,11 +839,23 @@ class TestGateDetailsBranches:
         assert r.gate_details["look_ahead"] == "FAIL"
 
     def test_gate_details_returns_all_four_keys(self):
-        """gate_details must always contain the four gate keys + the DSR convention disclosure (#547)."""
+        """gate_details must contain the four gate keys + DSR convention (#547) + the IID advisory (#621)."""
         r = RigorGateResult("s")
         keys = set(r.gate_details.keys())
-        assert keys == {"dsr", "dsr_convention", "pbo", "oos_sharpe", "look_ahead", "cpcv"}
+        assert keys == {
+            "dsr",
+            "dsr_convention",
+            "pbo",
+            "oos_sharpe",
+            "look_ahead",
+            "cpcv",
+            "iid",
+            "regime_robustness",
+        }
         assert r.gate_details["dsr_convention"] == "excess"
+        # Advisories are unset by default (no return series) -> MISSING.
+        assert r.gate_details["iid"] == "MISSING"
+        assert r.gate_details["regime_robustness"] == "MISSING"
 
 
 # ─── run_rigor_gate — all branches in lines 509-555 ──────────────────
@@ -927,9 +939,52 @@ class TestRunRigorGatePaths:
         assert isinstance(result, RigorGateResult)
 
     def test_gate_details_populated_by_run_rigor_gate(self):
-        """gate_details on the returned result must have the four gate keys + DSR convention (#547)."""
+        """gate_details on the returned result must have the four gate keys + DSR convention (#547) + IID (#621)."""
         result = run_rigor_gate("s", _RETURNS_80)
-        assert set(result.gate_details.keys()) == {"dsr", "dsr_convention", "pbo", "oos_sharpe", "look_ahead", "cpcv"}
+        assert set(result.gate_details.keys()) == {
+            "dsr",
+            "dsr_convention",
+            "pbo",
+            "oos_sharpe",
+            "look_ahead",
+            "cpcv",
+            "iid",
+            "regime_robustness",
+        }
+
+    def test_regime_robustness_surfaced_but_advisory(self):
+        """Regime-robustness is computed for a long-enough series, surfaced, and never gates."""
+        # 80 bars >= 63 → regime classification runs and robustness is populated.
+        result = run_rigor_gate("s", _RETURNS_80, num_trials=1, pbo_scores={"s": 0.1}, look_ahead_audit_passed=True)
+        assert result.regime_robustness is not None
+        assert result.gate_details["regime_robustness"].startswith("ADVISORY")
+        # toggling the advisory does not move passes_all
+        before = result.passes_all
+        result.regime_robustness = {"min_regime_sharpe": -9.0, "consistency": 0.0, "robust": False}
+        assert result.passes_all == before
+        # a short series simply reports MISSING (no crash)
+        short = run_rigor_gate("s2", [0.01, -0.01, 0.02, 0.0, 0.01])
+        assert short.gate_details["regime_robustness"] == "MISSING"
+
+    def test_iid_diagnostic_surfaced_but_advisory(self):
+        """#621: run_rigor_gate computes + surfaces the IID diagnostic, but it never gates pass/fail.
+
+        Autocorrelated returns are the edge for trend/momentum strategies, so an IID
+        violation must be advisory only.
+        """
+        result = run_rigor_gate("s", _RETURNS_80)
+        # computed + surfaced (not None / not dropped)
+        assert result.iid_diagnostics is not None
+        assert "iid_assumption_violated" in result.iid_diagnostics
+        assert result.gate_details["iid"].startswith("ADVISORY")
+        # A clearly autocorrelated series (strong trend) must NOT, by itself, fail the gate.
+        trending = [0.01 * (1 + 0.5 * (i % 3 == 0)) for i in range(80)]
+        r2 = run_rigor_gate("s2", trending, num_trials=1, pbo_scores={"s2": 0.1}, look_ahead_audit_passed=True)
+        # whatever passes_all decides, it is decided WITHOUT reference to the IID flag:
+        # toggling the advisory flag on the result does not change passes_all.
+        before = r2.passes_all
+        r2.iid_assumption_violated = not r2.iid_assumption_violated
+        assert r2.passes_all == before
 
     def test_num_trials_stored_on_result(self):
         """num_trials argument must be stored on the result."""
