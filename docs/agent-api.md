@@ -104,13 +104,13 @@ alternatives, each carrying the rigor verdict the user reviews before deploy.
 ## Slice 2 (pending) — DEPLOY + MONITOR
 
 Deploying a vault and reading it back needs a **programmatic signer** (agents
-can't do browser passkeys):
-- agent-auth that is not a passkey — either an API key, or an agent-held EOA doing
-  SIWE programmatically against `GET /api/auth/nonce` + `POST /api/auth/verify`;
-- a testnet dev key the agent controls (never a funded/mainnet key) to sign
-  `POST /api/generate`/vault transactions;
-- then `POST /api/vaults/create` + `GET /api/vaults/{address}/health` to complete
-  and monitor the journey.
+can't do browser passkeys). The flow:
+- **Agent-auth (not a passkey):** an agent-held EOA — a testnet dev key the agent
+  controls, never a funded/mainnet key — signs the **SIWE** challenge from
+  `GET /api/auth/nonce` and posts it to `POST /api/auth/verify`, which establishes
+  the session cookie.
+- **Deploy:** with that session, call the wallet-gated `POST /api/vaults/create`.
+- **Monitor:** read the vault back via `GET /api/vaults/{address}/health`.
 
 Tracked in [#788](https://github.com/a-apin/archimedes/issues/788). Do not land any
 contract-touching agent work before the #588 contract-redeploy keystone.

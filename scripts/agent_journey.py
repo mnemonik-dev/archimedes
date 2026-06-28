@@ -121,8 +121,14 @@ def step_generate(client: httpx.Client, intent: str, risk: str, timeout_s: float
     deadline = time.monotonic() + timeout_s
     seen = 0
     terminal: str | None = None
+    # Disable the httpx READ timeout for the SSE stream: the backend only writes
+    # when a new event arrives, so a long quiet gap (a slow LLM/tool call) would
+    # trip a ReadTimeout even though the overall journey isn't over. We bound the
+    # stream with the explicit `deadline` check inside the loop instead. Keep a
+    # finite connect timeout so a dead endpoint still fails fast. (Copilot, #790)
+    stream_timeout = httpx.Timeout(timeout_s, read=None)
     try:
-        with client.stream("GET", stream_url, timeout=timeout_s) as resp:
+        with client.stream("GET", stream_url, timeout=stream_timeout) as resp:
             if resp.status_code != 200:
                 print(f"  ✗ stream — HTTP {resp.status_code}")
                 return job_id
