@@ -62,13 +62,20 @@ export default function Insights() {
     } catch (e) {
       setError(String(e.message || e))
     }
-    // Visitor insights may not be deployed yet (#795) — tolerate a 404.
+    // Visitor insights may not be deployed yet (#795) — tolerate ONLY a 404 as
+    // "not live yet"; surface any other failure (500 / network) instead of
+    // masking it as a missing endpoint.
     try {
       setVisitors(await apiGet('/api/metrics/visitors'))
       setVisitorsLive(true)
-    } catch {
+    } catch (e) {
       setVisitors(null)
-      setVisitorsLive(false)
+      if (e?.status === 404) {
+        setVisitorsLive(false)
+      } else {
+        setVisitorsLive(true)
+        setError(prev => prev || `Visitor insights failed: ${e?.message || e}`)
+      }
     }
     setLoading(false)
   }, [])
@@ -145,14 +152,16 @@ export default function Insights() {
             Not live yet — merge <strong>#795</strong> and run the CloudFront <code>terraform apply</code> to
             enable viewer-country capture. (Device works on the UA fallback once #795 deploys.)
           </Empty>
-        ) : !visitors || (visitors.countries.length === 0 && totalDevices === 0) ? (
+        ) : loading && !visitors ? (
+          <Empty>Loading visitor insights…</Empty>
+        ) : !visitors || ((visitors.countries?.length ?? 0) === 0 && totalDevices === 0) ? (
           <Empty>No human visitors recorded yet.</Empty>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 24 }}>
             <div>
               <h3 style={{ fontSize: 13, color: 'var(--text-dim,#8b93a7)', margin: '0 0 10px' }}>Top countries</h3>
               <div style={{ display: 'grid', gap: 10 }}>
-                {visitors.countries.slice(0, 8).map(c => (
+                {(visitors.countries || []).slice(0, 8).map(c => (
                   <div key={c.code}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 4 }}>
                       <span>{COUNTRY_NAMES[c.code] || c.code}</span>
@@ -166,7 +175,7 @@ export default function Insights() {
             <div>
               <h3 style={{ fontSize: 13, color: 'var(--text-dim,#8b93a7)', margin: '0 0 10px' }}>Device</h3>
               <div style={{ display: 'grid', gap: 10 }}>
-                {Object.entries(visitors.devices)
+                {Object.entries(visitors.devices || {})
                   .filter(([, n]) => n > 0)
                   .sort((a, b) => b[1] - a[1])
                   .map(([dev, n]) => (
