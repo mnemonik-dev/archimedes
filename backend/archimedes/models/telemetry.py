@@ -90,5 +90,7 @@ class VisitorInsightsResponse(BaseModel):
 
     window: str = Field(..., description='"all-time" snapshot window.')
     countries: list[CountryCount] = Field(..., description="Countries, sorted by distinct visitors (desc).")
-    devices: dict[str, int] = Field(..., description="Distinct visitors per device class (mobile/tablet/desktop/tv).")
+    devices: dict[str, int] = Field(
+        ..., description="Distinct visitors per device class (mobile/tablet/desktop/tv, or 'unknown' if unclassified)."
+    )
     timestamp: str = Field(..., description="ISO-8601 UTC timestamp this snapshot was read.")

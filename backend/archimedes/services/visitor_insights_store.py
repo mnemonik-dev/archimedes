@@ -67,7 +67,7 @@ class VisitorInsightsStore:
 
     # ─── Record (write path — telemetry middleware, humans only) ─────────
 
-    async def record(self, country: str, device: str, visitor_id: str) -> None:
+    async def record(self, country: str | None, device: str, visitor_id: str) -> None:
         """Record one human visit's country + device for ``visitor_id``. Never raises."""
         if not visitor_id:
             return
